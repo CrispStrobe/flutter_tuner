@@ -1,0 +1,25 @@
+{
+  "@@locale": "de",
+  "appTitle": "Flutter Pro Tuner",
+  "startTuning": "Stimmen beginnen",
+  "listening": "Zuhören...",
+  "inTune": "Gestimmt ✓",
+  "tooSharp": "Zu hoch ↑",
+  "tooFlat": "Zu tief ↓",
+  "playing": "{note} wird gespielt",
+  "@playing": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "micPermissionDenied": "Mikrofonberechtigung verweigert",
+  "pitchHistory": "Tonhöhenverlauf",
+  "frequencySpectrum": "Frequenzspektrum",
+  "a4Frequency": "A4-Frequenz",
+  "guitar": "Gitarre",
+  "cello": "Cello",
+  "bass": "Bass",
+  "violin": "Geige"
+}
