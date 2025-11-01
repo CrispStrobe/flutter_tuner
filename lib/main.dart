@@ -36,6 +36,10 @@ class ToneGenerator {
   bool _isPlaying = false;
   int _currentNote = -1;
   double _phase = 0.0;
+  double _envelope = 0.0; // For smooth fade-in/out
+  static const double _fadeInDuration = 0.05; // 50ms fade-in
+  static const double _fadeOutDuration = 0.05; // 50ms fade-out
+  int _sampleCount = 0;
 
   Future<void> init() async {
     if (_isInitialized) return;
@@ -52,6 +56,8 @@ class ToneGenerator {
     if (!_isInitialized) return;
     _currentNote = (69 + 12 * (math.log(frequency / 440.0) / math.log(2))).round();
     _phase = 0.0;
+    _envelope = 0.0;
+    _sampleCount = 0;
     if (!_isPlaying) {
       _isPlaying = true;
       FlutterPcmSound.setFeedCallback(_onFeed);
@@ -71,20 +77,62 @@ class ToneGenerator {
   List<int> _generateSineWave(double frequency, int numSamples) {
     final samples = <int>[];
     const sampleRate = 44100;
-    const amplitude = 16000;
+    const amplitude = 20000; // Increased amplitude for better volume
+    const fadeInSamples = sampleRate * _fadeInDuration;
+    
     for (int i = 0; i < numSamples; i++) {
-      final value = (amplitude * math.sin(_phase)).toInt();
+      // Calculate envelope (fade-in)
+      if (_sampleCount < fadeInSamples) {
+        _envelope = _sampleCount / fadeInSamples;
+      } else {
+        _envelope = 1.0;
+      }
+      
+      // Generate sine wave with envelope
+      final value = (amplitude * _envelope * math.sin(_phase)).toInt();
       samples.add(value);
+      
+      // Update phase
       _phase += 2 * math.pi * frequency / sampleRate;
       if (_phase > 2 * math.pi) _phase -= 2 * math.pi;
+      
+      _sampleCount++;
     }
     return samples;
   }
 
   void stopNote() {
+    if (!_isPlaying) return;
+    
+    // Generate fade-out samples before stopping
+    if (_isInitialized && _currentNote >= 0) {
+      final frequency = 440.0 * math.pow(2, (_currentNote - 69) / 12.0);
+      final fadeOutSamples = _generateFadeOut(frequency, (44100 * _fadeOutDuration).toInt());
+      FlutterPcmSound.feed(PcmArrayInt16.fromList(fadeOutSamples));
+    }
+    
     _isPlaying = false;
     _currentNote = -1;
     _phase = 0.0;
+    _envelope = 0.0;
+    _sampleCount = 0;
+  }
+
+  List<int> _generateFadeOut(double frequency, int numSamples) {
+    final samples = <int>[];
+    const sampleRate = 44100;
+    const amplitude = 20000;
+    
+    for (int i = 0; i < numSamples; i++) {
+      // Linear fade-out
+      final fadeOut = 1.0 - (i / numSamples);
+      final value = (amplitude * fadeOut * math.sin(_phase)).toInt();
+      samples.add(value);
+      
+      _phase += 2 * math.pi * frequency / sampleRate;
+      if (_phase > 2 * math.pi) _phase -= 2 * math.pi;
+    }
+    return samples;
   }
 
   void dispose() {
@@ -679,14 +727,28 @@ class FFTPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (fftData.isEmpty) return;
+    
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
+    
     final double barWidth = size.width / (fftData.length / 8);
     final double maxMagnitude = fftData.sublist(0, fftData.length ~/ 2).reduce(math.max);
+    
+    // Fix: Check if maxMagnitude is valid before drawing
+    if (maxMagnitude <= 0 || maxMagnitude.isNaN || maxMagnitude.isInfinite) {
+      return; // Skip drawing if no valid data
+    }
+    
     for (int i = 0; i < fftData.length / 8; i++) {
       final double magnitude = fftData[i];
       final double barHeight = (magnitude / maxMagnitude) * size.height;
+      
+      // Additional safety check for the calculated values
+      if (barHeight.isNaN || barHeight.isInfinite || barHeight < 0) {
+        continue; // Skip this bar if invalid
+      }
+      
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(i * barWidth, size.height - barHeight, barWidth * 0.8, barHeight),

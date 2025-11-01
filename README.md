@@ -1,4 +1,4 @@
-# Flutter Pro Tuner 🎸
+# Flutter Pro 🎸
 
 A simple instrument tuner app built with Flutter, featuring real-time pitch detection, frequency analysis, and reference tone generation.
 
