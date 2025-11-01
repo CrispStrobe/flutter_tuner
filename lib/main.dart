@@ -2,12 +2,10 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:record/record.dart';
 import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:fftea/fftea.dart';
 import 'package:collection/collection.dart';
-import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'audio_service.dart';
 
 void main() {
   runApp(const TunerApp());
@@ -31,116 +29,6 @@ class TunerApp extends StatelessWidget {
   }
 }
 
-class ToneGenerator {
-  bool _isInitialized = false;
-  bool _isPlaying = false;
-  int _currentNote = -1;
-  double _phase = 0.0;
-  double _envelope = 0.0; // For smooth fade-in/out
-  static const double _fadeInDuration = 0.05; // 50ms fade-in
-  static const double _fadeOutDuration = 0.05; // 50ms fade-out
-  int _sampleCount = 0;
-
-  Future<void> init() async {
-    if (_isInitialized) return;
-    try {
-      await FlutterPcmSound.setup(sampleRate: 44100, channelCount: 1);
-      await FlutterPcmSound.setFeedThreshold(4000);
-      _isInitialized = true;
-    } catch (e) {
-      print('Error initializing tone generator: $e');
-    }
-  }
-
-  void playNote(double frequency) {
-    if (!_isInitialized) return;
-    _currentNote = (69 + 12 * (math.log(frequency / 440.0) / math.log(2))).round();
-    _phase = 0.0;
-    _envelope = 0.0;
-    _sampleCount = 0;
-    if (!_isPlaying) {
-      _isPlaying = true;
-      FlutterPcmSound.setFeedCallback(_onFeed);
-      _startFeeding();
-    }
-  }
-
-  void _startFeeding() => _onFeed(0);
-
-  void _onFeed(int remainingFrames) async {
-    if (!_isPlaying || _currentNote < 0) return;
-    final frequency = 440.0 * math.pow(2, (_currentNote - 69) / 12.0);
-    final samples = _generateSineWave(frequency, 2000);
-    await FlutterPcmSound.feed(PcmArrayInt16.fromList(samples));
-  }
-
-  List<int> _generateSineWave(double frequency, int numSamples) {
-    final samples = <int>[];
-    const sampleRate = 44100;
-    const amplitude = 20000; // Increased amplitude for better volume
-    const fadeInSamples = sampleRate * _fadeInDuration;
-    
-    for (int i = 0; i < numSamples; i++) {
-      // Calculate envelope (fade-in)
-      if (_sampleCount < fadeInSamples) {
-        _envelope = _sampleCount / fadeInSamples;
-      } else {
-        _envelope = 1.0;
-      }
-      
-      // Generate sine wave with envelope
-      final value = (amplitude * _envelope * math.sin(_phase)).toInt();
-      samples.add(value);
-      
-      // Update phase
-      _phase += 2 * math.pi * frequency / sampleRate;
-      if (_phase > 2 * math.pi) _phase -= 2 * math.pi;
-      
-      _sampleCount++;
-    }
-    return samples;
-  }
-
-  void stopNote() {
-    if (!_isPlaying) return;
-    
-    // Generate fade-out samples before stopping
-    if (_isInitialized && _currentNote >= 0) {
-      final frequency = 440.0 * math.pow(2, (_currentNote - 69) / 12.0);
-      final fadeOutSamples = _generateFadeOut(frequency, (44100 * _fadeOutDuration).toInt());
-      FlutterPcmSound.feed(PcmArrayInt16.fromList(fadeOutSamples));
-    }
-    
-    _isPlaying = false;
-    _currentNote = -1;
-    _phase = 0.0;
-    _envelope = 0.0;
-    _sampleCount = 0;
-  }
-
-  List<int> _generateFadeOut(double frequency, int numSamples) {
-    final samples = <int>[];
-    const sampleRate = 44100;
-    const amplitude = 20000;
-    
-    for (int i = 0; i < numSamples; i++) {
-      // Linear fade-out
-      final fadeOut = 1.0 - (i / numSamples);
-      final value = (amplitude * fadeOut * math.sin(_phase)).toInt();
-      samples.add(value);
-      
-      _phase += 2 * math.pi * frequency / sampleRate;
-      if (_phase > 2 * math.pi) _phase -= 2 * math.pi;
-    }
-    return samples;
-  }
-
-  void dispose() {
-    stopNote();
-    FlutterPcmSound.release();
-  }
-}
-
 class TunerPage extends StatefulWidget {
   const TunerPage({super.key});
 
@@ -149,9 +37,9 @@ class TunerPage extends StatefulWidget {
 }
 
 class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
-  final _audioRecorder = AudioRecorder();
+  late final AudioService _audioService;
+  late final ToneGeneratorService _toneGenerator;
   final _pitchDetector = PitchDetector();
-  final _toneGenerator = ToneGenerator();
 
   String _note = '';
   String _status = 'Start Tuning';
@@ -159,7 +47,6 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   double _cents = 0.0;
   bool _isListening = false;
   Timer? _timer;
-  StreamSubscription? _audioSubscription;
 
   double _a4Frequency = 440.0;
   Instrument _selectedInstrument = Instrument.guitar;
@@ -181,11 +68,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _audioService = AudioService.create();
+    _toneGenerator = ToneGeneratorService.create();
     WidgetsBinding.instance.addObserver(this);
     _recalculatePitches();
     for (int i = 0; i < 100; i++) {
       _pitchHistory.add(0);
     }
+    _audioService.init();
     _toneGenerator.init();
   }
 
@@ -193,10 +83,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   void dispose() {
     _stopCapture();
     _toneGenerator.dispose();
+    _audioService.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
-    _audioSubscription?.cancel();
-    _audioRecorder.dispose();
     super.dispose();
   }
 
@@ -220,15 +109,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _startCapture() async {
-    if (await _audioRecorder.hasPermission()) {
-      final stream = await _audioRecorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: 44100,
-          numChannels: 1,
-        ),
-      );
-      _audioSubscription = stream.listen((data) => _processAudioData(data));
+    if (await _audioService.hasPermission()) {
+      await _audioService.startListening((data) => _processAudioData(data));
       setState(() => _isListening = true);
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
@@ -275,9 +157,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   void _stopCapture() async {
-    await _audioRecorder.stop();
-    await _audioSubscription?.cancel();
-    _audioSubscription = null;
+    await _audioService.stopListening();
     _timer?.cancel();
     if (mounted) {
       setState(() {
@@ -735,18 +615,16 @@ class FFTPainter extends CustomPainter {
     final double barWidth = size.width / (fftData.length / 8);
     final double maxMagnitude = fftData.sublist(0, fftData.length ~/ 2).reduce(math.max);
     
-    // Fix: Check if maxMagnitude is valid before drawing
     if (maxMagnitude <= 0 || maxMagnitude.isNaN || maxMagnitude.isInfinite) {
-      return; // Skip drawing if no valid data
+      return;
     }
     
     for (int i = 0; i < fftData.length / 8; i++) {
       final double magnitude = fftData[i];
       final double barHeight = (magnitude / maxMagnitude) * size.height;
       
-      // Additional safety check for the calculated values
       if (barHeight.isNaN || barHeight.isInfinite || barHeight < 0) {
-        continue; // Skip this bar if invalid
+        continue;
       }
       
       canvas.drawRRect(
