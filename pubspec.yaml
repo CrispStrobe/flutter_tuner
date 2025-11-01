@@ -23,15 +23,14 @@ dependencies:
   # Utilities
   collection: ^1.18.0
   shared_preferences: ^2.2.2
-  vibration: ^1.8.4
+  # Removed vibration - not used in the app
   
   # UI enhancements
   cupertino_icons: ^1.0.6
   flutter_animate: ^4.5.0
   glassmorphism: ^3.0.0
   
-  # Web audio support
-  universal_html: ^2.2.4
+  # Web support
   web: ^1.1.0
 
 dev_dependencies:
