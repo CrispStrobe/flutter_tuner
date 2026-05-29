@@ -3,16 +3,14 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:js_interop';
-import 'dart:js_util' as js_util;
 import 'package:web/web.dart' as web;
 import 'audio_service_stub.dart' as stub;
 
 @JS('AudioContext')
-external JSObject get _AudioContextConstructor;
-
-@JS()
 @staticInterop
-class AudioContext {}
+class AudioContext {
+  external factory AudioContext();
+}
 
 extension AudioContextExtension on AudioContext {
   external AnalyserNode createAnalyser();
@@ -33,7 +31,7 @@ extension AudioWorkletExtension on AudioWorklet {
   external JSPromise addModule(String moduleURL);
 }
 
-@JS()
+@JS('AudioWorkletNode')
 @staticInterop
 class AudioWorkletNode {
   external factory AudioWorkletNode(AudioContext context, String name);
@@ -103,7 +101,7 @@ extension AudioProcessingEventExtension on AudioProcessingEvent {
 class AudioBuffer {}
 
 extension AudioBufferExtension on AudioBuffer {
-  external JSObject getChannelData(int channel);
+  external JSFloat32Array getChannelData(int channel);
 }
 
 @JS()
@@ -141,6 +139,11 @@ extension AudioParamExtension on AudioParam {
 @staticInterop
 class AudioDestinationNode {}
 
+/// Helper to read a Uint8Array from a JS MessageEvent.data.
+extension _JSUint8ArrayHelper on JSObject {
+  external int get length;
+}
+
 class AudioService implements stub.AudioService {
   web.MediaStream? _stream;
   AudioContext? _audioContext;
@@ -149,7 +152,6 @@ class AudioService implements stub.AudioService {
   ScriptProcessorNode? _scriptProcessor;
   AnalyserNode? _analyser;
   Function(Uint8List)? _onData;
-  bool _usingWorklet = false;
 
   @override
   Future<void> init() async {}
@@ -184,13 +186,12 @@ class AudioService implements stub.AudioService {
       final mediaDevices = web.window.navigator.mediaDevices;
       _stream = await mediaDevices.getUserMedia(constraints).toDart;
 
-      _audioContext = js_util.callConstructor(_AudioContextConstructor, []) as AudioContext;
+      _audioContext = AudioContext();
 
       _microphone = _audioContext!.createMediaStreamSource(_stream!);
 
       // Try AudioWorkletNode first (modern, low-latency)
       if (await _tryStartWorklet()) {
-        _usingWorklet = true;
         return;
       }
 
@@ -207,20 +208,15 @@ class AudioService implements stub.AudioService {
       final worklet = _audioContext!.audioWorklet;
       await worklet.addModule('pcm_processor.js').toDart;
 
-      _workletNode = js_util.callConstructor(
-        js_util.getProperty(js_util.globalThis, 'AudioWorkletNode'),
-        [_audioContext, 'pcm-processor'],
-      ) as AudioWorkletNode;
+      _workletNode = AudioWorkletNode(_audioContext!, 'pcm-processor');
 
       _workletNode!.port.onmessage = ((JSObject event) {
         try {
           final msgEvent = event as MessageEvent;
           final jsData = msgEvent.data;
-          final length = js_util.getProperty(jsData, 'length') as int;
-          final bytes = Uint8List(length);
-          for (int i = 0; i < length; i++) {
-            bytes[i] = js_util.getProperty(jsData, i) as int;
-          }
+          // The worklet posts a Uint8Array — read it via JSUint8Array interop
+          final jsTyped = jsData as JSUint8Array;
+          final bytes = jsTyped.toDart;
           _onData?.call(bytes);
         } catch (_) {
           // Worklet message processing error
@@ -251,14 +247,11 @@ class AudioService implements stub.AudioService {
       try {
         final audioEvent = event as AudioProcessingEvent;
         final inputBuffer = audioEvent.inputBuffer;
-        final channelDataJS = inputBuffer.getChannelData(0);
-
-        final length = js_util.getProperty(channelDataJS, 'length') as int;
+        final float32 = inputBuffer.getChannelData(0).toDart;
 
         final bytes = <int>[];
-        for (int i = 0; i < length; i++) {
-          final sample = js_util.getProperty(channelDataJS, i) as double;
-          final int16 = (sample * 32767).clamp(-32768, 32767).toInt();
+        for (int i = 0; i < float32.length; i++) {
+          final int16 = (float32[i] * 32767).clamp(-32768, 32767).toInt();
           bytes.add(int16 & 0xFF);
           bytes.add((int16 >> 8) & 0xFF);
         }
@@ -308,8 +301,6 @@ class AudioService implements stub.AudioService {
         await _audioContext!.close().toDart;
         _audioContext = null;
       }
-
-      _usingWorklet = false;
     } catch (e) {
       // Failed to stop web audio
     }
@@ -332,7 +323,7 @@ class ToneGeneratorService implements stub.ToneGeneratorService {
   @override
   Future<void> init() async {
     try {
-      _audioContext = js_util.callConstructor(_AudioContextConstructor, []) as AudioContext;
+      _audioContext = AudioContext();
     } catch (e) {
       // Failed to initialize tone generator
     }

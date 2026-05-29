@@ -49,7 +49,7 @@ void main() {
 
     test('sharp pitch is detected correctly', () {
       final engine = TunerEngine();
-      final sharpFreq = 445.0; // ~19.56 cents sharp of A4
+      const sharpFreq = 445.0; // ~19.56 cents sharp of A4
       final result = engine.detectNote(sharpFreq);
 
       expect(result.note, 'A4');
@@ -59,7 +59,7 @@ void main() {
 
     test('flat pitch is detected correctly', () {
       final engine = TunerEngine();
-      final flatFreq = 435.0; // ~19.78 cents flat of A4
+      const flatFreq = 435.0; // ~19.78 cents flat of A4
       final result = engine.detectNote(flatFreq);
 
       expect(result.note, 'A4');
@@ -121,12 +121,10 @@ void main() {
       engine.detectNote(329.63); // E4
       engine.detectNote(261.63); // C4
 
-      final history = engine.pitchHistory;
-      // Last 3 entries should be non-zero (cents values)
-      final recentEntries = history.sublist(history.length - 3);
-      // At least the E4 and C4 detections produce non-zero cents since they
-      // are unlikely to land exactly on target
       expect(engine.lastResult, isNotNull);
+      // History should contain entries from all three detections
+      final history = engine.pitchHistory;
+      expect(history.where((v) => v != 0).length, greaterThanOrEqualTo(2));
     });
 
     test('reset clears all state after detections', () {

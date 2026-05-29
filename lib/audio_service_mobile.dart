@@ -9,12 +9,15 @@ class AudioService implements stub.AudioService {
   final _audioRecorder = AudioRecorder();
   StreamSubscription? _audioSubscription;
 
+  @override
   Future<void> init() async {}
 
+  @override
   Future<bool> hasPermission() async {
     return await _audioRecorder.hasPermission();
   }
 
+  @override
   Future<void> startListening(Function(Uint8List) onData) async {
     final stream = await _audioRecorder.startStream(
       const RecordConfig(
@@ -26,11 +29,13 @@ class AudioService implements stub.AudioService {
     _audioSubscription = stream.listen(onData);
   }
 
+  @override
   Future<void> stopListening() async {
     await _audioSubscription?.cancel();
     await _audioRecorder.stop();
   }
 
+  @override
   void dispose() {
     _audioSubscription?.cancel();
     _audioRecorder.dispose();
@@ -45,6 +50,7 @@ class ToneGeneratorService implements stub.ToneGeneratorService {
   int _currentNote = -1;
   double _phase = 0.0;
 
+  @override
   Future<void> init() async {
     if (_isInitialized) return;
     try {
@@ -56,6 +62,7 @@ class ToneGeneratorService implements stub.ToneGeneratorService {
     }
   }
 
+  @override
   void playNote(double frequency) {
     if (!_isInitialized) return;
     _currentNote = (69 + 12 * (math.log(frequency / 440.0) / math.log(2))).round();
@@ -89,12 +96,14 @@ class ToneGeneratorService implements stub.ToneGeneratorService {
     return samples;
   }
 
+  @override
   void stopNote() {
     _isPlaying = false;
     _currentNote = -1;
     _phase = 0.0;
   }
 
+  @override
   void dispose() {
     stopNote();
     FlutterPcmSound.release();

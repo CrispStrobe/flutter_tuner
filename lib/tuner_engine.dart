@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';

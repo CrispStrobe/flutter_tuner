@@ -577,7 +577,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             ),
           ),
           DropdownButtonFormField<Instrument>(
-            value: _engine.selectedInstrument,
+            initialValue: _engine.selectedInstrument,
             isDense: true,
             decoration: InputDecoration(
               filled: true,
