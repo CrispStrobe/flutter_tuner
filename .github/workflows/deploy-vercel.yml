@@ -1,0 +1,41 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required secrets:
+#   VERCEL_TOKEN      — Vercel personal access token (Settings → Tokens)
+#   VERCEL_ORG_ID     — from .vercel/project.json after `vercel link`
+#   VERCEL_PROJECT_ID — from .vercel/project.json after `vercel link`
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter build web --release --base-href=/
+
+      - name: Verify web output
+        run: |
+          test -f build/web/index.html
+          test -f build/web/pcm_processor.js
+          echo "Web build OK — $(du -sh build/web | cut -f1)"
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Deploy to Vercel
+        run: vercel deploy build/web --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
