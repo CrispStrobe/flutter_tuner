@@ -5,6 +5,7 @@ import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_service.dart';
+import 'audio_service_stub.dart' show AudioInputDevice;
 import 'tuner_engine.dart';
 
 void main() {
@@ -50,6 +51,10 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   bool _isGeneratingTone = false;
   String? _currentlyPlayingNote;
 
+  // Input device selection
+  List<AudioInputDevice> _inputDevices = [];
+  String? _selectedDeviceId;
+
   // Throttle FFT display updates to ~20 fps
   DateTime _lastFftUpdate = DateTime.now();
   static const _fftFrameInterval = Duration(milliseconds: 50);
@@ -63,7 +68,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _audioService = AudioService.create();
     _toneGenerator = ToneGeneratorService.create();
     WidgetsBinding.instance.addObserver(this);
-    _audioService.init();
+    _audioService.init().then((_) => _refreshInputDevices());
     _toneGenerator.init();
     _loadPreferences();
   }
@@ -118,9 +123,28 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _refreshInputDevices() async {
+    final devices = await _audioService.listInputDevices();
+    if (mounted) {
+      setState(() {
+        _inputDevices = devices;
+        // Keep selection if device still exists, otherwise reset
+        if (_selectedDeviceId != null &&
+            !devices.any((d) => d.id == _selectedDeviceId)) {
+          _selectedDeviceId = null;
+        }
+      });
+    }
+  }
+
   Future<void> _startCapture() async {
     if (await _audioService.hasPermission()) {
-      await _audioService.startListening((data) => _processAudioData(data));
+      // Refresh device list (labels become available after permission)
+      await _refreshInputDevices();
+      await _audioService.startListening(
+        (data) => _processAudioData(data),
+        deviceId: _selectedDeviceId,
+      );
       setState(() {
         _isListening = true;
         _status = 'Listening...';
@@ -608,6 +632,52 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               );
             }).toList(),
           ),
+          if (_inputDevices.length > 1) ...[
+            const SizedBox(height: 8),
+            Semantics(
+              label: 'Select microphone input',
+              child: DropdownButtonFormField<String?>(
+                initialValue: _selectedDeviceId,
+                isDense: true,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: const Color(0x0DFFFFFF),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Colors.white12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Colors.white12),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  prefixIcon: const Icon(Icons.mic, size: 16, color: Colors.white38),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 28),
+                ),
+                dropdownColor: const Color(0xFF1A1A1A),
+                isExpanded: true,
+                onChanged: isActionDisabled
+                    ? null
+                    : (String? deviceId) {
+                        setState(() => _selectedDeviceId = deviceId);
+                      },
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Default mic', style: TextStyle(fontSize: 12)),
+                  ),
+                  ..._inputDevices.map((d) => DropdownMenuItem<String?>(
+                        value: d.id,
+                        child: Text(
+                          d.label,
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      )),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

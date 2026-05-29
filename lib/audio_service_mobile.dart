@@ -18,12 +18,32 @@ class AudioService implements stub.AudioService {
   }
 
   @override
-  Future<void> startListening(Function(Uint8List) onData) async {
+  Future<List<stub.AudioInputDevice>> listInputDevices() async {
+    try {
+      final devices = await _audioRecorder.listInputDevices();
+      return devices
+          .map((d) => stub.AudioInputDevice(id: d.id, label: d.label))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  @override
+  Future<void> startListening(Function(Uint8List) onData, {String? deviceId}) async {
+    InputDevice? device;
+    if (deviceId != null) {
+      final devices = await _audioRecorder.listInputDevices();
+      final match = devices.where((d) => d.id == deviceId);
+      if (match.isNotEmpty) device = match.first;
+    }
+
     final stream = await _audioRecorder.startStream(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: 44100,
         numChannels: 1,
+        device: device,
       ),
     );
     _audioSubscription = stream.listen(onData);

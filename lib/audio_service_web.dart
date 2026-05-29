@@ -173,11 +173,40 @@ class AudioService implements stub.AudioService {
   }
 
   @override
-  Future<void> startListening(Function(Uint8List) onData) async {
+  Future<List<stub.AudioInputDevice>> listInputDevices() async {
+    try {
+      // Need permission first to get labels
+      final mediaDevices = web.window.navigator.mediaDevices;
+      final jsDevices = (await mediaDevices.enumerateDevices().toDart).toDart;
+      final devices = <stub.AudioInputDevice>[];
+      for (final d in jsDevices) {
+        if (d.kind == 'audioinput') {
+          final id = d.deviceId;
+          final label = d.label.isNotEmpty
+              ? d.label
+              : 'Microphone ${id.length > 8 ? '(${id.substring(0, 8)}...)' : ''}';
+          devices.add(stub.AudioInputDevice(id: id, label: label));
+        }
+      }
+      return devices;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  @override
+  Future<void> startListening(Function(Uint8List) onData, {String? deviceId}) async {
     _onData = onData;
 
     try {
-      final constraints = web.MediaStreamConstraints(audio: true.toJS);
+      final web.MediaStreamConstraints constraints;
+      if (deviceId != null) {
+        // Build {audio: {deviceId: {exact: "..."}}} constraint
+        final audioConstraint = {'deviceId': {'exact': deviceId}.jsify()}.jsify();
+        constraints = web.MediaStreamConstraints(audio: audioConstraint);
+      } else {
+        constraints = web.MediaStreamConstraints(audio: true.toJS);
+      }
       final mediaDevices = web.window.navigator.mediaDevices;
       _stream = await mediaDevices.getUserMedia(constraints).toDart;
 
