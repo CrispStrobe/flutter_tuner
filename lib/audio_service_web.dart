@@ -139,11 +139,6 @@ extension AudioParamExtension on AudioParam {
 @staticInterop
 class AudioDestinationNode {}
 
-/// Helper to read a Uint8Array from a JS MessageEvent.data.
-extension _JSUint8ArrayHelper on JSObject {
-  external int get length;
-}
-
 class AudioService implements stub.AudioService {
   web.MediaStream? _stream;
   AudioContext? _audioContext;

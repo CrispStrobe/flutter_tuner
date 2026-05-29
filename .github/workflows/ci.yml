@@ -29,7 +29,7 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter test
+      - run: flutter test --update-goldens
 
   build-android:
     name: Build Android
