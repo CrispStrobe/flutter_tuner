@@ -18,21 +18,64 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="A professional instrument tuner with pitch detection, FFT visualization, and reference tone generation.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="flutter_tuner">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tuner">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>flutter_tuner</title>
+  <title>Flutter Pro Tuner</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Offline fallback styles (shown if Flutter fails to load) -->
+  <style>
+    .offline-message {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #0A0A0A;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      text-align: center;
+      padding: 2rem;
+    }
+    .offline-message h1 { color: #FF5722; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .offline-message p { color: #aaa; font-size: 1rem; }
+  </style>
 </head>
 <body>
+  <!-- Offline fallback — hidden by default, shown by JS if Flutter can't load -->
+  <div id="offline-fallback" class="offline-message">
+    <h1>Flutter Pro Tuner</h1>
+    <p>You appear to be offline. Please connect to the internet and reload.</p>
+  </div>
+
+  <script>
+    // Show offline fallback if the app fails to load within 10 seconds
+    var _offlineTimer = setTimeout(function() {
+      if (!document.querySelector('flt-glass-pane')) {
+        var el = document.getElementById('offline-fallback');
+        if (el) el.style.display = 'flex';
+      }
+    }, 10000);
+
+    window.addEventListener('flutter-first-frame', function() {
+      clearTimeout(_offlineTimer);
+      var el = document.getElementById('offline-fallback');
+      if (el) el.style.display = 'none';
+    });
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

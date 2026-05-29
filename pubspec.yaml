@@ -1,7 +1,7 @@
 name: flutter_tuner
 description: "A professional instrument tuner app with PWA support."
 publish_to: 'none'
-version: 2.0.0+2
+version: 2.1.0+3
 
 environment:
   sdk: '>=3.2.3 <4.0.0'
@@ -9,10 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations:
-    sdk: flutter
-  intl: any
-  
   # Core audio (mobile)
   permission_handler: ^11.3.1
   record: ^6.0.0
@@ -23,13 +19,6 @@ dependencies:
   # Utilities
   collection: ^1.18.0
   shared_preferences: ^2.2.2
-  # Removed vibration - not used in the app
-  
-  # UI enhancements
-  cupertino_icons: ^1.0.6
-  flutter_animate: ^4.5.0
-  glassmorphism: ^3.0.0
-  
   # Web support
   web: ^1.1.0
 
@@ -41,7 +30,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  generate: true
   
   assets:
     - assets/icon/

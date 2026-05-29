@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:pitch_detector_dart/pitch_detector.dart';
-import 'package:fftea/fftea.dart';
 import 'package:collection/collection.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_service.dart';
+import 'tuner_engine.dart';
 
 void main() {
   runApp(const TunerApp());
@@ -40,30 +40,22 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   late final AudioService _audioService;
   late final ToneGeneratorService _toneGenerator;
   final _pitchDetector = PitchDetector();
+  final _engine = TunerEngine();
 
-  String _note = '';
   String _status = 'Start Tuning';
-  double _pitch = 0.0;
-  double _cents = 0.0;
   bool _isListening = false;
-  Timer? _timer;
-
-  double _a4Frequency = 440.0;
-  Instrument _selectedInstrument = Instrument.guitar;
-  Map<String, double> _standardPitches = {};
-
-  List<double> _fftData = [];
-  final QueueList<double> _pitchHistory = QueueList<double>(100);
+  bool _wasListeningBeforePause = false;
+  Timer? _silenceTimer;
 
   bool _isGeneratingTone = false;
   String? _currentlyPlayingNote;
 
-  static const Map<Instrument, List<String>> _instrumentTunings = {
-    Instrument.guitar: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
-    Instrument.cello: ['C2', 'G2', 'D3', 'A3'],
-    Instrument.bass: ['E1', 'A1', 'D2', 'G2'],
-    Instrument.violin: ['G3', 'D4', 'A4', 'E5'],
-  };
+  // Throttle FFT display updates to ~20 fps
+  DateTime _lastFftUpdate = DateTime.now();
+  static const _fftFrameInterval = Duration(milliseconds: 50);
+
+  static const _prefA4 = 'a4_frequency';
+  static const _prefInstrument = 'instrument';
 
   @override
   void initState() {
@@ -71,12 +63,27 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _audioService = AudioService.create();
     _toneGenerator = ToneGeneratorService.create();
     WidgetsBinding.instance.addObserver(this);
-    _recalculatePitches();
-    for (int i = 0; i < 100; i++) {
-      _pitchHistory.add(0);
-    }
     _audioService.init();
     _toneGenerator.init();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final a4 = prefs.getDouble(_prefA4);
+    final instrumentIndex = prefs.getInt(_prefInstrument);
+    if (mounted) {
+      if (a4 != null) _engine.a4Frequency = a4;
+      if (instrumentIndex != null && instrumentIndex < Instrument.values.length) {
+        _engine.selectedInstrument = Instrument.values[instrumentIndex];
+      }
+    }
+  }
+
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_prefA4, _engine.a4Frequency);
+    await prefs.setInt(_prefInstrument, _engine.selectedInstrument.index);
   }
 
   @override
@@ -84,17 +91,20 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _stopCapture();
     _toneGenerator.dispose();
     _audioService.dispose();
+    _engine.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
+    _silenceTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
+      _wasListeningBeforePause = _isListening;
       _stopCapture();
       _stopToneGenerator();
-    } else if (state == AppLifecycleState.resumed && _isListening) {
+    } else if (state == AppLifecycleState.resumed && _wasListeningBeforePause) {
+      _wasListeningBeforePause = false;
       _startCapture();
     }
   }
@@ -111,130 +121,61 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   Future<void> _startCapture() async {
     if (await _audioService.hasPermission()) {
       await _audioService.startListening((data) => _processAudioData(data));
-      setState(() => _isListening = true);
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
-        if (mounted && _isListening) {
-          setState(() {
-            _note = '';
-            _status = 'Listening...';
-            _pitch = 0;
-            _cents = 0;
-          });
-        }
+      setState(() {
+        _isListening = true;
+        _status = 'Listening...';
       });
+      _resetSilenceTimer();
     } else {
       setState(() => _status = 'Microphone permission denied');
     }
   }
 
-  void _processAudioData(Uint8List data) async {
-    final floatData = <double>[];
-    for (int i = 0; i < data.length - 1; i += 2) {
-      final int sample = data[i] | (data[i + 1] << 8);
-      final int signedSample = sample > 32767 ? sample - 65536 : sample;
-      floatData.add(signedSample / 32768.0);
-    }
-    if (floatData.length < 2048) return;
-
-    try {
-      final result = await _pitchDetector.getPitchFromFloatBuffer(floatData);
-      if (result.pitched && result.probability > 0.9) {
-        _updatePitch(result.pitch);
+  void _resetSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _isListening) {
+        setState(() => _status = 'Listening...');
       }
-    } catch (e) {}
+    });
+  }
 
-    final fftSize = 2048;
-    final paddedSample = List<double>.filled(fftSize, 0.0);
-    for (int i = 0; i < floatData.length && i < fftSize; i++) {
-      paddedSample[i] = floatData[i];
-    }
-    final fft = FFT(fftSize);
-    final fftResult = fft.realFft(paddedSample);
-    if (mounted) {
-      setState(() => _fftData = fftResult.discardConjugates().magnitudes().toList());
+  void _processAudioData(dynamic data) {
+    final floatData = _engine.pcmToFloat(data);
+    if (floatData.length < TunerEngine.fftSize) return;
+
+    // Pitch detection (async, fire-and-forget)
+    _pitchDetector.getPitchFromFloatBuffer(floatData.toList()).then((result) {
+      if (result.pitched && result.probability > 0.9) {
+        final smoothed = _engine.smoothPitch(result.pitch);
+        // detectNote calls notifyListeners — UI rebuilds via ListenableBuilder
+        final detection = _engine.detectNote(smoothed);
+        _resetSilenceTimer();
+        if (mounted) {
+          setState(() => _status = detection.statusText);
+        }
+      }
+    });
+
+    // FFT — throttled to ~20 fps
+    final now = DateTime.now();
+    if (now.difference(_lastFftUpdate) >= _fftFrameInterval) {
+      _lastFftUpdate = now;
+      // computeFFT calls notifyListeners — UI rebuilds via ListenableBuilder
+      _engine.computeFFT(floatData);
     }
   }
 
-  void _stopCapture() async {
+  Future<void> _stopCapture() async {
     await _audioService.stopListening();
-    _timer?.cancel();
+    _silenceTimer?.cancel();
     if (mounted) {
       setState(() {
-        _note = '';
-        _pitch = 0.0;
-        _cents = 0.0;
         _isListening = false;
         _status = 'Start Tuning';
-        _fftData = [];
       });
+      _engine.reset();
     }
-  }
-
-  void _updatePitch(double detectedPitch) {
-    _timer?.cancel();
-    _timer = Timer(const Duration(seconds: 2), () {
-      if (mounted && _isListening) {
-        setState(() {
-          _note = '';
-          _status = 'Listening...';
-          _pitch = 0;
-          _cents = 0;
-        });
-      }
-    });
-
-    if (!mounted || detectedPitch <= 0) return;
-
-    String closestNote = '';
-    double minDifference = double.infinity;
-    double targetFrequency = 0;
-
-    _standardPitches.forEach((note, frequency) {
-      final difference = (detectedPitch - frequency).abs();
-      if (difference < minDifference) {
-        minDifference = difference;
-        closestNote = note;
-        targetFrequency = frequency;
-      }
-    });
-
-    final centsDifference = 1200 * (math.log(detectedPitch / targetFrequency) / math.log(2));
-    if (_pitchHistory.length >= 100) _pitchHistory.removeFirst();
-    _pitchHistory.add(centsDifference.clamp(-50, 50));
-
-    setState(() {
-      _pitch = detectedPitch;
-      _note = closestNote;
-      _cents = centsDifference;
-      if (centsDifference.abs() < 5) {
-        _status = 'In Tune ✓';
-      } else if (centsDifference > 5) {
-        _status = 'Too Sharp ↑';
-      } else {
-        _status = 'Too Flat ↓';
-      }
-    });
-  }
-
-  void _recalculatePitches() {
-    const Map<String, int> noteOffsets = {
-      'A0': -48, 'A#0': -47, 'B0': -46, 'C1': -45, 'C#1': -44, 'D1': -43,
-      'D#1': -42, 'E1': -41, 'F1': -40, 'F#1': -39, 'G1': -38, 'G#1': -37,
-      'A1': -36, 'A#1': -35, 'B1': -34, 'C2': -33, 'C#2': -32, 'D2': -31,
-      'D#2': -30, 'E2': -29, 'F2': -28, 'F#2': -27, 'G2': -26, 'G#2': -25,
-      'A2': -24, 'A#2': -23, 'B2': -22, 'C3': -21, 'C#3': -20, 'D3': -19,
-      'D#3': -18, 'E3': -17, 'F3': -16, 'F#3': -15, 'G3': -14, 'G#3': -13,
-      'A3': -12, 'A#3': -11, 'B3': -10, 'C4': -9, 'C#4': -8, 'D4': -7,
-      'D#4': -6, 'E4': -5, 'F4': -4, 'F#4': -3, 'G4': -2, 'G#4': -1, 'A4': 0,
-      'A#4': 1, 'B4': 2, 'C5': 3, 'C#5': 4, 'D5': 5, 'D#5': 6, 'E5': 7,
-      'F5': 8, 'F#5': 9, 'G5': 10, 'G#5': 11, 'A5': 12, 'A#5': 13, 'B5': 14,
-      'C6': 15,
-    };
-    _standardPitches.clear();
-    noteOffsets.forEach((note, offset) {
-      _standardPitches[note] = _a4Frequency * math.pow(2, offset / 12.0);
-    });
   }
 
   void _toggleToneGenerator(String note) {
@@ -242,13 +183,13 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     if (_currentlyPlayingNote == note) {
       _stopToneGenerator();
     } else {
-      final frequency = _standardPitches[note];
+      final frequency = _engine.getFrequencyForNote(note);
       if (frequency != null) {
         _toneGenerator.playNote(frequency);
         setState(() {
           _currentlyPlayingNote = note;
           _isGeneratingTone = true;
-          _status = 'Playing ${note.replaceAll(RegExp(r'[0-9]'), '')}';
+          _status = 'Playing ${TunerEngine.stripOctave(note)}';
         });
       }
     }
@@ -265,133 +206,223 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    return ListenableBuilder(
+      listenable: _engine,
+      builder: (context, _) => _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
+    final result = _engine.lastResult;
+    final displayNote = result?.displayNote ?? '';
+    final pitch = result?.pitch ?? 0.0;
+    final cents = result?.cents ?? 0.0;
+    final note = result?.note ?? '';
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Flutter Pro Tuner', style: TextStyle(fontSize: 18)),
         centerTitle: true,
-        backgroundColor: Colors.black.withOpacity(0.3),
+        backgroundColor: const Color(0x4D000000),
         elevation: 0,
         toolbarHeight: 48,
       ),
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              const Color(0xFF0A0A0A),
-              const Color(0xFF1A1A1A),
-              Colors.deepOrange.withOpacity(0.1),
+              Color(0xFF0A0A0A),
+              Color(0xFF1A1A1A),
+              Color(0x1AFF5722),
             ],
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                // Compact note display
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      _note.replaceAll(RegExp(r'[0-9]'), ''),
-                      style: TextStyle(
-                        fontSize: 72,
-                        fontWeight: FontWeight.bold,
-                        color: _status == 'In Tune ✓' ? Colors.greenAccent : Colors.white,
-                        height: 1,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(_status, style: TextStyle(fontSize: 16, color: _getStatusColor())),
-                  ],
-                ),
-                const SizedBox(height: 12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 600;
+              final meterWidth = isWide
+                  ? constraints.maxWidth * 0.6
+                  : constraints.maxWidth * 0.85;
 
-                // Tuning meter
-                _buildTuningMeter(size.width * 0.85),
-                const SizedBox(height: 4),
-                Text('${_pitch.toStringAsFixed(2)} Hz',
-                    style: const TextStyle(fontSize: 14, color: Colors.white60)),
-                const SizedBox(height: 12),
-
-                // String indicators
-                _buildCompactStringIndicators(),
-                const SizedBox(height: 12),
-
-                // Visualizations side by side
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        children: [
-                          const Text('Pitch History',
-                              style: TextStyle(color: Colors.white60, fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Container(
-                            height: 100,
-                            decoration: BoxDecoration(
-                              color: Colors.black26,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: SizedBox.expand(
-                                child: CustomPaint(
-                                  painter: PitchHistoryPainter(_pitchHistory.toList(), Colors.deepOrange),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          const Text('Frequency Spectrum',
-                              style: TextStyle(color: Colors.white60, fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Container(
-                            height: 100,
-                            decoration: BoxDecoration(
-                              color: Colors.black26,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: SizedBox.expand(
-                                child: CustomPaint(
-                                  painter: FFTPainter(_fftData, Colors.greenAccent),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Compact settings and mic button
-                Row(
-                  children: [
-                    Expanded(child: _buildCompactSettings()),
-                    const SizedBox(width: 12),
-                    _buildCompactMicButton(),
-                  ],
-                ),
-              ],
-            ),
+              return SingleChildScrollView(
+                padding: EdgeInsets.all(isWide ? 24.0 : 12.0),
+                child: isWide
+                    ? _buildWideLayout(displayNote, pitch, cents, note, meterWidth, constraints)
+                    : _buildNarrowLayout(displayNote, pitch, cents, note, meterWidth),
+              );
+            },
           ),
         ),
+      ),
+    );
+  }
+
+  /// Phone layout — single column, compact.
+  Widget _buildNarrowLayout(
+    String displayNote, double pitch, double cents, String note, double meterWidth,
+  ) {
+    return Column(
+      children: [
+        _buildNoteDisplay(displayNote),
+        const SizedBox(height: 12),
+        _buildTuningMeter(meterWidth, cents),
+        const SizedBox(height: 4),
+        Text('${pitch.toStringAsFixed(2)} Hz',
+            style: const TextStyle(fontSize: 14, color: Colors.white60)),
+        const SizedBox(height: 12),
+        _buildCompactStringIndicators(note),
+        const SizedBox(height: 12),
+        _buildVisualizationRow(),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: _buildCompactSettings()),
+            const SizedBox(width: 12),
+            _buildCompactMicButton(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Tablet / desktop layout — two-column with larger visualizations.
+  Widget _buildWideLayout(
+    String displayNote, double pitch, double cents, String note,
+    double meterWidth, BoxConstraints constraints,
+  ) {
+    return Column(
+      children: [
+        _buildNoteDisplay(displayNote, scaleFactor: 1.3),
+        const SizedBox(height: 16),
+        _buildTuningMeter(meterWidth, cents),
+        const SizedBox(height: 4),
+        Text('${pitch.toStringAsFixed(2)} Hz',
+            style: const TextStyle(fontSize: 16, color: Colors.white60)),
+        const SizedBox(height: 16),
+        _buildCompactStringIndicators(note),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left: visualizations stacked vertically
+            Expanded(
+              flex: 3,
+              child: Column(
+                children: [
+                  _buildVisualizationCard(
+                    'Pitch History',
+                    PitchHistoryPainter(_engine.pitchHistory, Colors.deepOrange),
+                    height: 140,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildVisualizationCard(
+                    'Frequency Spectrum',
+                    FFTPainter(_engine.fftMagnitudes, Colors.greenAccent),
+                    height: 140,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 24),
+            // Right: settings + mic
+            Expanded(
+              flex: 2,
+              child: Column(
+                children: [
+                  _buildCompactSettings(),
+                  const SizedBox(height: 16),
+                  _buildCompactMicButton(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNoteDisplay(String displayNote, {double scaleFactor = 1.0}) {
+    return Semantics(
+      liveRegion: true,
+      label: displayNote.isEmpty
+          ? 'No note detected. $_status'
+          : 'Detected note: $displayNote. $_status',
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ExcludeSemantics(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              transitionBuilder: (child, animation) =>
+                  FadeTransition(opacity: animation, child: child),
+              child: Text(
+                displayNote,
+                key: ValueKey(displayNote),
+                style: TextStyle(
+                  fontSize: 72 * scaleFactor,
+                  fontWeight: FontWeight.bold,
+                  color: _status == 'In Tune ✓' ? Colors.greenAccent : Colors.white,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ExcludeSemantics(
+            child: Text(_status, style: TextStyle(fontSize: 16 * scaleFactor, color: _getStatusColor())),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVisualizationRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildVisualizationCard(
+            'Pitch History',
+            PitchHistoryPainter(_engine.pitchHistory, Colors.deepOrange),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildVisualizationCard(
+            'Frequency Spectrum',
+            FFTPainter(_engine.fftMagnitudes, Colors.greenAccent),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVisualizationCard(String label, CustomPainter painter, {double height = 100}) {
+    return Semantics(
+      label: '$label visualization',
+      excludeSemantics: true,
+      child: Column(
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          const SizedBox(height: 4),
+          Container(
+            height: height,
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox.expand(
+                child: CustomPaint(painter: painter),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -403,17 +434,21 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     return Colors.orangeAccent;
   }
 
-  Widget _buildTuningMeter(double width) {
-    final clampedCents = _cents.clamp(-50.0, 50.0);
+  Widget _buildTuningMeter(double width, double cents) {
+    final clampedCents = cents.clamp(-50.0, 50.0);
     final meterPosition = clampedCents / 50.0;
     final leftMargin = meterPosition > 0 ? meterPosition * (width / 2 - 20) : 0.0;
     final rightMargin = meterPosition < 0 ? -meterPosition * (width / 2 - 20) : 0.0;
+    final statusColor = _getStatusColor();
 
-    return Container(
+    return Semantics(
+      label: 'Tuning meter: ${clampedCents.toStringAsFixed(0)} cents',
+      value: '${(meterPosition * 100).toStringAsFixed(0)}%',
+      child: Container(
       width: width,
       height: 40,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: const Color(0x0DFFFFFF),
         border: Border.all(color: Colors.white24, width: 2),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -427,11 +462,11 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             width: 6,
             height: 40,
             decoration: BoxDecoration(
-              color: _getStatusColor(),
+              color: statusColor,
               borderRadius: BorderRadius.circular(3),
               boxShadow: [
                 BoxShadow(
-                  color: _getStatusColor().withOpacity(0.6),
+                  color: Color.lerp(statusColor, Colors.transparent, 0.4)!,
                   blurRadius: 15,
                   spreadRadius: 3,
                 ),
@@ -440,15 +475,16 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           ),
         ],
       ),
+      ),
     );
   }
 
-  Widget _buildCompactStringIndicators() {
-    List<String> strings = _instrumentTunings[_selectedInstrument]!;
+  Widget _buildCompactStringIndicators(String currentNote) {
+    final strings = _engine.currentTuningStrings;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: strings.map((stringNote) {
-        final bool isCurrentNote = _note == stringNote;
+        final bool isCurrentNote = currentNote == stringNote;
         final bool isInTune = isCurrentNote && _status == 'In Tune ✓';
         final bool isPlayingThisTone = _currentlyPlayingNote == stringNote;
 
@@ -458,7 +494,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: const Color(0x0DFFFFFF),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: isCurrentNote ? Colors.deepOrange : Colors.white12,
@@ -466,7 +502,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                 ),
               ),
               child: Text(
-                stringNote.replaceAll(RegExp(r'[0-9]'), ''),
+                TunerEngine.stripOctave(stringNote),
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
@@ -478,16 +514,22 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                 shape: BoxShape.circle,
                 color: isInTune ? Colors.greenAccent : (isCurrentNote ? Colors.orangeAccent : Colors.white12),
                 boxShadow: isInTune
-                    ? [BoxShadow(color: Colors.greenAccent.withOpacity(0.8), blurRadius: 8, spreadRadius: 2)]
+                    ? [BoxShadow(color: Color.lerp(Colors.greenAccent, Colors.transparent, 0.2)!, blurRadius: 8, spreadRadius: 2)]
                     : [],
               ),
             ),
-            IconButton(
-              icon: Icon(isPlayingThisTone ? Icons.stop_circle : Icons.play_circle_outline, size: 24),
-              color: isPlayingThisTone ? Colors.cyanAccent : Colors.white70,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () => _toggleToneGenerator(stringNote),
+            Semantics(
+              button: true,
+              label: isPlayingThisTone
+                  ? 'Stop playing ${TunerEngine.stripOctave(stringNote)}'
+                  : 'Play reference tone ${TunerEngine.stripOctave(stringNote)}',
+              child: IconButton(
+                icon: Icon(isPlayingThisTone ? Icons.stop_circle : Icons.play_circle_outline, size: 24),
+                color: isPlayingThisTone ? Colors.cyanAccent : Colors.white70,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () => _toggleToneGenerator(stringNote),
+              ),
             ),
           ],
         );
@@ -500,44 +542,46 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: const Color(0x08FFFFFF),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white12),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('A4: ${_a4Frequency.toStringAsFixed(1)} Hz',
-              style: const TextStyle(color: Colors.white, fontSize: 13)),
+          Semantics(
+            label: 'A4 reference frequency',
+            value: '${_engine.a4Frequency.toStringAsFixed(1)} Hz',
+            child: Text('A4: ${_engine.a4Frequency.toStringAsFixed(1)} Hz',
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ),
           SliderTheme(
-            data: SliderThemeData(
+            data: const SliderThemeData(
               activeTrackColor: Colors.deepOrange,
               inactiveTrackColor: Colors.white12,
               thumbColor: Colors.deepOrange,
-              overlayColor: Colors.deepOrange.withOpacity(0.2),
+              overlayColor: Color(0x33FF5722),
               trackHeight: 2,
             ),
             child: Slider(
-              value: _a4Frequency,
+              value: _engine.a4Frequency,
               min: 415,
               max: 465,
               divisions: 500,
               onChanged: isActionDisabled
                   ? null
                   : (value) {
-                      setState(() {
-                        _a4Frequency = value;
-                        _recalculatePitches();
-                      });
+                      _engine.a4Frequency = value;
+                      _savePreferences();
                     },
             ),
           ),
           DropdownButtonFormField<Instrument>(
-            value: _selectedInstrument,
+            value: _engine.selectedInstrument,
             isDense: true,
             decoration: InputDecoration(
               filled: true,
-              fillColor: Colors.white.withOpacity(0.05),
+              fillColor: const Color(0x0DFFFFFF),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Colors.white12),
@@ -553,7 +597,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                 ? null
                 : (Instrument? newValue) {
                     if (newValue != null) {
-                      setState(() => _selectedInstrument = newValue);
+                      _engine.selectedInstrument = newValue;
+                      _savePreferences();
                     }
                   },
             items: Instrument.values.map<DropdownMenuItem<Instrument>>((value) {
@@ -574,24 +619,28 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: (_isListening ? Colors.redAccent : Colors.greenAccent).withOpacity(0.4),
+            color: Color.lerp(_isListening ? Colors.redAccent : Colors.greenAccent, Colors.transparent, 0.6)!,
             blurRadius: 15,
             spreadRadius: 3,
           ),
         ],
       ),
-      child: ElevatedButton(
-        onPressed: _toggleListening,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isListening ? Colors.redAccent : Colors.greenAccent,
-          shape: const CircleBorder(),
-          padding: const EdgeInsets.all(20),
-          elevation: 8,
-        ),
-        child: Icon(
-          _isListening ? Icons.mic_off : Icons.mic,
-          size: 32,
-          color: Colors.black87,
+      child: Semantics(
+        button: true,
+        label: _isListening ? 'Stop tuning' : 'Start tuning',
+        child: ElevatedButton(
+          onPressed: _toggleListening,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isListening ? Colors.redAccent : Colors.greenAccent,
+            shape: const CircleBorder(),
+            padding: const EdgeInsets.all(20),
+            elevation: 8,
+          ),
+          child: Icon(
+            _isListening ? Icons.mic_off : Icons.mic,
+            size: 32,
+            color: Colors.black87,
+          ),
         ),
       ),
     );
@@ -607,26 +656,28 @@ class FFTPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (fftData.isEmpty) return;
-    
+
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
-    
-    final double barWidth = size.width / (fftData.length / 8);
-    final double maxMagnitude = fftData.sublist(0, fftData.length ~/ 2).reduce(math.max);
-    
+
+    final int barCount = fftData.length;
+    if (barCount <= 0) return;
+    final double barWidth = size.width / barCount;
+    final double maxMagnitude = fftData.reduce(math.max);
+
     if (maxMagnitude <= 0 || maxMagnitude.isNaN || maxMagnitude.isInfinite) {
       return;
     }
-    
-    for (int i = 0; i < fftData.length / 8; i++) {
+
+    for (int i = 0; i < barCount; i++) {
       final double magnitude = fftData[i];
       final double barHeight = (magnitude / maxMagnitude) * size.height;
-      
+
       if (barHeight.isNaN || barHeight.isInfinite || barHeight < 0) {
         continue;
       }
-      
+
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(i * barWidth, size.height - barHeight, barWidth * 0.8, barHeight),
@@ -638,7 +689,8 @@ class FFTPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant FFTPainter oldDelegate) =>
+      !const ListEquality<double>().equals(fftData, oldDelegate.fftData);
 }
 
 class PitchHistoryPainter extends CustomPainter {
@@ -649,6 +701,7 @@ class PitchHistoryPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (pitchHistory.length < 2) return;
     final paint = Paint()
       ..color = color
       ..strokeWidth = 3.0
@@ -665,7 +718,7 @@ class PitchHistoryPainter extends CustomPainter {
       }
     }
     final centerLinePaint = Paint()
-      ..color = Colors.white.withOpacity(0.2)
+      ..color = const Color(0x33FFFFFF)
       ..strokeWidth = 1.0;
     canvas.drawLine(
       Offset(0, size.height / 2),
@@ -676,13 +729,6 @@ class PitchHistoryPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-enum Instrument { guitar, cello, bass, violin }
-
-extension StringExtension on String {
-  String capitalize() {
-    return "${this[0].toUpperCase()}${substring(1)}";
-  }
+  bool shouldRepaint(covariant PitchHistoryPainter oldDelegate) =>
+      !const ListEquality<double>().equals(pitchHistory, oldDelegate.pitchHistory);
 }

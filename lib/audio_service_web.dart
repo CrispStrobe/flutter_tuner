@@ -1,8 +1,11 @@
+// ignore_for_file: avoid_web_libraries_in_flutter, non_constant_identifier_names
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:js_interop';
 import 'dart:js_util' as js_util;
 import 'package:web/web.dart' as web;
+import 'audio_service_stub.dart' as stub;
 
 @JS('AudioContext')
 external JSObject get _AudioContextConstructor;
@@ -19,6 +22,43 @@ extension AudioContextExtension on AudioContext {
   external GainNode createGain();
   external AudioDestinationNode get destination;
   external JSPromise close();
+  external AudioWorklet get audioWorklet;
+}
+
+@JS()
+@staticInterop
+class AudioWorklet {}
+
+extension AudioWorkletExtension on AudioWorklet {
+  external JSPromise addModule(String moduleURL);
+}
+
+@JS()
+@staticInterop
+class AudioWorkletNode {
+  external factory AudioWorkletNode(AudioContext context, String name);
+}
+
+extension AudioWorkletNodeExtension on AudioWorkletNode {
+  external MessagePort get port;
+  external void connect(JSObject destination);
+  external void disconnect();
+}
+
+@JS()
+@staticInterop
+class MessagePort {}
+
+extension MessagePortExtension on MessagePort {
+  external set onmessage(JSFunction? handler);
+}
+
+@JS()
+@staticInterop
+class MessageEvent {}
+
+extension MessageEventExtension on MessageEvent {
+  external JSObject get data;
 }
 
 @JS()
@@ -101,22 +141,26 @@ extension AudioParamExtension on AudioParam {
 @staticInterop
 class AudioDestinationNode {}
 
-class AudioService {
+class AudioService implements stub.AudioService {
   web.MediaStream? _stream;
   AudioContext? _audioContext;
-  AnalyserNode? _analyser;
   MediaStreamAudioSourceNode? _microphone;
+  AudioWorkletNode? _workletNode;
   ScriptProcessorNode? _scriptProcessor;
+  AnalyserNode? _analyser;
   Function(Uint8List)? _onData;
+  bool _usingWorklet = false;
 
+  @override
   Future<void> init() async {}
 
+  @override
   Future<bool> hasPermission() async {
     try {
       final constraints = web.MediaStreamConstraints(audio: true.toJS);
       final mediaDevices = web.window.navigator.mediaDevices;
       _stream = await mediaDevices.getUserMedia(constraints).toDart;
-      
+
       if (_stream != null) {
         final tracks = _stream!.getTracks().toDart;
         for (var track in tracks) {
@@ -124,78 +168,134 @@ class AudioService {
         }
         _stream = null;
       }
-      
+
       return true;
     } catch (e) {
-      print('Microphone permission error: $e');
       return false;
     }
   }
 
+  @override
   Future<void> startListening(Function(Uint8List) onData) async {
     _onData = onData;
-    
+
     try {
       final constraints = web.MediaStreamConstraints(audio: true.toJS);
       final mediaDevices = web.window.navigator.mediaDevices;
       _stream = await mediaDevices.getUserMedia(constraints).toDart;
-      
-      // Use js_util.callConstructor to properly create AudioContext
+
       _audioContext = js_util.callConstructor(_AudioContextConstructor, []) as AudioContext;
-      
-      _analyser = _audioContext!.createAnalyser();
-      _analyser!.fftSize = 2048;
-      
+
       _microphone = _audioContext!.createMediaStreamSource(_stream!);
-      _microphone!.connect(_analyser! as JSObject);
-      
-      _scriptProcessor = _audioContext!.createScriptProcessor(4096, 1, 1);
-      
-      _scriptProcessor!.onaudioprocess = ((JSObject event) {
-        try {
-          final audioEvent = event as AudioProcessingEvent;
-          final inputBuffer = audioEvent.inputBuffer;
-          final channelDataJS = inputBuffer.getChannelData(0);
-          
-          // Convert JSObject to Float32List using js_util
-          final length = js_util.getProperty(channelDataJS, 'length') as int;
-          
-          final bytes = <int>[];
-          for (int i = 0; i < length; i++) {
-            final sample = js_util.getProperty(channelDataJS, i) as double;
-            final int16 = (sample * 32767).clamp(-32768, 32767).toInt();
-            bytes.add(int16 & 0xFF);
-            bytes.add((int16 >> 8) & 0xFF);
-          }
-          
-          _onData?.call(Uint8List.fromList(bytes));
-        } catch (e) {
-          print('Error in audio process callback: $e');
-        }
-      }.toJS);
-      
-      _analyser!.connect(_scriptProcessor! as JSObject);
-      _scriptProcessor!.connect(_audioContext!.destination as JSObject);
-      
-      print('Web audio started successfully');
-      
+
+      // Try AudioWorkletNode first (modern, low-latency)
+      if (await _tryStartWorklet()) {
+        _usingWorklet = true;
+        return;
+      }
+
+      // Fallback to deprecated ScriptProcessorNode
+      _startScriptProcessor();
     } catch (e) {
-      print('Error starting web audio: $e');
+      // Failed to start web audio
     }
   }
 
+  /// Attempt to set up AudioWorkletNode. Returns true on success.
+  Future<bool> _tryStartWorklet() async {
+    try {
+      final worklet = _audioContext!.audioWorklet;
+      await worklet.addModule('pcm_processor.js').toDart;
+
+      _workletNode = js_util.callConstructor(
+        js_util.getProperty(js_util.globalThis, 'AudioWorkletNode'),
+        [_audioContext, 'pcm-processor'],
+      ) as AudioWorkletNode;
+
+      _workletNode!.port.onmessage = ((JSObject event) {
+        try {
+          final msgEvent = event as MessageEvent;
+          final jsData = msgEvent.data;
+          final length = js_util.getProperty(jsData, 'length') as int;
+          final bytes = Uint8List(length);
+          for (int i = 0; i < length; i++) {
+            bytes[i] = js_util.getProperty(jsData, i) as int;
+          }
+          _onData?.call(bytes);
+        } catch (_) {
+          // Worklet message processing error
+        }
+      }).toJS;
+
+      _microphone!.connect(_workletNode! as JSObject);
+      // Connect to destination to keep the audio graph alive
+      _workletNode!.connect(_audioContext!.destination as JSObject);
+
+      return true;
+    } catch (_) {
+      // AudioWorklet not supported, will fall back to ScriptProcessorNode
+      return false;
+    }
+  }
+
+  /// Legacy fallback using deprecated ScriptProcessorNode.
+  void _startScriptProcessor() {
+    _analyser = _audioContext!.createAnalyser();
+    _analyser!.fftSize = 2048;
+
+    _microphone!.connect(_analyser! as JSObject);
+
+    _scriptProcessor = _audioContext!.createScriptProcessor(4096, 1, 1);
+
+    _scriptProcessor!.onaudioprocess = ((JSObject event) {
+      try {
+        final audioEvent = event as AudioProcessingEvent;
+        final inputBuffer = audioEvent.inputBuffer;
+        final channelDataJS = inputBuffer.getChannelData(0);
+
+        final length = js_util.getProperty(channelDataJS, 'length') as int;
+
+        final bytes = <int>[];
+        for (int i = 0; i < length; i++) {
+          final sample = js_util.getProperty(channelDataJS, i) as double;
+          final int16 = (sample * 32767).clamp(-32768, 32767).toInt();
+          bytes.add(int16 & 0xFF);
+          bytes.add((int16 >> 8) & 0xFF);
+        }
+
+        _onData?.call(Uint8List.fromList(bytes));
+      } catch (e) {
+        // Audio process callback error
+      }
+    }).toJS;
+
+    _analyser!.connect(_scriptProcessor! as JSObject);
+    _scriptProcessor!.connect(_audioContext!.destination as JSObject);
+  }
+
+  @override
   Future<void> stopListening() async {
     try {
+      if (_workletNode != null) {
+        _workletNode!.disconnect();
+        _workletNode = null;
+      }
+
       if (_scriptProcessor != null) {
         _scriptProcessor!.disconnect();
         _scriptProcessor = null;
       }
-      
+
+      if (_analyser != null) {
+        _analyser!.disconnect();
+        _analyser = null;
+      }
+
       if (_microphone != null) {
         _microphone!.disconnect();
         _microphone = null;
       }
-      
+
       if (_stream != null) {
         final tracks = _stream!.getTracks().toDart;
         for (var track in tracks) {
@@ -203,17 +303,19 @@ class AudioService {
         }
         _stream = null;
       }
-      
+
       if (_audioContext != null) {
         await _audioContext!.close().toDart;
         _audioContext = null;
       }
-      
+
+      _usingWorklet = false;
     } catch (e) {
-      print('Error stopping web audio: $e');
+      // Failed to stop web audio
     }
   }
 
+  @override
   void dispose() {
     stopListening();
   }
@@ -221,68 +323,70 @@ class AudioService {
   static AudioService create() => AudioService();
 }
 
-class ToneGeneratorService {
+class ToneGeneratorService implements stub.ToneGeneratorService {
   AudioContext? _audioContext;
   OscillatorNode? _oscillator;
   GainNode? _gainNode;
   bool _isPlaying = false;
 
+  @override
   Future<void> init() async {
     try {
-      // Use js_util.callConstructor to properly create AudioContext
       _audioContext = js_util.callConstructor(_AudioContextConstructor, []) as AudioContext;
-      print('Web tone generator initialized successfully');
     } catch (e) {
-      print('Error initializing web tone generator: $e');
+      // Failed to initialize tone generator
     }
   }
 
+  @override
   void playNote(double frequency) {
     if (_audioContext == null) return;
-    
+
     try {
       if (_isPlaying) {
         stopNote();
       }
-      
+
       _oscillator = _audioContext!.createOscillator();
       _oscillator!.type = 'sine';
       _oscillator!.frequency.value = frequency;
-      
+
       _gainNode = _audioContext!.createGain();
       _gainNode!.gain.value = 0.3;
-      
+
       _oscillator!.connect(_gainNode! as JSObject);
       _gainNode!.connect(_audioContext!.destination as JSObject);
-      
+
       _oscillator!.start();
       _isPlaying = true;
-      
-      print('Playing tone at ${frequency}Hz');
-    } catch (e) {
-      print('Error playing web tone: $e');
+    } catch (_) {
+      // Failed to play tone
     }
   }
 
+  @override
   void stopNote() {
     if (_oscillator != null && _isPlaying) {
       try {
         _oscillator!.stop();
         _oscillator!.disconnect();
         _oscillator = null;
-      } catch (e) {
-        print('Error stopping web tone: $e');
+      } catch (_) {
+        // Failed to stop tone
       }
     }
     _isPlaying = false;
   }
 
+  @override
   void dispose() {
     stopNote();
     if (_audioContext != null) {
       try {
         _audioContext!.close();
-      } catch (e) {}
+      } catch (_) {
+        // AudioContext close may fail if already closed
+      }
       _audioContext = null;
     }
   }

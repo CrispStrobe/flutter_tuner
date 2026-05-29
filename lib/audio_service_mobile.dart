@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'audio_service_stub.dart' as stub;
 
-class AudioService {
+class AudioService implements stub.AudioService {
   final _audioRecorder = AudioRecorder();
   StreamSubscription? _audioSubscription;
 
@@ -39,7 +39,7 @@ class AudioService {
   static AudioService create() => AudioService();
 }
 
-class ToneGeneratorService {
+class ToneGeneratorService implements stub.ToneGeneratorService {
   bool _isInitialized = false;
   bool _isPlaying = false;
   int _currentNote = -1;
@@ -52,7 +52,7 @@ class ToneGeneratorService {
       await FlutterPcmSound.setFeedThreshold(4000);
       _isInitialized = true;
     } catch (e) {
-      print('Error initializing tone generator: $e');
+      // Failed to initialize tone generator
     }
   }
 

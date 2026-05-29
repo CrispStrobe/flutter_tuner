@@ -1,13 +1,14 @@
 {
-    "name": "flutter_tuner",
-    "short_name": "flutter_tuner",
+    "name": "Flutter Pro Tuner",
+    "short_name": "Tuner",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0A0A0A",
     "theme_color": "#FF5722",
-    "description": "A new Flutter project.",
+    "description": "A professional instrument tuner with pitch detection, FFT visualization, and reference tone generation.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": ["music", "utilities"],
     "icons": [
         {
             "src": "icons/Icon-192.png",
