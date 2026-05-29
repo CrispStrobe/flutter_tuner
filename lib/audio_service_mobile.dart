@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:record/record.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'audio_service_stub.dart' as stub;
+export 'audio_service_stub.dart' show AudioInputDevice;
 
 class AudioService implements stub.AudioService {
   final _audioRecorder = AudioRecorder();

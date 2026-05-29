@@ -5,7 +5,6 @@ import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_service.dart';
-import 'audio_service_stub.dart' show AudioInputDevice;
 import 'tuner_engine.dart';
 
 void main() {

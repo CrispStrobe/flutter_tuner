@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'audio_service_stub.dart' as stub;
+export 'audio_service_stub.dart' show AudioInputDevice;
 
 @JS('AudioContext')
 @staticInterop
@@ -202,7 +203,7 @@ class AudioService implements stub.AudioService {
       final web.MediaStreamConstraints constraints;
       if (deviceId != null) {
         // Build {audio: {deviceId: {exact: "..."}}} constraint
-        final audioConstraint = {'deviceId': {'exact': deviceId}.jsify()}.jsify();
+        final audioConstraint = {'deviceId': {'exact': deviceId}.jsify()}.jsify()!;
         constraints = web.MediaStreamConstraints(audio: audioConstraint);
       } else {
         constraints = web.MediaStreamConstraints(audio: true.toJS);
