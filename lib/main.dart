@@ -371,16 +371,40 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
+              const maxContentWidth = 900.0;
               final isWide = constraints.maxWidth >= 600;
-              final meterWidth = isWide
-                  ? constraints.maxWidth * 0.6
-                  : constraints.maxWidth * 0.85;
+              // Derive the meter from the width the content will actually get,
+              // not the raw viewport — otherwise it overflows the cap on a wide
+              // desktop window.
+              final contentWidth =
+                  math.min(constraints.maxWidth, maxContentWidth);
+              final meterWidth =
+                  isWide ? contentWidth * 0.6 : contentWidth * 0.85;
 
+              final padding = isWide ? 24.0 : 12.0;
               return SingleChildScrollView(
-                padding: EdgeInsets.all(isWide ? 24.0 : 12.0),
-                child: isWide
-                    ? _buildWideLayout(l10n, displayNote, pitch, cents, note, meterWidth)
-                    : _buildNarrowLayout(l10n, displayNote, pitch, cents, note, meterWidth),
+                padding: EdgeInsets.all(padding),
+                // Centre the content when it is shorter than the viewport —
+                // otherwise on a tall tablet everything crowds into the top
+                // half and leaves a large empty band underneath. Still scrolls
+                // normally once the content outgrows the screen.
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - padding * 2,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      // Keep the two-column layout readable instead of letting
+                      // it stretch the full width of a large display.
+                      constraints: const BoxConstraints(maxWidth: maxContentWidth),
+                      child: isWide
+                          ? _buildWideLayout(
+                              l10n, displayNote, pitch, cents, note, meterWidth)
+                          : _buildNarrowLayout(
+                              l10n, displayNote, pitch, cents, note, meterWidth),
+                    ),
+                  ),
+                ),
               );
             },
           ),
