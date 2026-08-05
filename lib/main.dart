@@ -353,6 +353,10 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         ],
       ),
       body: Container(
+        // Fill the viewport. Without this the Container sizes to its scrolling
+        // child, so on a tall screen the gradient stopped where the content
+        // ended and left a black band below it.
+        constraints: const BoxConstraints.expand(),
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
