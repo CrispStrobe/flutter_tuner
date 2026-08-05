@@ -58,6 +58,20 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      - name: Validate the entitlements actually parse
+        # `plutil -lint` is NOT sufficient: AMFI's parser is far simpler than the
+        # generic plist parser and fails on angle brackets inside an XML comment,
+        # which lints clean and then dies minutes later mid-signing. Ad-hoc
+        # signing needs no keychain, so this check is instant.
+        run: |
+          set -euo pipefail
+          plutil -lint macos/Runner/AppStore.entitlements
+          cp /bin/echo "$RUNNER_TEMP/entitlement-probe"
+          codesign --force --sign - \
+            --entitlements macos/Runner/AppStore.entitlements \
+            "$RUNNER_TEMP/entitlement-probe"
+          echo "entitlements parse cleanly"
+
       - name: Import signing certificates into a temp keychain
         # NOT DIST_CERT_P12_BASE64: that one carries only the Apple Distribution
         # identity. The Mac App Store needs a SECOND identity to sign the .pkg,

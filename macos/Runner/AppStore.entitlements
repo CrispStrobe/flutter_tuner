@@ -2,37 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  Entitlements for the MAC APP STORE build only. Release.entitlements stays
-	  as-is for direct-download builds.
-
-	  `codesign --entitlements <file>` signs in EXACTLY this file and inherits
-	  nothing — a provisioning profile that *authorises* an entitlement is not
-	  the same as the entitlement being signed into the binary.
-	-->
-
-	<!-- Mandatory for the Mac App Store. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
-
-	<!-- The whole point of the app: capture from the microphone. -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
-
-	<!-- Pairs with the provisioning profile; without them altool emits
-	     warning 90886 on upload. -->
 	<key>com.apple.application-identifier</key>
 	<string>N9XSJ4M3GT.com.crispstrobe.CrispTuner</string>
 	<key>com.apple.developer.team-identifier</key>
 	<string>N9XSJ4M3GT</string>
-
-	<!--
-	  Deliberately NOT requested:
-	    com.apple.security.cs.allow-jit      - release builds are AOT compiled
-	    com.apple.security.network.*         - the app makes no network calls
-	    com.apple.security.files.*           - the app reads and writes no files
-	  Every entitlement is something App Review asks about; claim only what the
-	  app actually uses.
-	-->
 </dict>
 </plist>
