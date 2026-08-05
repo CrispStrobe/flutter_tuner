@@ -1,5 +1,5 @@
 name: flutter_tuner
-description: "A professional instrument tuner app with PWA support."
+description: "CrispTuner — a precise chromatic instrument tuner with live pitch detection, spectrum analysis and reference tones."
 publish_to: 'none'
 version: 2.1.0+3
 
@@ -9,15 +9,18 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   # Core audio (mobile)
-  permission_handler: ^11.3.1
   record: ^6.0.0
   pitch_detector_dart: ^0.0.7
   fftea: ^1.5.0
   flutter_pcm_sound: ^3.3.3
-  
+
   # Utilities
   collection: ^1.18.0
+  intl: any
+  package_info_plus: ^8.0.0
   shared_preferences: ^2.2.2
   # Web support
   web: ^1.1.0
@@ -30,7 +33,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
+  generate: true
+
   assets:
     - assets/icon/
 
@@ -39,6 +43,10 @@ flutter_launcher_icons:
   ios: true
   macos:
     generate: true
+    # macOS does NOT mask the icon, so it needs the rounded squircle baked in
+    # with a transparent margin. iOS/Android supply their own mask and Apple
+    # rejects any alpha channel in the 1024px marketing icon.
+    image_path: "assets/icon/app_icon_macos.png"
   windows:
     generate: true
   linux:
@@ -51,3 +59,6 @@ flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
   min_sdk_android: 23
   adaptive_icon_background: "#0A0A0A"
+  # Apple rejects any alpha channel in the 1024px marketing icon (ITMS-90717),
+  # even a fully-opaque one. Belt and braces alongside the RGB master.
+  remove_alpha_ios: true

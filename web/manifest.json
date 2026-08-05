@@ -1,6 +1,6 @@
 {
-    "name": "Flutter Pro Tuner",
-    "short_name": "Tuner",
+    "name": "CrispTuner",
+    "short_name": "CrispTuner",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0A0A0A",
@@ -8,7 +8,10 @@
     "description": "A professional instrument tuner with pitch detection, FFT visualization, and reference tone generation.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
-    "categories": ["music", "utilities"],
+    "categories": [
+        "music",
+        "utilities"
+    ],
     "icons": [
         {
             "src": "icons/Icon-192.png",

@@ -29,7 +29,30 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter test --update-goldens
+      # Golden images are host-renderer specific, so they are verified in the
+      # macOS job below. This previously ran `--update-goldens`, which silently
+      # REGENERATED the images every run — the golden tests could never fail.
+      - run: flutter test -x golden
+
+  test-goldens:
+    name: Test (goldens, macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # No --update-goldens: this must compare against the checked-in PNGs.
+      - run: flutter test -t golden
+      - name: Upload golden diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures
+          path: test/failures/
+          if-no-files-found: ignore
 
   build-android:
     name: Build Android

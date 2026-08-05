@@ -1,25 +1,171 @@
 {
   "@@locale": "en",
-  "appTitle": "Flutter Pro Tuner",
+
+  "appTitle": "CrispTuner",
+  "@appTitle": {
+    "description": "Application name, shown in the title bar and task switcher"
+  },
+
   "startTuning": "Start Tuning",
-  "listening": "Listening...",
+  "@startTuning": {
+    "description": "Idle status shown before listening starts"
+  },
+  "listening": "Listening…",
+  "@listening": {
+    "description": "Status shown while the microphone is active but no note is detected"
+  },
   "inTune": "In Tune ✓",
+  "@inTune": {
+    "description": "Status shown when the detected pitch is within 5 cents of the target"
+  },
   "tooSharp": "Too Sharp ↑",
+  "@tooSharp": {
+    "description": "Status shown when the detected pitch is above the target"
+  },
   "tooFlat": "Too Flat ↓",
+  "@tooFlat": {
+    "description": "Status shown when the detected pitch is below the target"
+  },
   "playing": "Playing {note}",
   "@playing": {
+    "description": "Status shown while a reference tone is sounding",
     "placeholders": {
       "note": {
-        "type": "String"
+        "type": "String",
+        "example": "A"
       }
     }
   },
   "micPermissionDenied": "Microphone permission denied",
+  "@micPermissionDenied": {
+    "description": "Status shown when the user declined microphone access"
+  },
+
   "pitchHistory": "Pitch History",
   "frequencySpectrum": "Frequency Spectrum",
-  "a4Frequency": "A4 Frequency",
-  "guitar": "Guitar",
-  "cello": "Cello",
-  "bass": "Bass",
-  "violin": "Violin"
+
+  "hertzValue": "{hz} Hz",
+  "@hertzValue": {
+    "description": "A frequency reading, e.g. 440.00 Hz",
+    "placeholders": {
+      "hz": {
+        "type": "String",
+        "example": "440.00"
+      }
+    }
+  },
+  "a4Label": "A4: {hz} Hz",
+  "@a4Label": {
+    "description": "Label above the A4 concert-pitch slider",
+    "placeholders": {
+      "hz": {
+        "type": "String",
+        "example": "440.0"
+      }
+    }
+  },
+  "a4ReferenceFrequency": "A4 reference frequency",
+  "@a4ReferenceFrequency": {
+    "description": "Accessibility label for the A4 slider"
+  },
+
+  "instrumentGuitar": "Guitar",
+  "instrumentCello": "Cello",
+  "instrumentBass": "Bass",
+  "instrumentViolin": "Violin",
+  "instrumentUkulele": "Ukulele",
+  "instrumentMandolin": "Mandolin",
+
+  "defaultMicrophone": "Default mic",
+  "selectMicrophone": "Select microphone input",
+
+  "noNoteDetected": "No note detected. {status}",
+  "@noNoteDetected": {
+    "description": "Accessibility live-region text when nothing is detected",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "Listening…"
+      }
+    }
+  },
+  "detectedNote": "Detected note: {note}. {status}",
+  "@detectedNote": {
+    "description": "Accessibility live-region text announcing the detected note",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "A"
+      },
+      "status": {
+        "type": "String",
+        "example": "In Tune ✓"
+      }
+    }
+  },
+  "tuningMeterLabel": "Tuning meter: {cents} cents",
+  "@tuningMeterLabel": {
+    "description": "Accessibility label for the cents deviation meter",
+    "placeholders": {
+      "cents": {
+        "type": "String",
+        "example": "-12"
+      }
+    }
+  },
+  "playReferenceTone": "Play reference tone {note}",
+  "@playReferenceTone": {
+    "description": "Accessibility label for a string's play button",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "A"
+      }
+    }
+  },
+  "stopReferenceTone": "Stop playing {note}",
+  "@stopReferenceTone": {
+    "description": "Accessibility label for a string's play button while sounding",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "A"
+      }
+    }
+  },
+  "startTuningButton": "Start tuning",
+  "stopTuningButton": "Stop tuning",
+
+  "about": "About",
+  "@about": {
+    "description": "Tooltip and title for the About screen"
+  },
+  "aboutTitle": "About CrispTuner",
+  "aboutTagline": "Precise chromatic tuner for six instruments",
+  "aboutServiceProvider": "Service Provider",
+  "aboutLicense": "License",
+  "aboutLicenseBody": "CrispTuner is licensed under the MIT License.\n\nYou are free to use, modify and distribute this software for any purpose, including commercial use.",
+  "aboutComponents": "Open Source Components",
+  "aboutComponentsIntro": "CrispTuner is built on these open source packages. The full license texts are available under “Open Source Licenses” below.",
+  "aboutHowItWorks": "How It Works",
+  "aboutHowItWorksBody": "Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.",
+  "aboutPrivacy": "Privacy",
+  "aboutPrivacyBody": "Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.",
+  "aboutPrivacyPolicyLink": "Read the full privacy policy",
+  "aboutDisclaimer": "Disclaimer",
+  "aboutDisclaimerBody": "This software is provided “as is”, without warranty of any kind. The authors are not liable for any damages arising from the use of this software.",
+  "aboutSourceCode": "Source Code",
+  "aboutContributions": "Contributions welcome. Please open an issue first for major changes.",
+  "aboutOpenSourceLicenses": "Open Source Licenses",
+  "aboutCopied": "Copied to clipboard",
+  "visualizationLabel": "{label} visualization",
+  "@visualizationLabel": {
+    "description": "Accessibility label for a chart",
+    "placeholders": {
+      "label": {
+        "type": "String",
+        "example": "Pitch History"
+      }
+    }
+  }
 }

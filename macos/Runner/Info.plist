@@ -28,5 +28,17 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Without this key macOS denies microphone access outright, so pitch
+	     detection could never start. Flutter's macOS template omits it. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CrispTuner listens through the microphone to detect the pitch of your instrument. Audio is analysed on your device and never recorded, stored or sent anywhere.</string>
+	<!-- Required by the Mac App Store: its absence is a hard validation
+	     rejection, not a warning. Flutter's template omits it. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<!-- Auto-answers export compliance; without it macOS uploads park at
+	     MISSING_EXPORT_COMPLIANCE and cannot be assigned to TestFlight. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

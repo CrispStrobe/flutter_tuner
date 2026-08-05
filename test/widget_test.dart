@@ -16,7 +16,7 @@ void main() {
     testWidgets('renders with correct title', (tester) async {
       await _setUpTestSize(tester);
       await tester.pumpWidget(const TunerApp());
-      expect(find.text('Flutter Pro Tuner'), findsOneWidget);
+      expect(find.text('CrispTuner'), findsOneWidget);
     });
 
     testWidgets('has dark theme', (tester) async {
@@ -24,6 +24,48 @@ void main() {
       await tester.pumpWidget(const TunerApp());
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
       expect(materialApp.theme?.brightness, Brightness.dark);
+    });
+
+    testWidgets('hides the debug banner (App Store screenshots)', (tester) async {
+      await _setUpTestSize(tester);
+      await tester.pumpWidget(const TunerApp());
+      final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+      expect(materialApp.debugShowCheckedModeBanner, isFalse);
+    });
+
+    testWidgets('declares both supported locales', (tester) async {
+      await _setUpTestSize(tester);
+      await tester.pumpWidget(const TunerApp());
+      final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+      final languages =
+          materialApp.supportedLocales.map((l) => l.languageCode).toList();
+      expect(languages, containsAll(<String>['en', 'de']));
+    });
+  });
+
+  group('Localization', () {
+    testWidgets('renders German strings under a de locale', (tester) async {
+      await _setUpTestSize(tester);
+      await tester.pumpWidget(const TunerApp());
+      // Force the German locale through the same delegates the app ships.
+      tester.platformDispatcher.localesTestValue = const [Locale('de')];
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Stimmen beginnen'), findsOneWidget);
+      expect(find.text('Tonhöhenverlauf'), findsOneWidget);
+      expect(find.text('Frequenzspektrum'), findsOneWidget);
+      expect(find.text('Gitarre'), findsOneWidget);
+    });
+
+    testWidgets('falls back to English for an unsupported locale', (tester) async {
+      await _setUpTestSize(tester);
+      await tester.pumpWidget(const TunerApp());
+      tester.platformDispatcher.localesTestValue = const [Locale('fr')];
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Start Tuning'), findsOneWidget);
     });
   });
 

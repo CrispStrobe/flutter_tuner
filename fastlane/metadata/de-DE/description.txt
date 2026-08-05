@@ -1,0 +1,21 @@
+CrispTuner ist ein schnelles, genaues chromatisches Stimmgerät für Gitarre, Bass, Geige, Cello, Ukulele und Mandoline.
+
+Die App hört über das Mikrofon mit, erkennt den gespielten Ton und zeigt auf den Cent genau, wie weit er daneben liegt – so sehen und hören Sie genau den Moment, in dem eine Saite sauber gestimmt ist.
+
+FUNKTIONEN
+
+• Tonhöhenerkennung in Echtzeit mit dem YIN-Algorithmus und einem Medianfilter, der die Anzeige ruhig hält statt zwischen den Frames zu springen.
+• Cent-genaue Stimmanzeige mit klarer Rückmeldung: gestimmt, zu hoch oder zu tief.
+• Live-Frequenzspektrum und Tonhöhenverlauf, damit Sie das Einschwingen eines Tons beobachten können.
+• Referenztöne für jede Saite des gewählten Instruments, erzeugt als saubere, phasenkontinuierliche Sinuswellen.
+• Sechs Instrumentenvorlagen: Gitarre, Bass, Geige, Cello, Ukulele und Mandoline.
+• Einstellbarer Kammerton von 415 Hz bis 465 Hz – für historische Instrumente, Ensembles und Orchester, die nicht auf 440 Hz stimmen.
+• Auswahl des Mikrofons, wenn mehrere Eingänge verfügbar sind.
+• Vollständige VoiceOver-Unterstützung – der erkannte Ton wird bei jeder Änderung angesagt.
+• Deutsch und Englisch.
+
+VON GRUND AUF PRIVAT
+
+CrispTuner erfasst nichts. Audio wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking. Die App stellt überhaupt keine Netzwerkverbindungen her.
+
+Ihr A4-Kammerton und das gewählte Instrument werden lokal gespeichert und stehen beim nächsten Start wieder bereit.

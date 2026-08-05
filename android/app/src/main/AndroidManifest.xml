@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     
     <application
-        android:label="Flutter Tuner"
+        android:label="CrispTuner"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -25,17 +25,40 @@ jobs:
       - run: flutter pub get
       - run: flutter build web --release --base-href=/
 
+      - name: Stage vercel.json into the deploy root
+        # `vercel deploy build/web` treats build/web as the project root, and
+        # Flutter does NOT copy the repo-root vercel.json there. Without this the
+        # SPA rewrite and the `Permissions-Policy: microphone=(self)` header are
+        # silently dropped — and a tuner that cannot reach the microphone is the
+        # whole app broken.
+        run: cp vercel.json build/web/vercel.json
+
       - name: Verify web output
         run: |
           test -f build/web/index.html
           test -f build/web/pcm_processor.js
+          test -f build/web/vercel.json
+          # The App Store listing points at this page; if it 404s, App Review
+          # rejects the submission.
+          test -f build/web/privacy.html
           echo "Web build OK — $(du -sh build/web | cut -f1)"
 
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
 
       - name: Deploy to Vercel
+        # The project is selected by VERCEL_ORG_ID/VERCEL_PROJECT_ID, which point
+        # at the `crisptuner` project aliased to https://crisptuner.vercel.app.
         run: vercel deploy build/web --prod --yes --token=${{ secrets.VERCEL_TOKEN }} --scope=crispstrobes-projects
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Verify the live site
+        run: |
+          set -euo pipefail
+          for path in "" "privacy.html"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 30 "https://crisptuner.vercel.app/$path")
+            echo "  $code  https://crisptuner.vercel.app/$path"
+            [ "$code" = "200" ] || { echo "::error::https://crisptuner.vercel.app/$path returned $code"; exit 1; }
+          done

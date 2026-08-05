@@ -14,6 +14,13 @@ class TunerEngine extends ChangeNotifier {
   Map<String, double> _standardPitches = {};
 
   final QueueList<double> _pitchHistory;
+  final int _historySize;
+
+  /// Immutable snapshot of [_pitchHistory], rebuilt only when the history
+  /// actually changes. Painters read this every frame, so allocating a fresh
+  /// copy per `build()` would churn the heap at display rate.
+  List<double> _pitchHistorySnapshot = const [];
+
   List<double> _fftMagnitudes = [];
 
   static const int fftSize = 2048;
@@ -22,9 +29,16 @@ class TunerEngine extends ChangeNotifier {
   // Pre-computed Hann window coefficients
   late final Float64List _hannWindow;
 
+  /// Scratch buffer for the windowed samples handed to the FFT. Reused across
+  /// calls — [computeFFT] runs at display rate on the audio callback path.
+  final Float64List _windowScratch = Float64List(fftSize);
+
   // Median filter buffer for pitch smoothing
   final QueueList<double> _pitchBuffer = QueueList<double>();
   static const int _medianFilterSize = 5;
+
+  /// Scratch buffer for the median filter's sort, sized to the filter window.
+  final Float64List _medianScratch = Float64List(_medianFilterSize);
 
   // Last detection result
   NoteDetectionResult? _lastResult;
@@ -58,6 +72,7 @@ class TunerEngine extends ChangeNotifier {
     int historySize = 100,
   })  : _a4Frequency = a4Frequency,
         _selectedInstrument = instrument,
+        _historySize = historySize,
         _pitchHistory = QueueList<double>(historySize) {
     // Pre-compute Hann window
     _hannWindow = Float64List(fftSize);
@@ -68,6 +83,7 @@ class TunerEngine extends ChangeNotifier {
     for (int i = 0; i < historySize; i++) {
       _pitchHistory.add(0);
     }
+    _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
     _recalculatePitches();
   }
 
@@ -76,7 +92,7 @@ class TunerEngine extends ChangeNotifier {
   double get a4Frequency => _a4Frequency;
   Instrument get selectedInstrument => _selectedInstrument;
   Map<String, double> get standardPitches => Map.unmodifiable(_standardPitches);
-  List<double> get pitchHistory => _pitchHistory.toList();
+  List<double> get pitchHistory => _pitchHistorySnapshot;
   List<double> get fftMagnitudes => _fftMagnitudes;
   NoteDetectionResult? get lastResult => _lastResult;
   List<String> get currentTuningStrings =>
@@ -127,9 +143,11 @@ class TunerEngine extends ChangeNotifier {
 
     final cents = computeCents(detectedPitch, targetFrequency);
 
-    // Update pitch history
-    if (_pitchHistory.length >= 100) _pitchHistory.removeFirst();
+    // Update pitch history — bounded by the configured size, not a literal,
+    // or a non-default historySize would grow without limit.
+    if (_pitchHistory.length >= _historySize) _pitchHistory.removeFirst();
     _pitchHistory.add(cents.clamp(-50, 50));
+    _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
 
     final status = _classifyTuning(cents);
 
@@ -152,8 +170,19 @@ class TunerEngine extends ChangeNotifier {
     }
     if (_pitchBuffer.length < 3) return rawPitch;
 
-    final sorted = _pitchBuffer.toList()..sort();
-    return sorted[sorted.length ~/ 2];
+    // Insertion-sort into the reusable scratch buffer. The window is 5 samples,
+    // so this beats allocating and sorting a fresh list on every audio callback.
+    final int n = _pitchBuffer.length;
+    for (int i = 0; i < n; i++) {
+      final double value = _pitchBuffer[i];
+      int j = i - 1;
+      while (j >= 0 && _medianScratch[j] > value) {
+        _medianScratch[j + 1] = _medianScratch[j];
+        j--;
+      }
+      _medianScratch[j + 1] = value;
+    }
+    return _medianScratch[n ~/ 2];
   }
 
   /// Convert raw PCM16 bytes to float samples.
@@ -169,21 +198,28 @@ class TunerEngine extends ChangeNotifier {
     return floatData;
   }
 
-  /// Run FFT with Hann windowing and return magnitudes (first 1/8 of bins — musically useful range).
+  /// Run FFT with Hann windowing and return magnitudes for the musically
+  /// useful range — the first quarter of the bins, i.e. up to ~5.5 kHz at a
+  /// 44.1 kHz sample rate. Everything above that is noise for a tuner.
   List<double> computeFFT(Float64List samples) {
     if (samples.length < fftSize) return [];
 
-    final windowed = List<double>.filled(fftSize, 0.0);
     for (int i = 0; i < fftSize; i++) {
-      windowed[i] = samples[i] * _hannWindow[i];
+      _windowScratch[i] = samples[i] * _hannWindow[i];
     }
 
-    final fftResult = _fft.realFft(windowed);
-    final magnitudes = fftResult.discardConjugates().magnitudes().toList();
+    final fftResult = _fft.realFft(_windowScratch);
+    final magnitudes = fftResult.discardConjugates().magnitudes();
 
-    // Only keep the first 1/8 of bins — up to ~2.7 kHz at 44100 sample rate
-    final usefulBins = magnitudes.length ~/ 4;
-    _fftMagnitudes = magnitudes.sublist(0, usefulBins);
+    // Copy out only the bins we display, in one pass — `.toList()` followed by
+    // `.sublist()` allocated the full spectrum then threw 3/4 of it away.
+    final int usefulBins = magnitudes.length ~/ 4;
+    final trimmed = List<double>.filled(usefulBins, 0.0);
+    for (int i = 0; i < usefulBins; i++) {
+      trimmed[i] = magnitudes[i];
+    }
+
+    _fftMagnitudes = trimmed;
     notifyListeners();
     return _fftMagnitudes;
   }
@@ -215,6 +251,7 @@ class TunerEngine extends ChangeNotifier {
     for (int i = 0; i < _pitchHistory.length; i++) {
       _pitchHistory[i] = 0;
     }
+    _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
     notifyListeners();
   }
 }
@@ -261,12 +298,5 @@ class NoteDetectionResult {
       case TuningStatus.idle:
         return '';
     }
-  }
-}
-
-extension StringExtension on String {
-  String capitalize() {
-    if (isEmpty) return this;
-    return "${this[0].toUpperCase()}${substring(1)}";
   }
 }

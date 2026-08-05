@@ -1,25 +1,59 @@
 {
   "@@locale": "de",
-  "appTitle": "Flutter Pro Tuner",
+
+  "appTitle": "CrispTuner",
+
   "startTuning": "Stimmen beginnen",
-  "listening": "Zuhören...",
+  "listening": "Höre zu…",
   "inTune": "Gestimmt ✓",
   "tooSharp": "Zu hoch ↑",
   "tooFlat": "Zu tief ↓",
-  "playing": "{note} wird gespielt",
-  "@playing": {
-    "placeholders": {
-      "note": {
-        "type": "String"
-      }
-    }
-  },
-  "micPermissionDenied": "Mikrofonberechtigung verweigert",
+  "playing": "{note} erklingt",
+  "micPermissionDenied": "Mikrofonzugriff verweigert",
+
   "pitchHistory": "Tonhöhenverlauf",
   "frequencySpectrum": "Frequenzspektrum",
-  "a4Frequency": "A4-Frequenz",
-  "guitar": "Gitarre",
-  "cello": "Cello",
-  "bass": "Bass",
-  "violin": "Geige"
+
+  "hertzValue": "{hz} Hz",
+  "a4Label": "A4: {hz} Hz",
+  "a4ReferenceFrequency": "A4-Referenzfrequenz",
+
+  "instrumentGuitar": "Gitarre",
+  "instrumentCello": "Cello",
+  "instrumentBass": "Bass",
+  "instrumentViolin": "Geige",
+  "instrumentUkulele": "Ukulele",
+  "instrumentMandolin": "Mandoline",
+
+  "defaultMicrophone": "Standardmikrofon",
+  "selectMicrophone": "Mikrofoneingang wählen",
+
+  "noNoteDetected": "Kein Ton erkannt. {status}",
+  "detectedNote": "Erkannter Ton: {note}. {status}",
+  "tuningMeterLabel": "Stimmanzeige: {cents} Cent",
+  "playReferenceTone": "Referenzton {note} abspielen",
+  "stopReferenceTone": "Wiedergabe von {note} stoppen",
+  "startTuningButton": "Stimmen starten",
+  "stopTuningButton": "Stimmen stoppen",
+
+  "about": "Über",
+  "aboutTitle": "Über CrispTuner",
+  "aboutTagline": "Präzises chromatisches Stimmgerät für sechs Instrumente",
+  "aboutServiceProvider": "Diensteanbieter",
+  "aboutLicense": "Lizenz",
+  "aboutLicenseBody": "CrispTuner steht unter der MIT-Lizenz.\n\nSie dürfen diese Software zu jedem Zweck frei verwenden, verändern und weitergeben, auch kommerziell.",
+  "aboutComponents": "Open-Source-Komponenten",
+  "aboutComponentsIntro": "CrispTuner baut auf diesen Open-Source-Paketen auf. Die vollständigen Lizenztexte finden Sie unten unter „Open-Source-Lizenzen“.",
+  "aboutHowItWorks": "Funktionsweise",
+  "aboutHowItWorksBody": "Das Mikrofonsignal wird als 16-Bit-PCM mit 44,1 kHz aufgenommen. Jeder Block von 2048 Samples wird mit dem YIN-Algorithmus auf seine Tonhöhe untersucht und anschließend durch einen Medianfilter über 5 Werte geglättet, damit die Anzeige ruhig bleibt. Das Ergebnis wird dem nächstgelegenen Ton für Ihren Kammerton zugeordnet und die Abweichung in Cent angezeigt. Parallel dazu speist eine Hann-gefensterte FFT die Spektrumanzeige.",
+  "aboutPrivacy": "Datenschutz",
+  "aboutPrivacyBody": "Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking; die App stellt überhaupt keine Netzwerkverbindungen her.\n\nGespeichert werden lokal nur Ihr A4-Kammerton und das gewählte Instrument, damit sie beim nächsten Start erhalten bleiben. Beim Deinstallieren werden sie entfernt.",
+  "aboutPrivacyPolicyLink": "Vollständige Datenschutzerklärung lesen",
+  "aboutDisclaimer": "Haftungsausschluss",
+  "aboutDisclaimerBody": "Diese Software wird „wie besehen“ und ohne jegliche Gewährleistung bereitgestellt. Die Autoren haften nicht für Schäden, die aus der Nutzung dieser Software entstehen.",
+  "aboutSourceCode": "Quellcode",
+  "aboutContributions": "Beiträge sind willkommen. Bitte eröffnen Sie vor größeren Änderungen zuerst ein Issue.",
+  "aboutOpenSourceLicenses": "Open-Source-Lizenzen",
+  "aboutCopied": "In die Zwischenablage kopiert",
+  "visualizationLabel": "Visualisierung: {label}"
 }
