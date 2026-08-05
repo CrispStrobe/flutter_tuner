@@ -66,61 +66,72 @@ class AudioService implements stub.AudioService {
 }
 
 class ToneGeneratorService implements stub.ToneGeneratorService {
+  static const int _sampleRate = 44100;
+  static const int _amplitude = 16000;
+  static const int _framesPerFeed = 2000;
+
   bool _isInitialized = false;
   bool _isPlaying = false;
-  int _currentNote = -1;
+
+  /// The exact frequency requested, in Hz. Must NOT be quantised to a MIDI
+  /// note: the user can retune A4 anywhere in 415–465 Hz, and rounding to the
+  /// nearest equal-tempered semitone would silently play the 440 Hz-based
+  /// pitch instead of the calibrated one.
+  double _frequency = 0.0;
   double _phase = 0.0;
+
+  /// Reused across feed callbacks, which fire continuously while a tone sounds.
+  final Int16List _feedBuffer = Int16List(_framesPerFeed);
 
   @override
   Future<void> init() async {
     if (_isInitialized) return;
     try {
-      await FlutterPcmSound.setup(sampleRate: 44100, channelCount: 1);
+      await FlutterPcmSound.setup(sampleRate: _sampleRate, channelCount: 1);
       await FlutterPcmSound.setFeedThreshold(4000);
       _isInitialized = true;
-    } catch (e) {
-      // Failed to initialize tone generator
+    } catch (_) {
+      // Audio output unavailable on this device — reference tones stay silent
+      // but pitch detection is unaffected, so this is not fatal.
     }
   }
 
   @override
   void playNote(double frequency) {
-    if (!_isInitialized) return;
-    _currentNote = (69 + 12 * (math.log(frequency / 440.0) / math.log(2))).round();
+    if (!_isInitialized || frequency <= 0) return;
+    _frequency = frequency;
     _phase = 0.0;
     if (!_isPlaying) {
       _isPlaying = true;
       FlutterPcmSound.setFeedCallback(_onFeed);
-      _startFeeding();
+      _onFeed(0);
     }
   }
 
-  void _startFeeding() => _onFeed(0);
-
-  void _onFeed(int remainingFrames) async {
-    if (!_isPlaying || _currentNote < 0) return;
-    final frequency = 440.0 * math.pow(2, (_currentNote - 69) / 12.0);
-    final samples = _generateSineWave(frequency, 2000);
-    await FlutterPcmSound.feed(PcmArrayInt16.fromList(samples));
+  void _onFeed(int remainingFrames) {
+    if (!_isPlaying || _frequency <= 0) return;
+    _fillSineWave();
+    // Fire-and-forget: the plugin calls back for more when it drains. A failed
+    // feed just means silence, so swallow it rather than raising an unhandled
+    // async error from an audio callback.
+    FlutterPcmSound.feed(PcmArrayInt16(bytes: _feedBuffer.buffer.asByteData()))
+        .catchError((_) {});
   }
 
-  List<int> _generateSineWave(double frequency, int numSamples) {
-    final samples = <int>[];
-    const sampleRate = 44100;
-    const amplitude = 16000;
-    for (int i = 0; i < numSamples; i++) {
-      final value = (amplitude * math.sin(_phase)).toInt();
-      samples.add(value);
-      _phase += 2 * math.pi * frequency / sampleRate;
+  /// Fill [_feedBuffer] with a phase-continuous sine at [_frequency].
+  void _fillSineWave() {
+    final double phaseStep = 2 * math.pi * _frequency / _sampleRate;
+    for (int i = 0; i < _framesPerFeed; i++) {
+      _feedBuffer[i] = (_amplitude * math.sin(_phase)).toInt();
+      _phase += phaseStep;
       if (_phase > 2 * math.pi) _phase -= 2 * math.pi;
     }
-    return samples;
   }
 
   @override
   void stopNote() {
     _isPlaying = false;
-    _currentNote = -1;
+    _frequency = 0.0;
     _phase = 0.0;
   }
 

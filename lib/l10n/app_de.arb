@@ -1,25 +1,39 @@
 {
   "@@locale": "de",
-  "appTitle": "Flutter Pro Tuner",
+
+  "appTitle": "CrispTuner",
+
   "startTuning": "Stimmen beginnen",
-  "listening": "Zuhören...",
+  "listening": "Höre zu…",
   "inTune": "Gestimmt ✓",
   "tooSharp": "Zu hoch ↑",
   "tooFlat": "Zu tief ↓",
-  "playing": "{note} wird gespielt",
-  "@playing": {
-    "placeholders": {
-      "note": {
-        "type": "String"
-      }
-    }
-  },
-  "micPermissionDenied": "Mikrofonberechtigung verweigert",
+  "playing": "{note} erklingt",
+  "micPermissionDenied": "Mikrofonzugriff verweigert",
+
   "pitchHistory": "Tonhöhenverlauf",
   "frequencySpectrum": "Frequenzspektrum",
-  "a4Frequency": "A4-Frequenz",
-  "guitar": "Gitarre",
-  "cello": "Cello",
-  "bass": "Bass",
-  "violin": "Geige"
+
+  "hertzValue": "{hz} Hz",
+  "a4Label": "A4: {hz} Hz",
+  "a4ReferenceFrequency": "A4-Referenzfrequenz",
+
+  "instrumentGuitar": "Gitarre",
+  "instrumentCello": "Cello",
+  "instrumentBass": "Bass",
+  "instrumentViolin": "Geige",
+  "instrumentUkulele": "Ukulele",
+  "instrumentMandolin": "Mandoline",
+
+  "defaultMicrophone": "Standardmikrofon",
+  "selectMicrophone": "Mikrofoneingang wählen",
+
+  "noNoteDetected": "Kein Ton erkannt. {status}",
+  "detectedNote": "Erkannter Ton: {note}. {status}",
+  "tuningMeterLabel": "Stimmanzeige: {cents} Cent",
+  "playReferenceTone": "Referenzton {note} abspielen",
+  "stopReferenceTone": "Wiedergabe von {note} stoppen",
+  "startTuningButton": "Stimmen starten",
+  "stopTuningButton": "Stimmen stoppen",
+  "visualizationLabel": "Visualisierung: {label}"
 }

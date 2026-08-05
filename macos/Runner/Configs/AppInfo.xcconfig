@@ -5,10 +5,15 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = flutter_tuner
+// NOTE: this also names the built bundle (CrispTuner.app) — the release
+// workflow packages that exact filename.
+PRODUCT_NAME = CrispTuner
 
-// The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.flutterTuner
+// The application's bundle identifier.
+// Deliberately identical to the iOS bundle id, so App Store Connect serves both
+// platforms from ONE app record — creating an app record is one of the few
+// steps Apple blocks via the API.
+PRODUCT_BUNDLE_IDENTIFIER = com.crispstrobe.CrispTuner
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2025 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Christian Ströbele. All rights reserved.

@@ -1,0 +1,21 @@
+CrispTuner is a fast, accurate chromatic tuner for guitar, bass, violin, cello, ukulele and mandolin.
+
+It listens through your microphone, detects the note you are playing and shows exactly how far off you are — in cents — so you can hear and see the moment a string lands in tune.
+
+FEATURES
+
+• Real-time pitch detection using the YIN algorithm, with a median filter that keeps the reading steady instead of jittering between frames.
+• Cent-accurate tuning meter with a clear in-tune / too sharp / too flat readout.
+• Live frequency spectrum and pitch-history graphs, so you can watch a note settle.
+• Reference tones for every string of the selected instrument, generated as clean phase-continuous sine waves.
+• Six instrument presets: guitar, bass, violin, cello, ukulele and mandolin.
+• Adjustable concert pitch from 415 Hz to 465 Hz, for period instruments, ensembles and orchestras that do not tune to 440.
+• Choose which microphone to use when more than one input is available.
+• Full VoiceOver support — the detected note is announced as it changes.
+• English and German.
+
+PRIVATE BY DESIGN
+
+CrispTuner collects nothing. Audio is analysed on your device, in real time, and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The app makes no network requests at all.
+
+Your A4 setting and chosen instrument are saved locally so they are there next time you open the app.

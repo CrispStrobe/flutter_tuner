@@ -1,3 +1,6 @@
+@Tags(<String>['golden'])
+library;
+
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,8 +8,13 @@ import 'package:flutter_tuner/main.dart';
 
 /// Golden tests for FFTPainter and PitchHistoryPainter.
 ///
-/// Run with: flutter test --update-goldens test/golden_painter_test.dart
-/// Then verify the generated images in test/goldens/ visually.
+/// Golden images are rasterised by Skia and differ subtly between host
+/// platforms, so these are tagged `golden` and the checked-in images are the
+/// macOS renders. CI runs them on `macos-latest` (`flutter test -t golden`)
+/// and excludes them elsewhere (`flutter test -x golden`).
+///
+/// After an intentional painter change, re-record and eyeball the diff:
+///   flutter test --update-goldens -t golden
 void main() {
   Widget buildPainterWidget(CustomPainter painter, {Key? key}) {
     return MaterialApp(

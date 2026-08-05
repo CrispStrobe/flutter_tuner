@@ -1,0 +1,54 @@
+name: GitHub Pages (mirror)
+
+# Publishes the web build to GitHub Pages as a SECOND public home for the app
+# and, importantly, for the privacy policy:
+#   https://crispstrobe.github.io/flutter_tuner/privacy.html
+#
+# The App Store listing points at the Vercel URL; this is the fallback, so an
+# outage or a Vercel project change can never leave App Review looking at a dead
+# privacy-policy link. (This repo is public, so Pages is reachable by reviewers.)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a half-finished publish; just don't run two at once.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # Pages serves this repo at /flutter_tuner/, so the base href must match
+      # or every asset request 404s.
+      - run: flutter build web --release --base-href=/flutter_tuner/
+      - name: Verify the privacy policy made it into the output
+        run: test -f build/web/privacy.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,6 @@
+# Declares the tags used by the test suite so `flutter test -t/-x <tag>` works
+# without warning about an unknown tag.
+tags:
+  golden:
+    # Golden images are host-renderer specific; the checked-in PNGs are macOS
+    # renders. Run with `-t golden` on macOS, `-x golden` everywhere else.

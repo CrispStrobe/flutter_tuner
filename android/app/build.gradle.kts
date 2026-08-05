@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flutter_tuner"
+    namespace = "com.crispstrobe.crisptuner"
     compileSdk = 36  // Changed from 34 to 36
 
     compileOptions {
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.flutter_tuner"
+        applicationId = "com.crispstrobe.crisptuner"
         minSdk = flutter.minSdkVersion
         targetSdk = 36  // Also update targetSdk to 36
         versionCode = 2

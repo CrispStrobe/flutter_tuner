@@ -1,15 +1,24 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_service.dart';
+import 'l10n/app_localizations.dart';
 import 'tuner_engine.dart';
 
 void main() {
   runApp(const TunerApp());
 }
+
+/// What the status line is currently reporting.
+///
+/// Held as an enum rather than a display string so that comparisons stay
+/// correct in every locale — the UI previously tested `_status == 'In Tune ✓'`,
+/// which silently stops matching the moment the text is translated.
+enum TunerStatus { idle, listening, inTune, sharp, flat, playing, permissionDenied }
 
 class TunerApp extends StatelessWidget {
   const TunerApp({super.key});
@@ -17,7 +26,24 @@ class TunerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Tuner',
+      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
+      // The debug banner paints only under an assert, so release builds never
+      // showed it — but simulator builds are debug-only and App Store
+      // screenshots must not carry it.
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      // `supportedLocales` is generated in alphabetical order, so 'de' sits
+      // first and Flutter's default resolution would hand an unsupported
+      // locale (fr, ja, …) a German UI. English is the template locale.
+      localeResolutionCallback: (locale, supported) {
+        if (locale != null) {
+          for (final candidate in supported) {
+            if (candidate.languageCode == locale.languageCode) return candidate;
+          }
+        }
+        return const Locale('en');
+      },
       theme: ThemeData(
         brightness: Brightness.dark,
         primaryColor: Colors.deepOrange,
@@ -42,7 +68,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   final _pitchDetector = PitchDetector();
   final _engine = TunerEngine();
 
-  String _status = 'Start Tuning';
+  TunerStatus _status = TunerStatus.idle;
   bool _isListening = false;
   bool _wasListeningBeforePause = false;
   Timer? _silenceTimer;
@@ -137,45 +163,54 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _startCapture() async {
-    if (await _audioService.hasPermission()) {
+    if (!await _audioService.hasPermission()) {
+      if (mounted) setState(() => _status = TunerStatus.permissionDenied);
+      return;
+    }
+    try {
       // Refresh device list (labels become available after permission)
       await _refreshInputDevices();
       await _audioService.startListening(
         (data) => _processAudioData(data),
         deviceId: _selectedDeviceId,
       );
-      setState(() {
-        _isListening = true;
-        _status = 'Listening...';
-      });
-      _resetSilenceTimer();
-    } else {
-      setState(() => _status = 'Microphone permission denied');
+    } catch (_) {
+      // Capture can fail if the chosen device vanished or is held by another
+      // app. Report it as unavailable rather than leaving a stuck "Listening".
+      if (mounted) setState(() => _status = TunerStatus.permissionDenied);
+      return;
     }
+    if (!mounted) return;
+    setState(() {
+      _isListening = true;
+      _status = TunerStatus.listening;
+    });
+    _resetSilenceTimer();
   }
 
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
     _silenceTimer = Timer(const Duration(seconds: 2), () {
       if (mounted && _isListening) {
-        setState(() => _status = 'Listening...');
+        setState(() => _status = TunerStatus.listening);
       }
     });
   }
 
-  void _processAudioData(dynamic data) {
+  void _processAudioData(Uint8List data) {
     final floatData = _engine.pcmToFloat(data);
     if (floatData.length < TunerEngine.fftSize) return;
 
-    // Pitch detection (async, fire-and-forget)
-    _pitchDetector.getPitchFromFloatBuffer(floatData.toList()).then((result) {
+    // Pitch detection (async, fire-and-forget). Float64List already implements
+    // List<double>, so no copy is needed here — this runs per audio callback.
+    _pitchDetector.getPitchFromFloatBuffer(floatData).then((result) {
       if (result.pitched && result.probability > 0.9) {
         final smoothed = _engine.smoothPitch(result.pitch);
         // detectNote calls notifyListeners — UI rebuilds via ListenableBuilder
         final detection = _engine.detectNote(smoothed);
         _resetSilenceTimer();
         if (mounted) {
-          setState(() => _status = detection.statusText);
+          setState(() => _status = _statusFromTuning(detection.status));
         }
       }
     });
@@ -195,7 +230,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _isListening = false;
-        _status = 'Start Tuning';
+        _status = TunerStatus.idle;
       });
       _engine.reset();
     }
@@ -212,7 +247,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         setState(() {
           _currentlyPlayingNote = note;
           _isGeneratingTone = true;
-          _status = 'Playing ${TunerEngine.stripOctave(note)}';
+          _status = TunerStatus.playing;
         });
       }
     }
@@ -223,8 +258,59 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     setState(() {
       _currentlyPlayingNote = null;
       _isGeneratingTone = false;
-      _status = 'Start Tuning';
+      _status = TunerStatus.idle;
     });
+  }
+
+  static TunerStatus _statusFromTuning(TuningStatus status) {
+    switch (status) {
+      case TuningStatus.inTune:
+        return TunerStatus.inTune;
+      case TuningStatus.sharp:
+        return TunerStatus.sharp;
+      case TuningStatus.flat:
+        return TunerStatus.flat;
+      case TuningStatus.idle:
+        return TunerStatus.listening;
+    }
+  }
+
+  /// The localized text for the current [_status].
+  String _statusText(AppLocalizations l10n) {
+    switch (_status) {
+      case TunerStatus.idle:
+        return l10n.startTuning;
+      case TunerStatus.listening:
+        return l10n.listening;
+      case TunerStatus.inTune:
+        return l10n.inTune;
+      case TunerStatus.sharp:
+        return l10n.tooSharp;
+      case TunerStatus.flat:
+        return l10n.tooFlat;
+      case TunerStatus.playing:
+        return l10n.playing(
+            TunerEngine.stripOctave(_currentlyPlayingNote ?? ''));
+      case TunerStatus.permissionDenied:
+        return l10n.micPermissionDenied;
+    }
+  }
+
+  static String _instrumentName(AppLocalizations l10n, Instrument instrument) {
+    switch (instrument) {
+      case Instrument.guitar:
+        return l10n.instrumentGuitar;
+      case Instrument.cello:
+        return l10n.instrumentCello;
+      case Instrument.bass:
+        return l10n.instrumentBass;
+      case Instrument.violin:
+        return l10n.instrumentViolin;
+      case Instrument.ukulele:
+        return l10n.instrumentUkulele;
+      case Instrument.mandolin:
+        return l10n.instrumentMandolin;
+    }
   }
 
   @override
@@ -236,6 +322,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildScaffold(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final result = _engine.lastResult;
     final displayNote = result?.displayNote ?? '';
     final pitch = result?.pitch ?? 0.0;
@@ -245,7 +332,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Flutter Pro Tuner', style: TextStyle(fontSize: 18)),
+        title: Text(l10n.appTitle, style: const TextStyle(fontSize: 18)),
         centerTitle: true,
         backgroundColor: const Color(0x4D000000),
         elevation: 0,
@@ -274,8 +361,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               return SingleChildScrollView(
                 padding: EdgeInsets.all(isWide ? 24.0 : 12.0),
                 child: isWide
-                    ? _buildWideLayout(displayNote, pitch, cents, note, meterWidth, constraints)
-                    : _buildNarrowLayout(displayNote, pitch, cents, note, meterWidth),
+                    ? _buildWideLayout(l10n, displayNote, pitch, cents, note, meterWidth)
+                    : _buildNarrowLayout(l10n, displayNote, pitch, cents, note, meterWidth),
               );
             },
           ),
@@ -286,26 +373,27 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   /// Phone layout — single column, compact.
   Widget _buildNarrowLayout(
+    AppLocalizations l10n,
     String displayNote, double pitch, double cents, String note, double meterWidth,
   ) {
     return Column(
       children: [
-        _buildNoteDisplay(displayNote),
+        _buildNoteDisplay(l10n, displayNote),
         const SizedBox(height: 12),
-        _buildTuningMeter(meterWidth, cents),
+        _buildTuningMeter(l10n, meterWidth, cents),
         const SizedBox(height: 4),
-        Text('${pitch.toStringAsFixed(2)} Hz',
+        Text(l10n.hertzValue(pitch.toStringAsFixed(2)),
             style: const TextStyle(fontSize: 14, color: Colors.white60)),
         const SizedBox(height: 12),
-        _buildCompactStringIndicators(note),
+        _buildCompactStringIndicators(l10n, note),
         const SizedBox(height: 12),
-        _buildVisualizationRow(),
+        _buildVisualizationRow(l10n),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _buildCompactSettings()),
+            Expanded(child: _buildCompactSettings(l10n)),
             const SizedBox(width: 12),
-            _buildCompactMicButton(),
+            _buildCompactMicButton(l10n),
           ],
         ),
       ],
@@ -314,19 +402,20 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   /// Tablet / desktop layout — two-column with larger visualizations.
   Widget _buildWideLayout(
+    AppLocalizations l10n,
     String displayNote, double pitch, double cents, String note,
-    double meterWidth, BoxConstraints constraints,
+    double meterWidth,
   ) {
     return Column(
       children: [
-        _buildNoteDisplay(displayNote, scaleFactor: 1.3),
+        _buildNoteDisplay(l10n, displayNote, scaleFactor: 1.3),
         const SizedBox(height: 16),
-        _buildTuningMeter(meterWidth, cents),
+        _buildTuningMeter(l10n, meterWidth, cents),
         const SizedBox(height: 4),
-        Text('${pitch.toStringAsFixed(2)} Hz',
+        Text(l10n.hertzValue(pitch.toStringAsFixed(2)),
             style: const TextStyle(fontSize: 16, color: Colors.white60)),
         const SizedBox(height: 16),
-        _buildCompactStringIndicators(note),
+        _buildCompactStringIndicators(l10n, note),
         const SizedBox(height: 16),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,14 +426,16 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               child: Column(
                 children: [
                   _buildVisualizationCard(
-                    'Pitch History',
+                    l10n.pitchHistory,
                     PitchHistoryPainter(_engine.pitchHistory, Colors.deepOrange),
+                    l10n,
                     height: 140,
                   ),
                   const SizedBox(height: 12),
                   _buildVisualizationCard(
-                    'Frequency Spectrum',
+                    l10n.frequencySpectrum,
                     FFTPainter(_engine.fftMagnitudes, Colors.greenAccent),
+                    l10n,
                     height: 140,
                   ),
                 ],
@@ -356,9 +447,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               flex: 2,
               child: Column(
                 children: [
-                  _buildCompactSettings(),
+                  _buildCompactSettings(l10n),
                   const SizedBox(height: 16),
-                  _buildCompactMicButton(),
+                  _buildCompactMicButton(l10n),
                 ],
               ),
             ),
@@ -368,12 +459,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildNoteDisplay(String displayNote, {double scaleFactor = 1.0}) {
+  Widget _buildNoteDisplay(AppLocalizations l10n, String displayNote,
+      {double scaleFactor = 1.0}) {
+    final statusText = _statusText(l10n);
     return Semantics(
       liveRegion: true,
       label: displayNote.isEmpty
-          ? 'No note detected. $_status'
-          : 'Detected note: $displayNote. $_status',
+          ? l10n.noNoteDetected(statusText)
+          : l10n.detectedNote(displayNote, statusText),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -389,7 +482,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                 style: TextStyle(
                   fontSize: 72 * scaleFactor,
                   fontWeight: FontWeight.bold,
-                  color: _status == 'In Tune ✓' ? Colors.greenAccent : Colors.white,
+                  color: _status == TunerStatus.inTune
+                      ? Colors.greenAccent
+                      : Colors.white,
                   height: 1,
                 ),
               ),
@@ -397,36 +492,42 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           ),
           const SizedBox(width: 12),
           ExcludeSemantics(
-            child: Text(_status, style: TextStyle(fontSize: 16 * scaleFactor, color: _getStatusColor())),
+            child: Text(statusText,
+                style: TextStyle(
+                    fontSize: 16 * scaleFactor, color: _getStatusColor())),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildVisualizationRow() {
+  Widget _buildVisualizationRow(AppLocalizations l10n) {
     return Row(
       children: [
         Expanded(
           child: _buildVisualizationCard(
-            'Pitch History',
+            l10n.pitchHistory,
             PitchHistoryPainter(_engine.pitchHistory, Colors.deepOrange),
+            l10n,
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _buildVisualizationCard(
-            'Frequency Spectrum',
+            l10n.frequencySpectrum,
             FFTPainter(_engine.fftMagnitudes, Colors.greenAccent),
+            l10n,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildVisualizationCard(String label, CustomPainter painter, {double height = 100}) {
+  Widget _buildVisualizationCard(
+      String label, CustomPainter painter, AppLocalizations l10n,
+      {double height = 100}) {
     return Semantics(
-      label: '$label visualization',
+      label: l10n.visualizationLabel(label),
       excludeSemantics: true,
       child: Column(
         children: [
@@ -451,13 +552,22 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   Color _getStatusColor() {
-    if (_status == 'In Tune ✓') return Colors.greenAccent;
-    if (_status == 'Start Tuning' || _status == 'Listening...') return Colors.white70;
-    if (_isGeneratingTone) return Colors.cyanAccent;
-    return Colors.orangeAccent;
+    switch (_status) {
+      case TunerStatus.inTune:
+        return Colors.greenAccent;
+      case TunerStatus.idle:
+      case TunerStatus.listening:
+        return Colors.white70;
+      case TunerStatus.playing:
+        return Colors.cyanAccent;
+      case TunerStatus.sharp:
+      case TunerStatus.flat:
+      case TunerStatus.permissionDenied:
+        return Colors.orangeAccent;
+    }
   }
 
-  Widget _buildTuningMeter(double width, double cents) {
+  Widget _buildTuningMeter(AppLocalizations l10n, double width, double cents) {
     final clampedCents = cents.clamp(-50.0, 50.0);
     final meterPosition = clampedCents / 50.0;
     final leftMargin = meterPosition > 0 ? meterPosition * (width / 2 - 20) : 0.0;
@@ -465,7 +575,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     final statusColor = _getStatusColor();
 
     return Semantics(
-      label: 'Tuning meter: ${clampedCents.toStringAsFixed(0)} cents',
+      label: l10n.tuningMeterLabel(clampedCents.toStringAsFixed(0)),
       value: '${(meterPosition * 100).toStringAsFixed(0)}%',
       child: Container(
       width: width,
@@ -502,13 +612,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCompactStringIndicators(String currentNote) {
+  Widget _buildCompactStringIndicators(
+      AppLocalizations l10n, String currentNote) {
     final strings = _engine.currentTuningStrings;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: strings.map((stringNote) {
         final bool isCurrentNote = currentNote == stringNote;
-        final bool isInTune = isCurrentNote && _status == 'In Tune ✓';
+        final bool isInTune = isCurrentNote && _status == TunerStatus.inTune;
         final bool isPlayingThisTone = _currentlyPlayingNote == stringNote;
 
         return Column(
@@ -544,8 +655,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             Semantics(
               button: true,
               label: isPlayingThisTone
-                  ? 'Stop playing ${TunerEngine.stripOctave(stringNote)}'
-                  : 'Play reference tone ${TunerEngine.stripOctave(stringNote)}',
+                  ? l10n.stopReferenceTone(TunerEngine.stripOctave(stringNote))
+                  : l10n.playReferenceTone(TunerEngine.stripOctave(stringNote)),
               child: IconButton(
                 icon: Icon(isPlayingThisTone ? Icons.stop_circle : Icons.play_circle_outline, size: 24),
                 color: isPlayingThisTone ? Colors.cyanAccent : Colors.white70,
@@ -560,7 +671,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCompactSettings() {
+  Widget _buildCompactSettings(AppLocalizations l10n) {
     final bool isActionDisabled = _isListening || _isGeneratingTone;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -573,9 +684,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         mainAxisSize: MainAxisSize.min,
         children: [
           Semantics(
-            label: 'A4 reference frequency',
-            value: '${_engine.a4Frequency.toStringAsFixed(1)} Hz',
-            child: Text('A4: ${_engine.a4Frequency.toStringAsFixed(1)} Hz',
+            label: l10n.a4ReferenceFrequency,
+            value: l10n.hertzValue(_engine.a4Frequency.toStringAsFixed(1)),
+            child: Text(l10n.a4Label(_engine.a4Frequency.toStringAsFixed(1)),
                 style: const TextStyle(color: Colors.white, fontSize: 13)),
           ),
           SliderTheme(
@@ -627,14 +738,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             items: Instrument.values.map<DropdownMenuItem<Instrument>>((value) {
               return DropdownMenuItem<Instrument>(
                 value: value,
-                child: Text(value.name.capitalize(), style: const TextStyle(fontSize: 14)),
+                child: Text(_instrumentName(l10n, value),
+                    style: const TextStyle(fontSize: 14)),
               );
             }).toList(),
           ),
           if (_inputDevices.length > 1) ...[
             const SizedBox(height: 8),
             Semantics(
-              label: 'Select microphone input',
+              label: l10n.selectMicrophone,
               child: DropdownButtonFormField<String?>(
                 initialValue: _selectedDeviceId,
                 isDense: true,
@@ -661,9 +773,10 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                         setState(() => _selectedDeviceId = deviceId);
                       },
                 items: [
-                  const DropdownMenuItem<String?>(
+                  DropdownMenuItem<String?>(
                     value: null,
-                    child: Text('Default mic', style: TextStyle(fontSize: 12)),
+                    child: Text(l10n.defaultMicrophone,
+                        style: const TextStyle(fontSize: 12)),
                   ),
                   ..._inputDevices.map((d) => DropdownMenuItem<String?>(
                         value: d.id,
@@ -682,7 +795,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCompactMicButton() {
+  Widget _buildCompactMicButton(AppLocalizations l10n) {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -696,7 +809,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       ),
       child: Semantics(
         button: true,
-        label: _isListening ? 'Stop tuning' : 'Start tuning',
+        label: _isListening ? l10n.stopTuningButton : l10n.startTuningButton,
         child: ElevatedButton(
           onPressed: _toggleListening,
           style: ElevatedButton.styleFrom(

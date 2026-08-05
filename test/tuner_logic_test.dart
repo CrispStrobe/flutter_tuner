@@ -4,24 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tuner/tuner_engine.dart';
 
 void main() {
-  group('StringExtension.capitalize', () {
-    test('capitalizes a lowercase word', () {
-      expect('guitar'.capitalize(), 'Guitar');
-    });
-
-    test('returns already-capitalized word unchanged', () {
-      expect('Guitar'.capitalize(), 'Guitar');
-    });
-
-    test('handles single character', () {
-      expect('g'.capitalize(), 'G');
-    });
-
-    test('handles empty string', () {
-      expect(''.capitalize(), '');
-    });
-  });
-
   group('Instrument enum', () {
     test('has all expected instruments', () {
       expect(Instrument.values.length, 6);
@@ -265,6 +247,24 @@ void main() {
       final history = engine.pitchHistory;
       // The last entry should be the clamped cents value, not zero
       expect(history.last, isNot(0.0));
+    });
+
+    test('history stays bounded by the configured historySize', () {
+      // Regression: the bound was hardcoded to 100, so any engine built with a
+      // different historySize grew without limit on every detection.
+      final small = TunerEngine(historySize: 10);
+      for (int i = 0; i < 200; i++) {
+        small.detectNote(440.0 + i % 7);
+      }
+      expect(small.pitchHistory.length, 10);
+    });
+
+    test('history stays bounded at the default size too', () {
+      final defaultEngine = TunerEngine();
+      for (int i = 0; i < 250; i++) {
+        defaultEngine.detectNote(440.0 + i % 7);
+      }
+      expect(defaultEngine.pitchHistory.length, 100);
     });
   });
 
