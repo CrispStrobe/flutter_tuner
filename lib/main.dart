@@ -5,11 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'about_screen.dart';
 import 'audio_service.dart';
 import 'l10n/app_localizations.dart';
 import 'tuner_engine.dart';
 
 void main() {
+  // Adds CrispTuner's own MIT licence and the YIN citation to the registry;
+  // pub packages register themselves, but the app would otherwise be absent
+  // from its own licence page.
+  registerAppLicenses();
   runApp(const TunerApp());
 }
 
@@ -337,6 +342,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         backgroundColor: const Color(0x4D000000),
         elevation: 0,
         toolbarHeight: 48,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, size: 20),
+            tooltip: l10n.about,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const AboutScreen()),
+            ),
+          ),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(

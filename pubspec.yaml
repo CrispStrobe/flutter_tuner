@@ -20,6 +20,7 @@ dependencies:
   # Utilities
   collection: ^1.18.0
   intl: any
+  package_info_plus: ^8.0.0
   shared_preferences: ^2.2.2
   # Web support
   web: ^1.1.0

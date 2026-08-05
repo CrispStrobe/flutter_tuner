@@ -2,6 +2,8 @@ PODS:
   - Flutter (1.0.0)
   - flutter_pcm_sound (0.0.1):
     - Flutter
+  - package_info_plus (0.4.5):
+    - Flutter
   - record_ios (1.1.0):
     - Flutter
   - shared_preferences_foundation (0.0.1):
@@ -11,6 +13,7 @@ PODS:
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - flutter_pcm_sound (from `.symlinks/plugins/flutter_pcm_sound/ios`)
+  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
 
@@ -19,6 +22,8 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_pcm_sound:
     :path: ".symlinks/plugins/flutter_pcm_sound/ios"
+  package_info_plus:
+    :path: ".symlinks/plugins/package_info_plus/ios"
   record_ios:
     :path: ".symlinks/plugins/record_ios/ios"
   shared_preferences_foundation:
@@ -27,6 +32,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_pcm_sound: e9c2f6ce580eefcab2af46763f0354484d5c4ac8
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
   record_ios: f75fa1d57f840012775c0e93a38a7f3ceea1a374
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
 

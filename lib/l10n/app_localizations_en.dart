@@ -109,6 +109,69 @@ class AppLocalizationsEn extends AppLocalizations {
   String get stopTuningButton => 'Stop tuning';
 
   @override
+  String get about => 'About';
+
+  @override
+  String get aboutTitle => 'About CrispTuner';
+
+  @override
+  String get aboutTagline => 'Precise chromatic tuner for six instruments';
+
+  @override
+  String get aboutServiceProvider => 'Service Provider';
+
+  @override
+  String get aboutLicense => 'License';
+
+  @override
+  String get aboutLicenseBody =>
+      'CrispTuner is licensed under the MIT License.\n\nYou are free to use, modify and distribute this software for any purpose, including commercial use.';
+
+  @override
+  String get aboutComponents => 'Open Source Components';
+
+  @override
+  String get aboutComponentsIntro =>
+      'CrispTuner is built on these open source packages. The full license texts are available under “Open Source Licenses” below.';
+
+  @override
+  String get aboutHowItWorks => 'How It Works';
+
+  @override
+  String get aboutHowItWorksBody =>
+      'Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.';
+
+  @override
+  String get aboutPrivacy => 'Privacy';
+
+  @override
+  String get aboutPrivacyBody =>
+      'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.';
+
+  @override
+  String get aboutPrivacyPolicyLink => 'Read the full privacy policy';
+
+  @override
+  String get aboutDisclaimer => 'Disclaimer';
+
+  @override
+  String get aboutDisclaimerBody =>
+      'This software is provided “as is”, without warranty of any kind. The authors are not liable for any damages arising from the use of this software.';
+
+  @override
+  String get aboutSourceCode => 'Source Code';
+
+  @override
+  String get aboutContributions =>
+      'Contributions welcome. Please open an issue first for major changes.';
+
+  @override
+  String get aboutOpenSourceLicenses => 'Open Source Licenses';
+
+  @override
+  String get aboutCopied => 'Copied to clipboard';
+
+  @override
   String visualizationLabel(String label) {
     return '$label visualization';
   }

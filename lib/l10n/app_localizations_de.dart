@@ -109,6 +109,71 @@ class AppLocalizationsDe extends AppLocalizations {
   String get stopTuningButton => 'Stimmen stoppen';
 
   @override
+  String get about => 'Über';
+
+  @override
+  String get aboutTitle => 'Über CrispTuner';
+
+  @override
+  String get aboutTagline =>
+      'Präzises chromatisches Stimmgerät für sechs Instrumente';
+
+  @override
+  String get aboutServiceProvider => 'Diensteanbieter';
+
+  @override
+  String get aboutLicense => 'Lizenz';
+
+  @override
+  String get aboutLicenseBody =>
+      'CrispTuner steht unter der MIT-Lizenz.\n\nSie dürfen diese Software zu jedem Zweck frei verwenden, verändern und weitergeben, auch kommerziell.';
+
+  @override
+  String get aboutComponents => 'Open-Source-Komponenten';
+
+  @override
+  String get aboutComponentsIntro =>
+      'CrispTuner baut auf diesen Open-Source-Paketen auf. Die vollständigen Lizenztexte finden Sie unten unter „Open-Source-Lizenzen“.';
+
+  @override
+  String get aboutHowItWorks => 'Funktionsweise';
+
+  @override
+  String get aboutHowItWorksBody =>
+      'Das Mikrofonsignal wird als 16-Bit-PCM mit 44,1 kHz aufgenommen. Jeder Block von 2048 Samples wird mit dem YIN-Algorithmus auf seine Tonhöhe untersucht und anschließend durch einen Medianfilter über 5 Werte geglättet, damit die Anzeige ruhig bleibt. Das Ergebnis wird dem nächstgelegenen Ton für Ihren Kammerton zugeordnet und die Abweichung in Cent angezeigt. Parallel dazu speist eine Hann-gefensterte FFT die Spektrumanzeige.';
+
+  @override
+  String get aboutPrivacy => 'Datenschutz';
+
+  @override
+  String get aboutPrivacyBody =>
+      'Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking; die App stellt überhaupt keine Netzwerkverbindungen her.\n\nGespeichert werden lokal nur Ihr A4-Kammerton und das gewählte Instrument, damit sie beim nächsten Start erhalten bleiben. Beim Deinstallieren werden sie entfernt.';
+
+  @override
+  String get aboutPrivacyPolicyLink =>
+      'Vollständige Datenschutzerklärung lesen';
+
+  @override
+  String get aboutDisclaimer => 'Haftungsausschluss';
+
+  @override
+  String get aboutDisclaimerBody =>
+      'Diese Software wird „wie besehen“ und ohne jegliche Gewährleistung bereitgestellt. Die Autoren haften nicht für Schäden, die aus der Nutzung dieser Software entstehen.';
+
+  @override
+  String get aboutSourceCode => 'Quellcode';
+
+  @override
+  String get aboutContributions =>
+      'Beiträge sind willkommen. Bitte eröffnen Sie vor größeren Änderungen zuerst ein Issue.';
+
+  @override
+  String get aboutOpenSourceLicenses => 'Open-Source-Lizenzen';
+
+  @override
+  String get aboutCopied => 'In die Zwischenablage kopiert';
+
+  @override
   String visualizationLabel(String label) {
     return 'Visualisierung: $label';
   }

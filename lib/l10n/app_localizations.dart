@@ -266,6 +266,120 @@ abstract class AppLocalizations {
   /// **'Stop tuning'**
   String get stopTuningButton;
 
+  /// Tooltip and title for the About screen
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get about;
+
+  /// No description provided for @aboutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'About CrispTuner'**
+  String get aboutTitle;
+
+  /// No description provided for @aboutTagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Precise chromatic tuner for six instruments'**
+  String get aboutTagline;
+
+  /// No description provided for @aboutServiceProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Service Provider'**
+  String get aboutServiceProvider;
+
+  /// No description provided for @aboutLicense.
+  ///
+  /// In en, this message translates to:
+  /// **'License'**
+  String get aboutLicense;
+
+  /// No description provided for @aboutLicenseBody.
+  ///
+  /// In en, this message translates to:
+  /// **'CrispTuner is licensed under the MIT License.\n\nYou are free to use, modify and distribute this software for any purpose, including commercial use.'**
+  String get aboutLicenseBody;
+
+  /// No description provided for @aboutComponents.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Source Components'**
+  String get aboutComponents;
+
+  /// No description provided for @aboutComponentsIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'CrispTuner is built on these open source packages. The full license texts are available under “Open Source Licenses” below.'**
+  String get aboutComponentsIntro;
+
+  /// No description provided for @aboutHowItWorks.
+  ///
+  /// In en, this message translates to:
+  /// **'How It Works'**
+  String get aboutHowItWorks;
+
+  /// No description provided for @aboutHowItWorksBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.'**
+  String get aboutHowItWorksBody;
+
+  /// No description provided for @aboutPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy'**
+  String get aboutPrivacy;
+
+  /// No description provided for @aboutPrivacyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.'**
+  String get aboutPrivacyBody;
+
+  /// No description provided for @aboutPrivacyPolicyLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the full privacy policy'**
+  String get aboutPrivacyPolicyLink;
+
+  /// No description provided for @aboutDisclaimer.
+  ///
+  /// In en, this message translates to:
+  /// **'Disclaimer'**
+  String get aboutDisclaimer;
+
+  /// No description provided for @aboutDisclaimerBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This software is provided “as is”, without warranty of any kind. The authors are not liable for any damages arising from the use of this software.'**
+  String get aboutDisclaimerBody;
+
+  /// No description provided for @aboutSourceCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Source Code'**
+  String get aboutSourceCode;
+
+  /// No description provided for @aboutContributions.
+  ///
+  /// In en, this message translates to:
+  /// **'Contributions welcome. Please open an issue first for major changes.'**
+  String get aboutContributions;
+
+  /// No description provided for @aboutOpenSourceLicenses.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Source Licenses'**
+  String get aboutOpenSourceLicenses;
+
+  /// No description provided for @aboutCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied to clipboard'**
+  String get aboutCopied;
+
   /// Accessibility label for a chart
   ///
   /// In en, this message translates to:
