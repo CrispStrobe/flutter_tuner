@@ -57,7 +57,7 @@ void main() {
   }
 
   testWidgets('capture store screenshots', (tester) async {
-    await app.main();
+    app.main();
     await hold(tester, ms: 1500);
 
     // 1) Home idle
