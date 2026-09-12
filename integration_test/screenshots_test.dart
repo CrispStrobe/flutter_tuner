@@ -1,75 +1,74 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:flutter_tuner/main.dart' as app;
-import 'package:flutter_tuner/tuner_engine.dart';
 
-/// Drives the real app to each screen worth photographing and *holds* it, so a
-/// host script can grab native pixels with `xcrun simctl io … screenshot`.
-///
-/// There is no way to inject taps into a running Simulator from outside — no
-/// `simctl tap`, and AppleScript cannot see inside the rendered iOS canvas. So
-/// navigation has to happen from within the Flutter engine, which is what
-/// `WidgetTester` gives us.
-///
-/// Run with:
-///   flutter test integration_test/screenshots_test.dart -d <simulator-udid>
-/// while `tool/capture_screenshots.sh` watches the log for SHOT_MARKER lines.
 void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  const prefix = String.fromEnvironment('SHOT_PREFIX', defaultValue: 'shot');
+  const shotDir = String.fromEnvironment('SHOT_DIR');
+  const shotRatio = int.fromEnvironment('SHOT_RATIO', defaultValue: 2);
 
-  /// Holds the current frame for [seconds], pumping in small fixed steps.
-  ///
-  /// Deliberately NOT `pumpAndSettle`: the mic button's glow and the note
-  /// AnimatedSwitcher mean a settle can hang, and we want the screen to stay
-  /// put while the host grabs it anyway.
-  Future<void> hold(WidgetTester tester, String name, {int seconds = 6}) async {
-    debugPrint('SHOT_MARKER $name');
-    for (int i = 0; i < seconds * 1000 ~/ 150; i++) {
+  Future<void> hold(WidgetTester tester, {int ms = 2200}) async {
+    for (var t = 0; t < ms; t += 150) {
       await tester.pump(const Duration(milliseconds: 150));
     }
   }
 
-  testWidgets('capture App Store screenshots', (tester) async {
-    app.main();
-    await tester.pump(const Duration(seconds: 2));
-    for (int i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 150));
+  Future<void> writeLayerPng(WidgetTester tester, String file) async {
+    final view = tester.binding.renderViews.first;
+    final layer = view.debugLayer! as OffsetLayer;
+    final image = await layer.toImage(
+      view.paintBounds,
+      pixelRatio: shotRatio.toDouble(),
+    );
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (data == null) return;
+    
+    Directory dir;
+    try {
+      dir = Directory(shotDir)..createSync(recursive: true);
+    } on FileSystemException {
+      dir = Directory('${Directory.systemTemp.path}/tuner-shots')
+        ..createSync(recursive: true);
     }
+    final f = File('${dir.path}/$file.png');
+    await f.writeAsBytes(data.buffer.asUint8List());
+    print('SHOT ${f.path} ${image.width}x${image.height}');
+  }
 
-    // 1 — the main tuning screen, as it looks on launch.
-    await hold(tester, 'main');
-
-    // 2 — instrument picker open, showing all six presets.
-    final dropdown = find.byType(DropdownButtonFormField<Instrument>);
-    if (dropdown.evaluate().isNotEmpty) {
-      await tester.tap(dropdown.first);
-      for (int i = 0; i < 20; i++) {
-        await tester.pump(const Duration(milliseconds: 150));
-      }
-      await hold(tester, 'instruments');
-
-      // Pick Ukulele so the next shot differs from the first (4 strings, not 6).
-      final ukulele = find.text('Ukulele').last;
-      if (ukulele.evaluate().isNotEmpty) {
-        await tester.tap(ukulele);
-        for (int i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 150));
-        }
-        await hold(tester, 'ukulele');
+  Future<void> shot(WidgetTester tester, String name) async {
+    await hold(tester);
+    if (shotDir.isNotEmpty) {
+      await writeLayerPng(tester, '${prefix}_$name');
+    } else {
+      try {
+        await writeLayerPng(tester, '${prefix}_$name');
+      } catch (_) {
+        await binding.takeScreenshot('${prefix}_$name');
       }
     }
+  }
 
-    // 3 — the About screen: licences, privacy stance and imprint.
-    final info = find.byIcon(Icons.info_outline);
-    if (info.evaluate().isNotEmpty) {
-      await tester.tap(info.first);
-      for (int i = 0; i < 25; i++) {
-        await tester.pump(const Duration(milliseconds: 150));
-      }
-      await hold(tester, 'about');
+  testWidgets('capture store screenshots', (tester) async {
+    await app.main();
+    await hold(tester, ms: 1500);
+
+    // 1) Home idle
+    await shot(tester, '01_home');
+
+    // 2) Tuning (mic active)
+    final mic = find.byType(ElevatedButton);
+    if (mic.evaluate().isNotEmpty) {
+      await tester.tap(mic.first, warnIfMissed: false);
+      await hold(tester, ms: 3000); // let it capture some noise/UI
+      await shot(tester, '02_tuning');
     }
-
-    debugPrint('SHOT_MARKER done');
   });
 }
