@@ -62,3 +62,7 @@ test/failures/
 
 # Draft correspondence, not part of the project.
 APPEAL.md
+
+# Local UI preview renders — regenerate with
+#   flutter test -t preview --update-goldens
+test/goldens/preview/

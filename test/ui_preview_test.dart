@@ -1,7 +1,9 @@
-// Tagged `golden` as well as `preview`: these are host-renderer specific like
-// any golden, and CI's Linux job runs `flutter test -x golden`, which would
-// otherwise run them against macOS-recorded PNGs and fail.
-@Tags(<String>['golden', 'preview'])
+// Excluded from CI by both jobs: `-x golden -x preview` on Linux, and
+// `-t golden` on macOS does not select them. These renders are a local aid for
+// eyeballing layout, not assertions — CI floats on `channel: stable` while the
+// release workflows pin a Flutter version, and a full-app render differs
+// between the two for reasons that say nothing about this app.
+@Tags(<String>['preview'])
 library;
 
 import 'package:flutter/services.dart';
