@@ -281,7 +281,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutTagline.
   ///
   /// In en, this message translates to:
-  /// **'Precise chromatic tuner for six instruments'**
+  /// **'Chromatic tuner with historical temperaments'**
   String get aboutTagline;
 
   /// No description provided for @aboutServiceProvider.
@@ -323,7 +323,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutHowItWorksBody.
   ///
   /// In en, this message translates to:
-  /// **'Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.'**
+  /// **'Microphone audio is captured as 16-bit PCM at 44.1 kHz and accumulated into a 4096-sample window. That window is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The width matters: YIN can only resolve frequencies above twice the sample rate divided by the window, so a narrower window would not reach the low B of a five-string bass at 30.9 Hz.\n\nThe result is matched to the nearest note by its position on a logarithmic pitch scale, against targets computed for your concert pitch and temperament, and the deviation is shown in cents. Each temperament is derived from the sizes of the twelve fifths that define it rather than from a table of published cent values, and is then anchored so that A sounds exactly where you set it.\n\nIn parallel a Hann-windowed FFT over the most recent 2048 samples drives the spectrum display.'**
   String get aboutHowItWorksBody;
 
   /// No description provided for @aboutPrivacy.
@@ -335,7 +335,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutPrivacyBody.
   ///
   /// In en, this message translates to:
-  /// **'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.'**
+  /// **'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.'**
   String get aboutPrivacyBody;
 
   /// No description provided for @aboutPrivacyPolicyLink.
@@ -385,6 +385,222 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{label} visualization'**
   String visualizationLabel(String label);
+
+  /// No description provided for @instrumentGuitar7.
+  ///
+  /// In en, this message translates to:
+  /// **'7-string guitar'**
+  String get instrumentGuitar7;
+
+  /// No description provided for @instrumentBass5.
+  ///
+  /// In en, this message translates to:
+  /// **'5-string bass'**
+  String get instrumentBass5;
+
+  /// No description provided for @instrumentViola.
+  ///
+  /// In en, this message translates to:
+  /// **'Viola'**
+  String get instrumentViola;
+
+  /// No description provided for @instrumentDoubleBass.
+  ///
+  /// In en, this message translates to:
+  /// **'Double bass'**
+  String get instrumentDoubleBass;
+
+  /// No description provided for @instrumentBanjo.
+  ///
+  /// In en, this message translates to:
+  /// **'Banjo'**
+  String get instrumentBanjo;
+
+  /// No description provided for @instrumentLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Instrument'**
+  String get instrumentLabel;
+
+  /// No description provided for @tuningLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Tuning'**
+  String get tuningLabel;
+
+  /// No description provided for @tuningStandard.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard'**
+  String get tuningStandard;
+
+  /// No description provided for @tuningHalfStepDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Half step down'**
+  String get tuningHalfStepDown;
+
+  /// No description provided for @tuningWholeStepDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Whole step down'**
+  String get tuningWholeStepDown;
+
+  /// No description provided for @tuningLowG.
+  ///
+  /// In en, this message translates to:
+  /// **'Low G'**
+  String get tuningLowG;
+
+  /// No description provided for @tuningBaritone.
+  ///
+  /// In en, this message translates to:
+  /// **'Baritone'**
+  String get tuningBaritone;
+
+  /// No description provided for @tuningDTuning.
+  ///
+  /// In en, this message translates to:
+  /// **'D tuning'**
+  String get tuningDTuning;
+
+  /// No description provided for @tuningSolo.
+  ///
+  /// In en, this message translates to:
+  /// **'Solo tuning'**
+  String get tuningSolo;
+
+  /// No description provided for @tuningTenor.
+  ///
+  /// In en, this message translates to:
+  /// **'Tenor'**
+  String get tuningTenor;
+
+  /// No description provided for @tuningOctave.
+  ///
+  /// In en, this message translates to:
+  /// **'Octave'**
+  String get tuningOctave;
+
+  /// No description provided for @tuningCrossAEAE.
+  ///
+  /// In en, this message translates to:
+  /// **'Cross-tuning AEAE'**
+  String get tuningCrossAEAE;
+
+  /// No description provided for @tuningCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom…'**
+  String get tuningCustom;
+
+  /// No description provided for @temperamentLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Temperament'**
+  String get temperamentLabel;
+
+  /// No description provided for @temperamentKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Key'**
+  String get temperamentKey;
+
+  /// No description provided for @temperamentEqual.
+  ///
+  /// In en, this message translates to:
+  /// **'Equal'**
+  String get temperamentEqual;
+
+  /// No description provided for @temperamentPythagorean.
+  ///
+  /// In en, this message translates to:
+  /// **'Pythagorean'**
+  String get temperamentPythagorean;
+
+  /// No description provided for @temperamentMeantone.
+  ///
+  /// In en, this message translates to:
+  /// **'1/4-comma meantone'**
+  String get temperamentMeantone;
+
+  /// No description provided for @temperamentWerckmeister.
+  ///
+  /// In en, this message translates to:
+  /// **'Werckmeister III'**
+  String get temperamentWerckmeister;
+
+  /// No description provided for @temperamentKirnberger.
+  ///
+  /// In en, this message translates to:
+  /// **'Kirnberger III'**
+  String get temperamentKirnberger;
+
+  /// No description provided for @temperamentVallotti.
+  ///
+  /// In en, this message translates to:
+  /// **'Vallotti'**
+  String get temperamentVallotti;
+
+  /// No description provided for @editCustomTuning.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit custom tuning'**
+  String get editCustomTuning;
+
+  /// No description provided for @customTuningTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom tuning'**
+  String get customTuningTitle;
+
+  /// No description provided for @addString.
+  ///
+  /// In en, this message translates to:
+  /// **'Add string'**
+  String get addString;
+
+  /// No description provided for @removeString.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove string'**
+  String get removeString;
+
+  /// No description provided for @done.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get done;
+
+  /// No description provided for @resetTuning.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to standard'**
+  String get resetTuning;
+
+  /// Accessibility label for one string row in the custom tuning editor
+  ///
+  /// In en, this message translates to:
+  /// **'String {n}'**
+  String stringNumber(String n);
+
+  /// Accessibility label for the raise-pitch button
+  ///
+  /// In en, this message translates to:
+  /// **'Raise {note} a semitone'**
+  String raiseSemitone(String note);
+
+  /// Accessibility label for the lower-pitch button
+  ///
+  /// In en, this message translates to:
+  /// **'Lower {note} a semitone'**
+  String lowerSemitone(String note);
+
+  /// Readout showing how far the current note sits from equal temperament
+  ///
+  /// In en, this message translates to:
+  /// **'{note} {cents} ¢ vs equal'**
+  String temperamentOffset(String note, String cents);
 }
 
 class _AppLocalizationsDelegate

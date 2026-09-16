@@ -1,17 +1,52 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:collection/collection.dart';
 import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';
 
-/// Pure-Dart tuner engine — no Flutter dependency beyond ChangeNotifier.
-/// Handles pitch detection math, note matching, cents calculation,
-/// FFT processing, and pitch history tracking.
+import 'temperament.dart';
+import 'tuner_core.dart';
+// Also imported under a prefix: the class below deliberately re-exposes
+// several of the core's top-level functions as static members of the same
+// name, and an unprefixed call inside the class body would resolve to the
+// static member itself and recurse forever.
+import 'tuner_core.dart' as core;
+import 'tunings.dart';
+
+export 'temperament.dart';
+export 'tuner_core.dart'
+    show
+        NoteDetectionResult,
+        TuningStatus,
+        PitchTable,
+        MedianFilter,
+        RollingWindow,
+        pitchWindowSize;
+export 'tunings.dart';
+
+/// The app's tuner state.
 ///
-/// Widgets can listen via [ListenableBuilder] instead of calling setState.
+/// All of the mathematics lives in `tuner_core.dart`, which has no Flutter
+/// dependency whatsoever — this class adds the mutable state and the
+/// `ChangeNotifier` the UI listens to, and nothing else. That split is what
+/// lets `tool/tuner_probe.dart` run the very same detection code against real
+/// audio from a terminal.
 class TunerEngine extends ChangeNotifier {
   double _a4Frequency;
   Instrument _selectedInstrument;
+  String _tuningId;
+  List<String> _customStrings;
+  TemperamentTable _temperament;
+  late PitchTable _pitchTable;
   Map<String, double> _standardPitches = {};
+
+  /// Whether [_customStrings] holds a tuning the user actually chose, as
+  /// opposed to the placeholder the engine starts with. Selecting the custom
+  /// tuning seeds it from what is on screen, but only the first time —
+  /// otherwise restoring a saved custom tuning at launch would immediately
+  /// overwrite it with the standard one, because the tuning id is applied
+  /// after the strings are.
+  bool _hasCustomTuning = false;
 
   final QueueList<double> _pitchHistory;
   final int _historySize;
@@ -33,58 +68,57 @@ class TunerEngine extends ChangeNotifier {
   /// calls — [computeFFT] runs at display rate on the audio callback path.
   final Float64List _windowScratch = Float64List(fftSize);
 
-  // Median filter buffer for pitch smoothing
-  final QueueList<double> _pitchBuffer = QueueList<double>();
-  static const int _medianFilterSize = 5;
+  final MedianFilter _medianFilter = MedianFilter();
 
-  /// Scratch buffer for the median filter's sort, sized to the filter window.
-  final Float64List _medianScratch = Float64List(_medianFilterSize);
-
-  // Last detection result
   NoteDetectionResult? _lastResult;
 
-  static const Map<Instrument, List<String>> instrumentTunings = {
-    Instrument.guitar: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
-    Instrument.cello: ['C2', 'G2', 'D3', 'A3'],
-    Instrument.bass: ['E1', 'A1', 'D2', 'G2'],
-    Instrument.violin: ['G3', 'D4', 'A4', 'E5'],
-    Instrument.ukulele: ['G4', 'C4', 'E4', 'A4'],
-    Instrument.mandolin: ['G3', 'D4', 'A4', 'E5'],
-  };
+  /// Set while a coalesced notification is already queued. A single audio
+  /// callback updates the pitch reading *and* the spectrum, and each used to
+  /// call [notifyListeners] separately — two full rebuilds per frame for one
+  /// block of audio. Merging them into one microtask halves the UI work on
+  /// the hot path.
+  bool _notifyScheduled = false;
+  bool _disposed = false;
 
-  static const Map<String, int> noteOffsets = {
-    'A0': -48, 'A#0': -47, 'B0': -46, 'C1': -45, 'C#1': -44, 'D1': -43,
-    'D#1': -42, 'E1': -41, 'F1': -40, 'F#1': -39, 'G1': -38, 'G#1': -37,
-    'A1': -36, 'A#1': -35, 'B1': -34, 'C2': -33, 'C#2': -32, 'D2': -31,
-    'D#2': -30, 'E2': -29, 'F2': -28, 'F#2': -27, 'G2': -26, 'G#2': -25,
-    'A2': -24, 'A#2': -23, 'B2': -22, 'C3': -21, 'C#3': -20, 'D3': -19,
-    'D#3': -18, 'E3': -17, 'F3': -16, 'F#3': -15, 'G3': -14, 'G#3': -13,
-    'A3': -12, 'A#3': -11, 'B3': -10, 'C4': -9, 'C#4': -8, 'D4': -7,
-    'D#4': -6, 'E4': -5, 'F4': -4, 'F#4': -3, 'G4': -2, 'G#4': -1, 'A4': 0,
-    'A#4': 1, 'B4': 2, 'C5': 3, 'C#5': 4, 'D5': 5, 'D#5': 6, 'E5': 7,
-    'F5': 8, 'F#5': 9, 'G5': 10, 'G#5': 11, 'A5': 12, 'A#5': 13, 'B5': 14,
-    'C6': 15,
-  };
+  /// Lowest note the tuner will report: A0, the bottom of a piano.
+  static const int minMidi = core.minMidi;
+
+  /// Highest note the tuner will report: C8, the top of a piano.
+  static const int maxMidi = core.maxMidi;
+
+  /// Semitone offsets from A4 for every note in range, keyed by name.
+  ///
+  /// The pre-2.2 implementation carried this as a hand-written table that
+  /// stopped at C6 (~1046 Hz), so anything above it — routine on a violin or
+  /// mandolin E string — was reported as a wildly out-of-tune C6.
+  static final Map<String, int> noteOffsets = Map.unmodifiable({
+    for (int midi = core.minMidi; midi <= core.maxMidi; midi++)
+      core.noteNameForMidi(midi): midi - 69,
+  });
 
   TunerEngine({
     double a4Frequency = 440.0,
     Instrument instrument = Instrument.guitar,
+    String? tuningId,
+    Temperament temperament = Temperament.equal,
+    int temperamentRoot = 0,
     int historySize = 100,
   })  : _a4Frequency = a4Frequency,
         _selectedInstrument = instrument,
+        _tuningId = tuningId ?? tuningsFor(instrument).first.id,
+        _customStrings = List<String>.from(tuningsFor(instrument).first.strings),
+        _temperament = TemperamentTable(temperament, root: temperamentRoot),
         _historySize = historySize,
         _pitchHistory = QueueList<double>(historySize) {
-    // Pre-compute Hann window
     _hannWindow = Float64List(fftSize);
     for (int i = 0; i < fftSize; i++) {
       _hannWindow[i] = 0.5 * (1 - math.cos(2 * math.pi * i / (fftSize - 1)));
     }
-    // Fill pitch history with zeros
     for (int i = 0; i < historySize; i++) {
       _pitchHistory.add(0);
     }
     _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
-    _recalculatePitches();
+    _rebuildPitchTable();
   }
 
   // -- Getters --
@@ -95,108 +129,131 @@ class TunerEngine extends ChangeNotifier {
   List<double> get pitchHistory => _pitchHistorySnapshot;
   List<double> get fftMagnitudes => _fftMagnitudes;
   NoteDetectionResult? get lastResult => _lastResult;
-  List<String> get currentTuningStrings =>
-      instrumentTunings[_selectedInstrument]!;
+
+  /// The table the detection actually consults.
+  PitchTable get pitchTable => _pitchTable;
+
+  /// The id of the selected tuning — [customTuningId] when the user has one
+  /// of their own.
+  String get tuningId => _tuningId;
+
+  /// The user's editable tuning, independent of the selected instrument.
+  List<String> get customStrings => List.unmodifiable(_customStrings);
+
+  TemperamentTable get temperamentTable => _temperament;
+  Temperament get temperament => _temperament.temperament;
+  int get temperamentRoot => _temperament.root;
+
+  /// Open-string notes of the tuning in force, lowest string first.
+  List<String> get currentTuningStrings => _tuningId == customTuningId
+      ? List.unmodifiable(_customStrings)
+      : tuningFor(_selectedInstrument, _tuningId).strings;
 
   // -- Setters --
 
   set a4Frequency(double value) {
     if (value == _a4Frequency) return;
     _a4Frequency = value;
-    _recalculatePitches();
+    _rebuildPitchTable();
     notifyListeners();
   }
 
   set selectedInstrument(Instrument value) {
     if (value == _selectedInstrument) return;
     _selectedInstrument = value;
+    // A tuning id is only meaningful for the instrument that defines it —
+    // "dropD" exists for guitar and bass but not for viola. Fall back to the
+    // new instrument's standard tuning rather than showing it no strings.
+    if (_tuningId != customTuningId &&
+        !tuningsFor(value).any((t) => t.id == _tuningId)) {
+      _tuningId = tuningsFor(value).first.id;
+    }
     notifyListeners();
   }
 
-  // -- Core logic --
-
-  void _recalculatePitches() {
-    _standardPitches = {
-      for (final entry in noteOffsets.entries)
-        entry.key: _a4Frequency * math.pow(2, entry.value / 12.0),
-    };
+  set tuningId(String value) {
+    if (value == _tuningId) return;
+    // Entering custom mode for the first time seeds the editable tuning from
+    // whatever was on screen, so the user adjusts rather than starts blank.
+    if (value == customTuningId && !_hasCustomTuning) {
+      _customStrings = List<String>.from(currentTuningStrings);
+      _hasCustomTuning = true;
+    }
+    _tuningId = value;
+    notifyListeners();
   }
 
-  /// Find the closest note to a detected pitch frequency.
+  set customStrings(List<String> value) {
+    if (value.isEmpty) return;
+    _customStrings = List<String>.from(value);
+    _hasCustomTuning = true;
+    notifyListeners();
+  }
+
+  set temperament(Temperament value) {
+    if (value == _temperament.temperament) return;
+    _temperament = TemperamentTable(value, root: _temperament.root);
+    _rebuildPitchTable();
+    notifyListeners();
+  }
+
+  set temperamentRoot(int value) {
+    final root = value % 12;
+    if (root == _temperament.root) return;
+    _temperament = TemperamentTable(_temperament.temperament, root: root);
+    _rebuildPitchTable();
+    notifyListeners();
+  }
+
+  // -- Static forwarders, so callers need only this library --
+
+  static String noteNameForMidi(int midi) => core.noteNameForMidi(midi);
+  static int? midiForNoteName(String name) => core.midiForNoteName(name);
+  static String stripOctave(String note) => core.stripOctave(note);
+  static double computeCents(double detected, double target) =>
+      core.computeCents(detected, target);
+
+  // -- Core logic --
+
+  void _rebuildPitchTable() {
+    _pitchTable =
+        PitchTable(a4Frequency: _a4Frequency, temperament: _temperament);
+    _standardPitches = _pitchTable.allPitches();
+  }
+
+  /// The sounding frequency of a MIDI note under the current concert pitch
+  /// and temperament.
+  double frequencyForMidi(int midi) => _pitchTable.frequencyForMidi(midi);
+
+  /// How far the given note sits from equal temperament, in cents. Zero in
+  /// equal temperament; this is what the temperament readout shows.
+  double centsOffsetForNote(String note) {
+    final midi = midiForNoteName(note);
+    if (midi == null) return 0;
+    return _temperament.centsForPitchClass(midi % 12);
+  }
+
+  /// Find the closest note to a detected pitch, and record it.
   NoteDetectionResult detectNote(double detectedPitch) {
-    if (detectedPitch <= 0) {
-      return NoteDetectionResult.empty();
-    }
-
-    String closestNote = '';
-    double minDifference = double.infinity;
-    double targetFrequency = 0;
-
-    for (final entry in _standardPitches.entries) {
-      final difference = (detectedPitch - entry.value).abs();
-      if (difference < minDifference) {
-        minDifference = difference;
-        closestNote = entry.key;
-        targetFrequency = entry.value;
-      }
-    }
-
-    final cents = computeCents(detectedPitch, targetFrequency);
+    final result = _pitchTable.nearestNote(detectedPitch);
+    if (result.isEmpty) return result;
 
     // Update pitch history — bounded by the configured size, not a literal,
     // or a non-default historySize would grow without limit.
     if (_pitchHistory.length >= _historySize) _pitchHistory.removeFirst();
-    _pitchHistory.add(cents.clamp(-50, 50));
+    _pitchHistory.add(result.cents.clamp(-50, 50));
     _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
 
-    final status = _classifyTuning(cents);
-
-    _lastResult = NoteDetectionResult(
-      note: closestNote,
-      pitch: detectedPitch,
-      cents: cents,
-      targetFrequency: targetFrequency,
-      status: status,
-    );
-    notifyListeners();
-    return _lastResult!;
+    _lastResult = result;
+    _scheduleNotify();
+    return result;
   }
 
-  /// Apply median filter to smooth raw pitch values.
-  double smoothPitch(double rawPitch) {
-    _pitchBuffer.add(rawPitch);
-    if (_pitchBuffer.length > _medianFilterSize) {
-      _pitchBuffer.removeFirst();
-    }
-    if (_pitchBuffer.length < 3) return rawPitch;
-
-    // Insertion-sort into the reusable scratch buffer. The window is 5 samples,
-    // so this beats allocating and sorting a fresh list on every audio callback.
-    final int n = _pitchBuffer.length;
-    for (int i = 0; i < n; i++) {
-      final double value = _pitchBuffer[i];
-      int j = i - 1;
-      while (j >= 0 && _medianScratch[j] > value) {
-        _medianScratch[j + 1] = _medianScratch[j];
-        j--;
-      }
-      _medianScratch[j + 1] = value;
-    }
-    return _medianScratch[n ~/ 2];
-  }
+  /// Apply the median filter to smooth raw pitch values.
+  double smoothPitch(double rawPitch) => _medianFilter.add(rawPitch);
 
   /// Convert raw PCM16 bytes to float samples.
-  Float64List pcmToFloat(Uint8List data) {
-    final sampleCount = data.length ~/ 2;
-    final floatData = Float64List(sampleCount);
-    for (int i = 0; i < sampleCount; i++) {
-      final int byteIndex = i * 2;
-      final int sample = data[byteIndex] | (data[byteIndex + 1] << 8);
-      final int signedSample = sample > 32767 ? sample - 65536 : sample;
-      floatData[i] = signedSample / 32768.0;
-    }
-    return floatData;
-  }
+  Float64List pcmToFloat(Uint8List data) => core.pcmToFloat(data);
 
   /// Run FFT with Hann windowing and return magnitudes for the musically
   /// useful range — the first quarter of the bins, i.e. up to ~5.5 kHz at a
@@ -220,83 +277,38 @@ class TunerEngine extends ChangeNotifier {
     }
 
     _fftMagnitudes = trimmed;
-    notifyListeners();
+    _scheduleNotify();
     return _fftMagnitudes;
   }
 
-  /// Compute cents difference between detected and target frequency.
-  static double computeCents(double detected, double target) {
-    if (target <= 0 || detected <= 0) return 0;
-    return 1200 * (math.log(detected / target) / math.log(2));
+  /// Coalesce the notifications raised by one block of audio into one.
+  void _scheduleNotify() {
+    if (_notifyScheduled) return;
+    _notifyScheduled = true;
+    scheduleMicrotask(() {
+      _notifyScheduled = false;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   /// Compute frequency for a given note name.
-  double? getFrequencyForNote(String note) => _standardPitches[note];
-
-  /// Strip octave number from a note name (e.g., "E4" -> "E").
-  static String stripOctave(String note) {
-    return note.replaceAll(RegExp(r'[0-9]'), '');
-  }
-
-  TuningStatus _classifyTuning(double cents) {
-    if (cents.abs() < 5) return TuningStatus.inTune;
-    if (cents > 5) return TuningStatus.sharp;
-    return TuningStatus.flat;
-  }
+  double? getFrequencyForNote(String note) =>
+      _standardPitches[note] ?? _pitchTable.frequencyForNote(note);
 
   void reset() {
     _lastResult = null;
     _fftMagnitudes = [];
-    _pitchBuffer.clear();
+    _medianFilter.clear();
     for (int i = 0; i < _pitchHistory.length; i++) {
       _pitchHistory[i] = 0;
     }
     _pitchHistorySnapshot = List<double>.unmodifiable(_pitchHistory);
     notifyListeners();
-  }
-}
-
-enum Instrument { guitar, cello, bass, violin, ukulele, mandolin }
-
-enum TuningStatus { inTune, sharp, flat, idle }
-
-class NoteDetectionResult {
-  final String note;
-  final double pitch;
-  final double cents;
-  final double targetFrequency;
-  final TuningStatus status;
-
-  const NoteDetectionResult({
-    required this.note,
-    required this.pitch,
-    required this.cents,
-    required this.targetFrequency,
-    required this.status,
-  });
-
-  factory NoteDetectionResult.empty() => const NoteDetectionResult(
-        note: '',
-        pitch: 0,
-        cents: 0,
-        targetFrequency: 0,
-        status: TuningStatus.idle,
-      );
-
-  bool get isEmpty => note.isEmpty;
-
-  String get displayNote => TunerEngine.stripOctave(note);
-
-  String get statusText {
-    switch (status) {
-      case TuningStatus.inTune:
-        return 'In Tune ✓';
-      case TuningStatus.sharp:
-        return 'Too Sharp ↑';
-      case TuningStatus.flat:
-        return 'Too Flat ↓';
-      case TuningStatus.idle:
-        return '';
-    }
   }
 }

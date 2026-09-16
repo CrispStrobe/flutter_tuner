@@ -116,7 +116,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aboutTagline =>
-      'Präzises chromatisches Stimmgerät für sechs Instrumente';
+      'Chromatisches Stimmgerät mit historischen Temperaturen';
 
   @override
   String get aboutServiceProvider => 'Diensteanbieter';
@@ -140,14 +140,14 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aboutHowItWorksBody =>
-      'Das Mikrofonsignal wird als 16-Bit-PCM mit 44,1 kHz aufgenommen. Jeder Block von 2048 Samples wird mit dem YIN-Algorithmus auf seine Tonhöhe untersucht und anschließend durch einen Medianfilter über 5 Werte geglättet, damit die Anzeige ruhig bleibt. Das Ergebnis wird dem nächstgelegenen Ton für Ihren Kammerton zugeordnet und die Abweichung in Cent angezeigt. Parallel dazu speist eine Hann-gefensterte FFT die Spektrumanzeige.';
+      'Das Mikrofonsignal wird als 16-Bit-PCM mit 44,1 kHz aufgenommen und in einem Fenster von 4096 Samples gesammelt. Dieses Fenster wird mit dem YIN-Algorithmus analysiert und anschließend durch einen Medianfilter über 5 Werte geglättet. Die Fensterbreite ist entscheidend: YIN erfasst nur Frequenzen oberhalb der doppelten Abtastrate geteilt durch die Fensterlänge – ein schmaleres Fenster würde das tiefe H eines 5-saitigen Basses bei 30,9 Hz nicht mehr erreichen.\n\nDer ermittelte Ton wird über seine Position auf einer logarithmischen Tonhöhenskala dem nächstgelegenen Ton zugeordnet – anhand von Zielfrequenzen, die aus Kammerton und Temperatur berechnet werden –, und die Abweichung wird in Cent angezeigt. Jede Temperatur wird aus den Größen der zwölf Quinten hergeleitet, die sie definieren, und so verankert, dass das A genau dort klingt, wo Sie es eingestellt haben.\n\nParallel dazu speist eine Hann-gefensterte FFT über die letzten 2048 Samples die Spektrumanzeige.';
 
   @override
   String get aboutPrivacy => 'Datenschutz';
 
   @override
   String get aboutPrivacyBody =>
-      'Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking; die App stellt überhaupt keine Netzwerkverbindungen her.\n\nGespeichert werden lokal nur Ihr A4-Kammerton und das gewählte Instrument, damit sie beim nächsten Start erhalten bleiben. Beim Deinstallieren werden sie entfernt.';
+      'Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking, und die App stellt überhaupt keine Netzwerkverbindungen her.\n\nNur Ihre Einstellungen – Kammerton, Instrument, gewählte Stimmung, Ihre eigene Stimmung sowie Temperatur und deren Tonart – werden lokal gespeichert, damit sie beim nächsten Start wieder bereitstehen. Beim Deinstallieren werden sie entfernt.';
 
   @override
   String get aboutPrivacyPolicyLink =>
@@ -176,5 +176,121 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String visualizationLabel(String label) {
     return 'Visualisierung: $label';
+  }
+
+  @override
+  String get instrumentGuitar7 => '7-saitige Gitarre';
+
+  @override
+  String get instrumentBass5 => '5-saitiger Bass';
+
+  @override
+  String get instrumentViola => 'Bratsche';
+
+  @override
+  String get instrumentDoubleBass => 'Kontrabass';
+
+  @override
+  String get instrumentBanjo => 'Banjo';
+
+  @override
+  String get instrumentLabel => 'Instrument';
+
+  @override
+  String get tuningLabel => 'Stimmung';
+
+  @override
+  String get tuningStandard => 'Standard';
+
+  @override
+  String get tuningHalfStepDown => 'Einen Halbton tiefer';
+
+  @override
+  String get tuningWholeStepDown => 'Einen Ganzton tiefer';
+
+  @override
+  String get tuningLowG => 'Tiefes G';
+
+  @override
+  String get tuningBaritone => 'Bariton';
+
+  @override
+  String get tuningDTuning => 'D-Stimmung';
+
+  @override
+  String get tuningSolo => 'Solostimmung';
+
+  @override
+  String get tuningTenor => 'Tenor';
+
+  @override
+  String get tuningOctave => 'Oktav';
+
+  @override
+  String get tuningCrossAEAE => 'Skordatur AEAE';
+
+  @override
+  String get tuningCustom => 'Eigene …';
+
+  @override
+  String get temperamentLabel => 'Temperatur';
+
+  @override
+  String get temperamentKey => 'Tonart';
+
+  @override
+  String get temperamentEqual => 'Gleichstufig';
+
+  @override
+  String get temperamentPythagorean => 'Pythagoreisch';
+
+  @override
+  String get temperamentMeantone => '1/4-Komma-mitteltönig';
+
+  @override
+  String get temperamentWerckmeister => 'Werckmeister III';
+
+  @override
+  String get temperamentKirnberger => 'Kirnberger III';
+
+  @override
+  String get temperamentVallotti => 'Vallotti';
+
+  @override
+  String get editCustomTuning => 'Eigene Stimmung bearbeiten';
+
+  @override
+  String get customTuningTitle => 'Eigene Stimmung';
+
+  @override
+  String get addString => 'Saite hinzufügen';
+
+  @override
+  String get removeString => 'Saite entfernen';
+
+  @override
+  String get done => 'Fertig';
+
+  @override
+  String get resetTuning => 'Auf Standard zurücksetzen';
+
+  @override
+  String stringNumber(String n) {
+    return 'Saite $n';
+  }
+
+  @override
+  String raiseSemitone(String note) {
+    return '$note einen Halbton höher';
+  }
+
+  @override
+  String lowerSemitone(String note) {
+    return '$note einen Halbton tiefer';
+  }
+
+  @override
+  String temperamentOffset(String note, String cents) {
+    return '$note $cents ¢ ggü. gleichstufig';
   }
 }

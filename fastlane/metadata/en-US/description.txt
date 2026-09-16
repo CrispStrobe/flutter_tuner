@@ -1,21 +1,35 @@
-CrispTuner is a fast, accurate chromatic tuner for guitar, bass, violin, cello, ukulele and mandolin.
+CrispTuner is a precise chromatic tuner for fretted and bowed instruments — and, unusually, a tuner that also knows the historical temperaments.
 
-It listens through your microphone, detects the note you are playing and shows exactly how far off you are — in cents — so you can hear and see the moment a string lands in tune.
+It listens through your microphone, detects the note you are playing and shows exactly how far off you are, in cents, so you can see and hear the moment a string lands in tune.
 
-FEATURES
+INSTRUMENTS AND TUNINGS
+
+• Eleven instruments: guitar, 7-string guitar, bass, 5-string bass, ukulele, banjo, mandolin, violin, viola, cello and double bass.
+• Over thirty ready-made tunings — Drop D, Drop C, DADGAD, Open G, Open D, Open E, Open C, half and whole step down, low-G and baritone ukulele, banjo double C, cello and double-bass solo tuning, and more.
+• Build your own tuning of up to twelve strings, a semitone at a time, and it is saved for next time.
+
+HISTORICAL TEMPERAMENTS
+
+• Equal, Pythagorean, quarter-comma meantone, Werckmeister III, Kirnberger III and Vallotti.
+• Choose the key the temperament is built on, and see how far each note sits from equal temperament, in cents.
+• Concert pitch adjustable from 415 Hz to 465 Hz, for period instruments, ensembles and orchestras that do not tune to 440.
+
+The temperaments are derived from the sizes of the fifths that define them, not from a copied table, so A stays exactly where you set it in every temperament and every key.
+
+MEASUREMENT
 
 • Real-time pitch detection using the YIN algorithm, with a median filter that keeps the reading steady instead of jittering between frames.
-• Cent-accurate tuning meter with a clear in-tune / too sharp / too flat readout.
+• A window wide enough to resolve the low B of a five-string bass at 30.9 Hz — well below where most tuners give up.
 • Live frequency spectrum and pitch-history graphs, so you can watch a note settle.
-• Reference tones for every string of the selected instrument, generated as clean phase-continuous sine waves.
-• Six instrument presets: guitar, bass, violin, cello, ukulele and mandolin.
-• Adjustable concert pitch from 415 Hz to 465 Hz, for period instruments, ensembles and orchestras that do not tune to 440.
+• Reference tones for every string, generated as clean phase-continuous sine waves at your chosen pitch and temperament.
 • Choose which microphone to use when more than one input is available.
 • Full VoiceOver support — the detected note is announced as it changes.
-• English and German.
+• Light and dark themes, English and German.
 
 PRIVATE BY DESIGN
 
 CrispTuner collects nothing. Audio is analysed on your device, in real time, and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The app makes no network requests at all.
 
-Your A4 setting and chosen instrument are saved locally so they are there next time you open the app.
+Your settings are saved locally so they are there next time you open the app.
+
+CrispTuner is open source under the MIT licence.

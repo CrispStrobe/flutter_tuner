@@ -1,11 +1,9 @@
 {
   "@@locale": "en",
-
   "appTitle": "CrispTuner",
   "@appTitle": {
     "description": "Application name, shown in the title bar and task switcher"
   },
-
   "startTuning": "Start Tuning",
   "@startTuning": {
     "description": "Idle status shown before listening starts"
@@ -40,10 +38,8 @@
   "@micPermissionDenied": {
     "description": "Status shown when the user declined microphone access"
   },
-
   "pitchHistory": "Pitch History",
   "frequencySpectrum": "Frequency Spectrum",
-
   "hertzValue": "{hz} Hz",
   "@hertzValue": {
     "description": "A frequency reading, e.g. 440.00 Hz",
@@ -68,17 +64,14 @@
   "@a4ReferenceFrequency": {
     "description": "Accessibility label for the A4 slider"
   },
-
   "instrumentGuitar": "Guitar",
   "instrumentCello": "Cello",
   "instrumentBass": "Bass",
   "instrumentViolin": "Violin",
   "instrumentUkulele": "Ukulele",
   "instrumentMandolin": "Mandolin",
-
   "defaultMicrophone": "Default mic",
   "selectMicrophone": "Select microphone input",
-
   "noNoteDetected": "No note detected. {status}",
   "@noNoteDetected": {
     "description": "Accessibility live-region text when nothing is detected",
@@ -135,22 +128,21 @@
   },
   "startTuningButton": "Start tuning",
   "stopTuningButton": "Stop tuning",
-
   "about": "About",
   "@about": {
     "description": "Tooltip and title for the About screen"
   },
   "aboutTitle": "About CrispTuner",
-  "aboutTagline": "Precise chromatic tuner for six instruments",
+  "aboutTagline": "Chromatic tuner with historical temperaments",
   "aboutServiceProvider": "Service Provider",
   "aboutLicense": "License",
   "aboutLicenseBody": "CrispTuner is licensed under the MIT License.\n\nYou are free to use, modify and distribute this software for any purpose, including commercial use.",
   "aboutComponents": "Open Source Components",
   "aboutComponentsIntro": "CrispTuner is built on these open source packages. The full license texts are available under “Open Source Licenses” below.",
   "aboutHowItWorks": "How It Works",
-  "aboutHowItWorksBody": "Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.",
+  "aboutHowItWorksBody": "Microphone audio is captured as 16-bit PCM at 44.1 kHz and accumulated into a 4096-sample window. That window is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The width matters: YIN can only resolve frequencies above twice the sample rate divided by the window, so a narrower window would not reach the low B of a five-string bass at 30.9 Hz.\n\nThe result is matched to the nearest note by its position on a logarithmic pitch scale, against targets computed for your concert pitch and temperament, and the deviation is shown in cents. Each temperament is derived from the sizes of the twelve fifths that define it rather than from a table of published cent values, and is then anchored so that A sounds exactly where you set it.\n\nIn parallel a Hann-windowed FFT over the most recent 2048 samples drives the spectrum display.",
   "aboutPrivacy": "Privacy",
-  "aboutPrivacyBody": "Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.",
+  "aboutPrivacyBody": "Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.",
   "aboutPrivacyPolicyLink": "Read the full privacy policy",
   "aboutDisclaimer": "Disclaimer",
   "aboutDisclaimerBody": "This software is provided “as is”, without warranty of any kind. The authors are not liable for any damages arising from the use of this software.",
@@ -165,6 +157,82 @@
       "label": {
         "type": "String",
         "example": "Pitch History"
+      }
+    }
+  },
+  "instrumentGuitar7": "7-string guitar",
+  "instrumentBass5": "5-string bass",
+  "instrumentViola": "Viola",
+  "instrumentDoubleBass": "Double bass",
+  "instrumentBanjo": "Banjo",
+  "instrumentLabel": "Instrument",
+  "tuningLabel": "Tuning",
+  "tuningStandard": "Standard",
+  "tuningHalfStepDown": "Half step down",
+  "tuningWholeStepDown": "Whole step down",
+  "tuningLowG": "Low G",
+  "tuningBaritone": "Baritone",
+  "tuningDTuning": "D tuning",
+  "tuningSolo": "Solo tuning",
+  "tuningTenor": "Tenor",
+  "tuningOctave": "Octave",
+  "tuningCrossAEAE": "Cross-tuning AEAE",
+  "tuningCustom": "Custom…",
+  "temperamentLabel": "Temperament",
+  "temperamentKey": "Key",
+  "temperamentEqual": "Equal",
+  "temperamentPythagorean": "Pythagorean",
+  "temperamentMeantone": "1/4-comma meantone",
+  "temperamentWerckmeister": "Werckmeister III",
+  "temperamentKirnberger": "Kirnberger III",
+  "temperamentVallotti": "Vallotti",
+  "editCustomTuning": "Edit custom tuning",
+  "customTuningTitle": "Custom tuning",
+  "addString": "Add string",
+  "removeString": "Remove string",
+  "done": "Done",
+  "resetTuning": "Reset to standard",
+  "stringNumber": "String {n}",
+  "@stringNumber": {
+    "description": "Accessibility label for one string row in the custom tuning editor",
+    "placeholders": {
+      "n": {
+        "type": "String",
+        "example": "3"
+      }
+    }
+  },
+  "raiseSemitone": "Raise {note} a semitone",
+  "@raiseSemitone": {
+    "description": "Accessibility label for the raise-pitch button",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "E2"
+      }
+    }
+  },
+  "lowerSemitone": "Lower {note} a semitone",
+  "@lowerSemitone": {
+    "description": "Accessibility label for the lower-pitch button",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "E2"
+      }
+    }
+  },
+  "temperamentOffset": "{note} {cents} ¢ vs equal",
+  "@temperamentOffset": {
+    "description": "Readout showing how far the current note sits from equal temperament",
+    "placeholders": {
+      "note": {
+        "type": "String",
+        "example": "E"
+      },
+      "cents": {
+        "type": "String",
+        "example": "-9.8"
       }
     }
   }

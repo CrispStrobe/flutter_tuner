@@ -1,1 +1,1 @@
-Chromatic instrument tuner
+Chromatic tuner & temperaments
