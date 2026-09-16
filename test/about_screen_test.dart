@@ -32,7 +32,7 @@ void main() {
 
       expect(find.text('About CrispTuner'), findsOneWidget);
       expect(find.text('CrispTuner'), findsWidgets);
-      expect(find.text('Precise chromatic tuner for six instruments'), findsOneWidget);
+      expect(find.text('Chromatic tuner with historical temperaments'), findsOneWidget);
       expect(find.text('License'), findsOneWidget);
       expect(find.text('Disclaimer'), findsOneWidget);
       expect(find.text('Privacy'), findsOneWidget);

@@ -19,11 +19,16 @@ void main() {
       expect(find.text('CrispTuner'), findsOneWidget);
     });
 
-    testWidgets('has dark theme', (tester) async {
+    testWidgets('supplies both a light and a dark theme', (tester) async {
       await _setUpTestSize(tester);
       await tester.pumpWidget(const TunerApp());
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
-      expect(materialApp.theme?.brightness, Brightness.dark);
+      // A musician tuning on a dark stage should not be handed a white
+      // screen, and one tuning by a window should not be handed a black one,
+      // so neither theme may go missing.
+      expect(materialApp.theme?.brightness, Brightness.light);
+      expect(materialApp.darkTheme?.brightness, Brightness.dark);
+      expect(materialApp.themeMode, ThemeMode.system);
     });
 
     testWidgets('hides the debug banner (App Store screenshots)', (tester) async {

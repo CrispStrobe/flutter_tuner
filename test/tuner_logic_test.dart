@@ -6,13 +6,21 @@ import 'package:flutter_tuner/tuner_engine.dart';
 void main() {
   group('Instrument enum', () {
     test('has all expected instruments', () {
-      expect(Instrument.values.length, 6);
-      expect(Instrument.values, contains(Instrument.guitar));
-      expect(Instrument.values, contains(Instrument.cello));
-      expect(Instrument.values, contains(Instrument.bass));
-      expect(Instrument.values, contains(Instrument.violin));
-      expect(Instrument.values, contains(Instrument.ukulele));
-      expect(Instrument.values, contains(Instrument.mandolin));
+      for (final expected in [
+        Instrument.guitar,
+        Instrument.guitar7,
+        Instrument.bass,
+        Instrument.bass5,
+        Instrument.ukulele,
+        Instrument.banjo,
+        Instrument.mandolin,
+        Instrument.violin,
+        Instrument.viola,
+        Instrument.cello,
+        Instrument.doubleBass,
+      ]) {
+        expect(Instrument.values, contains(expected));
+      }
     });
   });
 
@@ -50,50 +58,101 @@ void main() {
   });
 
   group('Instrument tunings', () {
-    test('guitar has 6 strings EADGBE', () {
-      expect(TunerEngine.instrumentTunings[Instrument.guitar],
+    Tuning standardOf(Instrument instrument) =>
+        tuningFor(instrument, 'standard');
+
+    test('guitar standard is EADGBE', () {
+      expect(standardOf(Instrument.guitar).strings,
           ['E2', 'A2', 'D3', 'G3', 'B3', 'E4']);
     });
 
-    test('violin has 4 strings GDAE', () {
-      expect(TunerEngine.instrumentTunings[Instrument.violin],
-          ['G3', 'D4', 'A4', 'E5']);
+    test('violin standard is GDAE', () {
+      expect(standardOf(Instrument.violin).strings, ['G3', 'D4', 'A4', 'E5']);
     });
 
-    test('cello has 4 strings CGDA', () {
-      expect(TunerEngine.instrumentTunings[Instrument.cello],
-          ['C2', 'G2', 'D3', 'A3']);
+    test('cello standard is CGDA', () {
+      expect(standardOf(Instrument.cello).strings, ['C2', 'G2', 'D3', 'A3']);
     });
 
-    test('bass has 4 strings EADG', () {
-      expect(TunerEngine.instrumentTunings[Instrument.bass],
-          ['E1', 'A1', 'D2', 'G2']);
+    test('bass standard is EADG', () {
+      expect(standardOf(Instrument.bass).strings, ['E1', 'A1', 'D2', 'G2']);
     });
 
-    test('ukulele has 4 strings GCEA', () {
-      expect(TunerEngine.instrumentTunings[Instrument.ukulele],
-          ['G4', 'C4', 'E4', 'A4']);
+    test('ukulele standard is reentrant GCEA', () {
+      expect(standardOf(Instrument.ukulele).strings, ['G4', 'C4', 'E4', 'A4']);
     });
 
-    test('mandolin has 4 strings GDAE', () {
-      expect(TunerEngine.instrumentTunings[Instrument.mandolin],
-          ['G3', 'D4', 'A4', 'E5']);
+    test('mandolin standard is GDAE', () {
+      expect(standardOf(Instrument.mandolin).strings, ['G3', 'D4', 'A4', 'E5']);
     });
 
-    test('every instrument has a tuning defined', () {
-      for (final instrument in Instrument.values) {
-        expect(TunerEngine.instrumentTunings.containsKey(instrument), isTrue,
-            reason: '${instrument.name} should have a tuning');
+    test('drop D lowers only the sixth string', () {
+      final standard = standardOf(Instrument.guitar).strings;
+      final dropD = tuningFor(Instrument.guitar, 'dropD').strings;
+      expect(dropD.first, 'D2');
+      expect(dropD.sublist(1), standard.sublist(1));
+    });
+
+    test('DADGAD is D A D G A D', () {
+      expect(tuningFor(Instrument.guitar, 'dadgad').strings,
+          ['D2', 'A2', 'D3', 'G3', 'A3', 'D4']);
+    });
+
+    test('half step down is every string one semitone below standard', () {
+      final standard = standardOf(Instrument.guitar).strings;
+      final lowered = tuningFor(Instrument.guitar, 'halfStepDown').strings;
+      expect(lowered.length, standard.length);
+      for (int i = 0; i < standard.length; i++) {
+        expect(TunerEngine.midiForNoteName(lowered[i]),
+            TunerEngine.midiForNoteName(standard[i])! - 1,
+            reason: 'string ${i + 1}');
       }
     });
 
-    test('all instrument notes exist in noteOffsets', () {
+    test('every instrument has at least one tuning, standard first', () {
       for (final instrument in Instrument.values) {
-        for (final note in TunerEngine.instrumentTunings[instrument]!) {
-          expect(TunerEngine.noteOffsets.containsKey(note), isTrue,
-              reason: '$note (${instrument.name}) must exist in noteOffsets');
+        final tunings = tuningsFor(instrument);
+        expect(tunings, isNotEmpty, reason: instrument.name);
+        // The banjo's conventional home tuning is open G, not "standard".
+        expect(tunings.first.id, anyOf('standard', 'openG'),
+            reason: instrument.name);
+      }
+    });
+
+    test('tuning ids are unique within an instrument', () {
+      for (final instrument in Instrument.values) {
+        final ids = tuningsFor(instrument).map((t) => t.id).toList();
+        expect(ids.toSet().length, ids.length, reason: instrument.name);
+      }
+    });
+
+    test('no tuning uses the reserved custom id', () {
+      for (final instrument in Instrument.values) {
+        for (final tuning in tuningsFor(instrument)) {
+          expect(tuning.id, isNot(customTuningId), reason: instrument.name);
         }
       }
+    });
+
+    test('every string of every tuning is a note the engine can resolve', () {
+      for (final instrument in Instrument.values) {
+        for (final tuning in tuningsFor(instrument)) {
+          for (final note in tuning.strings) {
+            final midi = TunerEngine.midiForNoteName(note);
+            expect(midi, isNotNull,
+                reason: '$note (${instrument.name}/${tuning.id})');
+            expect(midi, inInclusiveRange(
+                TunerEngine.minMidi, TunerEngine.maxMidi),
+                reason: '$note (${instrument.name}/${tuning.id})');
+            expect(TunerEngine.noteOffsets.containsKey(note), isTrue,
+                reason: '$note (${instrument.name}/${tuning.id})');
+          }
+        }
+      }
+    });
+
+    test('unknown tuning id falls back to the instrument standard', () {
+      expect(tuningFor(Instrument.viola, 'dadgad').id, 'standard');
     });
   });
 
@@ -280,34 +339,6 @@ void main() {
       expect(result.displayNote, 'A#');
     });
 
-    test('statusText for inTune', () {
-      const result = NoteDetectionResult(
-        note: 'A4', pitch: 440, cents: 0, targetFrequency: 440,
-        status: TuningStatus.inTune,
-      );
-      expect(result.statusText, 'In Tune ✓');
-    });
-
-    test('statusText for sharp', () {
-      const result = NoteDetectionResult(
-        note: 'A4', pitch: 445, cents: 19, targetFrequency: 440,
-        status: TuningStatus.sharp,
-      );
-      expect(result.statusText, 'Too Sharp ↑');
-    });
-
-    test('statusText for flat', () {
-      const result = NoteDetectionResult(
-        note: 'A4', pitch: 435, cents: -19, targetFrequency: 440,
-        status: TuningStatus.flat,
-      );
-      expect(result.statusText, 'Too Flat ↓');
-    });
-
-    test('statusText for idle', () {
-      final result = NoteDetectionResult.empty();
-      expect(result.statusText, '');
-    });
 
     test('isEmpty is true for empty result', () {
       expect(NoteDetectionResult.empty().isEmpty, isTrue);

@@ -59,3 +59,10 @@ test/failures/
 
 # Vercel CLI project link (holds the project/org ids; they live in CI secrets)
 .vercel/
+
+# Draft correspondence, not part of the project.
+APPEAL.md
+
+# Local UI preview renders — regenerate with
+#   flutter test -t preview --update-goldens
+test/goldens/preview/

@@ -1,21 +1,35 @@
-CrispTuner ist ein schnelles, genaues chromatisches Stimmgerät für Gitarre, Bass, Geige, Cello, Ukulele und Mandoline.
+CrispTuner ist ein präzises chromatisches Stimmgerät für Zupf- und Streichinstrumente – und, ungewöhnlich genug, ein Stimmgerät, das auch die historischen Temperaturen beherrscht.
 
-Die App hört über das Mikrofon mit, erkennt den gespielten Ton und zeigt auf den Cent genau, wie weit er daneben liegt – so sehen und hören Sie genau den Moment, in dem eine Saite sauber gestimmt ist.
+Die App hört über das Mikrofon mit, erkennt den gespielten Ton und zeigt auf den Cent genau, wie weit er daneben liegt – so sehen und hören Sie den Moment, in dem eine Saite sauber gestimmt ist.
 
-FUNKTIONEN
+INSTRUMENTE UND STIMMUNGEN
+
+• Elf Instrumente: Gitarre, 7-saitige Gitarre, Bass, 5-saitiger Bass, Ukulele, Banjo, Mandoline, Geige, Bratsche, Cello und Kontrabass.
+• Über dreißig fertige Stimmungen – Drop D, Drop C, DADGAD, Open G, Open D, Open E, Open C, einen Halbton oder Ganzton tiefer, Ukulele mit tiefem G und Bariton-Ukulele, Banjo Double C, Solostimmung für Cello und Kontrabass und mehr.
+• Eigene Stimmungen mit bis zu zwölf Saiten, halbtonweise einstellbar und dauerhaft gespeichert.
+
+HISTORISCHE TEMPERATUREN
+
+• Gleichstufig, pythagoreisch, 1/4-Komma-mitteltönig, Werckmeister III, Kirnberger III und Vallotti.
+• Wählen Sie die Tonart, auf der die Temperatur aufbaut, und sehen Sie für jeden Ton die Abweichung von der gleichstufigen Stimmung in Cent.
+• Kammerton von 415 Hz bis 465 Hz einstellbar – für historische Instrumente, Ensembles und Orchester, die nicht auf 440 Hz stimmen.
+
+Die Temperaturen werden aus den Quintgrößen hergeleitet, die sie definieren, nicht aus einer abgeschriebenen Tabelle. Das A bleibt deshalb in jeder Temperatur und jeder Tonart genau dort, wo Sie es eingestellt haben.
+
+MESSUNG
 
 • Tonhöhenerkennung in Echtzeit mit dem YIN-Algorithmus und einem Medianfilter, der die Anzeige ruhig hält statt zwischen den Frames zu springen.
-• Cent-genaue Stimmanzeige mit klarer Rückmeldung: gestimmt, zu hoch oder zu tief.
+• Ein Analysefenster, das bis zum tiefen H eines 5-saitigen Basses bei 30,9 Hz hinunterreicht – deutlich tiefer, als die meisten Stimmgeräte kommen.
 • Live-Frequenzspektrum und Tonhöhenverlauf, damit Sie das Einschwingen eines Tons beobachten können.
-• Referenztöne für jede Saite des gewählten Instruments, erzeugt als saubere, phasenkontinuierliche Sinuswellen.
-• Sechs Instrumentenvorlagen: Gitarre, Bass, Geige, Cello, Ukulele und Mandoline.
-• Einstellbarer Kammerton von 415 Hz bis 465 Hz – für historische Instrumente, Ensembles und Orchester, die nicht auf 440 Hz stimmen.
+• Referenztöne für jede Saite, erzeugt als saubere, phasenkontinuierliche Sinuswellen im gewählten Kammerton und in der gewählten Temperatur.
 • Auswahl des Mikrofons, wenn mehrere Eingänge verfügbar sind.
 • Vollständige VoiceOver-Unterstützung – der erkannte Ton wird bei jeder Änderung angesagt.
-• Deutsch und Englisch.
+• Helles und dunkles Design, Deutsch und Englisch.
 
 VON GRUND AUF PRIVAT
 
 CrispTuner erfasst nichts. Audio wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking. Die App stellt überhaupt keine Netzwerkverbindungen her.
 
-Ihr A4-Kammerton und das gewählte Instrument werden lokal gespeichert und stehen beim nächsten Start wieder bereit.
+Ihre Einstellungen werden lokal gespeichert und stehen beim nächsten Start wieder bereit.
+
+CrispTuner ist quelloffen unter der MIT-Lizenz.

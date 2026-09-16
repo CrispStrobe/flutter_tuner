@@ -115,7 +115,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutTitle => 'About CrispTuner';
 
   @override
-  String get aboutTagline => 'Precise chromatic tuner for six instruments';
+  String get aboutTagline => 'Chromatic tuner with historical temperaments';
 
   @override
   String get aboutServiceProvider => 'Service Provider';
@@ -139,14 +139,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aboutHowItWorksBody =>
-      'Microphone audio is captured as 16-bit PCM at 44.1 kHz. Each 2048-sample block is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The result is matched to the nearest note for your chosen concert pitch, and the deviation is shown in cents. In parallel a Hann-windowed FFT drives the spectrum display.';
+      'Microphone audio is captured as 16-bit PCM at 44.1 kHz and accumulated into a 4096-sample window. That window is analysed with the YIN algorithm to estimate pitch, then passed through a 5-sample median filter so the reading stays steady. The width matters: YIN can only resolve frequencies above twice the sample rate divided by the window, so a narrower window would not reach the low B of a five-string bass at 30.9 Hz.\n\nThe result is matched to the nearest note by its position on a logarithmic pitch scale, against targets computed for your concert pitch and temperament, and the deviation is shown in cents. Each temperament is derived from the sizes of the twelve fifths that define it rather than from a table of published cent values, and is then anchored so that A sounds exactly where you set it.\n\nIn parallel a Hann-windowed FFT over the most recent 2048 samples drives the spectrum display.';
 
   @override
   String get aboutPrivacy => 'Privacy';
 
   @override
   String get aboutPrivacyBody =>
-      'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your A4 reference frequency and selected instrument are saved, locally, so they persist between launches. They are removed when you uninstall the app.';
+      'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.';
 
   @override
   String get aboutPrivacyPolicyLink => 'Read the full privacy policy';
@@ -174,5 +174,121 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String visualizationLabel(String label) {
     return '$label visualization';
+  }
+
+  @override
+  String get instrumentGuitar7 => '7-string guitar';
+
+  @override
+  String get instrumentBass5 => '5-string bass';
+
+  @override
+  String get instrumentViola => 'Viola';
+
+  @override
+  String get instrumentDoubleBass => 'Double bass';
+
+  @override
+  String get instrumentBanjo => 'Banjo';
+
+  @override
+  String get instrumentLabel => 'Instrument';
+
+  @override
+  String get tuningLabel => 'Tuning';
+
+  @override
+  String get tuningStandard => 'Standard';
+
+  @override
+  String get tuningHalfStepDown => 'Half step down';
+
+  @override
+  String get tuningWholeStepDown => 'Whole step down';
+
+  @override
+  String get tuningLowG => 'Low G';
+
+  @override
+  String get tuningBaritone => 'Baritone';
+
+  @override
+  String get tuningDTuning => 'D tuning';
+
+  @override
+  String get tuningSolo => 'Solo tuning';
+
+  @override
+  String get tuningTenor => 'Tenor';
+
+  @override
+  String get tuningOctave => 'Octave';
+
+  @override
+  String get tuningCrossAEAE => 'Cross-tuning AEAE';
+
+  @override
+  String get tuningCustom => 'Custom…';
+
+  @override
+  String get temperamentLabel => 'Temperament';
+
+  @override
+  String get temperamentKey => 'Key';
+
+  @override
+  String get temperamentEqual => 'Equal';
+
+  @override
+  String get temperamentPythagorean => 'Pythagorean';
+
+  @override
+  String get temperamentMeantone => '1/4-comma meantone';
+
+  @override
+  String get temperamentWerckmeister => 'Werckmeister III';
+
+  @override
+  String get temperamentKirnberger => 'Kirnberger III';
+
+  @override
+  String get temperamentVallotti => 'Vallotti';
+
+  @override
+  String get editCustomTuning => 'Edit custom tuning';
+
+  @override
+  String get customTuningTitle => 'Custom tuning';
+
+  @override
+  String get addString => 'Add string';
+
+  @override
+  String get removeString => 'Remove string';
+
+  @override
+  String get done => 'Done';
+
+  @override
+  String get resetTuning => 'Reset to standard';
+
+  @override
+  String stringNumber(String n) {
+    return 'String $n';
+  }
+
+  @override
+  String raiseSemitone(String note) {
+    return 'Raise $note a semitone';
+  }
+
+  @override
+  String lowerSemitone(String note) {
+    return 'Lower $note a semitone';
+  }
+
+  @override
+  String temperamentOffset(String note, String cents) {
+    return '$note $cents ¢ vs equal';
   }
 }

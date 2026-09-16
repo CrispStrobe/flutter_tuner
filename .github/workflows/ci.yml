@@ -32,7 +32,10 @@ jobs:
       # Golden images are host-renderer specific, so they are verified in the
       # macOS job below. This previously ran `--update-goldens`, which silently
       # REGENERATED the images every run — the golden tests could never fail.
-      - run: flutter test -x golden
+      #
+      # `preview` is excluded too: those are local layout renders for a human
+      # to look at, not assertions, and they are not checked in.
+      - run: flutter test -x golden -x preview
 
   test-goldens:
     name: Test (goldens, macOS)

@@ -1,7 +1,7 @@
 name: flutter_tuner
-description: "CrispTuner — a precise chromatic instrument tuner with live pitch detection, spectrum analysis and reference tones."
+description: "CrispTuner — a chromatic instrument tuner with historical temperaments, alternate and custom tunings, live pitch detection and spectrum analysis."
 publish_to: 'none'
-version: 2.1.1+4
+version: 2.2.0+5
 
 environment:
   sdk: '>=3.2.3 <4.0.0'
@@ -56,11 +56,11 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: "assets/icon/app_icon.png"
-    background_color: "#0A0A0A"
-    theme_color: "#FF5722"
+    background_color: "#FBF1DE"
+    theme_color: "#9A6413"
   image_path: "assets/icon/app_icon.png"
   min_sdk_android: 23
-  adaptive_icon_background: "#0A0A0A"
+  adaptive_icon_background: "#FBF1DE"
   # Apple rejects any alpha channel in the 1024px marketing icon (ITMS-90717),
   # even a fully-opaque one. Belt and braces alongside the RGB master.
   remove_alpha_ios: true

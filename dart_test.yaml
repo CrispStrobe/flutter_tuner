@@ -4,3 +4,8 @@ tags:
   golden:
     # Golden images are host-renderer specific; the checked-in PNGs are macOS
     # renders. Run with `-t golden` on macOS, `-x golden` everywhere else.
+  preview:
+    # UI preview renders for eyeballing layout without a device. Not
+    # assertions: re-record with
+    #   flutter test -t preview --update-goldens
+    # and look at test/goldens/preview/*.png.

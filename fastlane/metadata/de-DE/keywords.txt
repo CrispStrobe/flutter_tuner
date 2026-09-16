@@ -1,1 +1,1 @@
-Stimmgerät,Gitarre,Bass,Geige,Cello,Ukulele,Mandoline,chromatisch,Tonhöhe,stimmen,Instrument,Musik
+Stimmgerät,Gitarre,Bass,Geige,Cello,Ukulele,Banjo,chromatisch,Temperatur,mitteltönig,barock
