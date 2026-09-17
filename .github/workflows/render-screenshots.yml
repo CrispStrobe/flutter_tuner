@@ -1,0 +1,69 @@
+name: Render Store Screenshots
+
+# Renders App Store screenshots from the widget tree — no simulator, no Xcode
+# build, about a minute. Runs on macOS because the renderer loads the system
+# SF font; without it every string comes out as Ahem boxes.
+#
+# `screenshots.yml` is the slower simulator-based cross-check.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+
+      - name: Render
+        run: |
+          flutter test -t store --update-goldens test/store_screenshots_test.dart
+
+      - name: Install Pillow
+        run: pip3 install --quiet --break-system-packages pillow
+
+      - name: Check sizes and flatten
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import glob, os, sys
+          from pathlib import Path
+          from PIL import Image
+
+          # App Store Connect rejects anything that is not one of these, and
+          # rejects images carrying an alpha channel.
+          OK = {"iphone": {(1320, 2868), (1290, 2796)},
+                "ipad": {(2064, 2752), (2048, 2732)},
+                "mac": {(2880, 1800), (2560, 1600), (1440, 900), (1280, 800)}}
+          out = Path("store-screenshots"); out.mkdir(exist_ok=True)
+          bad = []
+          files = sorted(glob.glob("test/store_screenshots/*.png"))
+          if not files:
+              sys.exit("the renderer produced no screenshots")
+          for f in files:
+              im = Image.open(f).convert("RGBA")
+              kind = os.path.basename(f).split("_")[0]
+              if im.size not in OK.get(kind, set()):
+                  bad.append(f"{os.path.basename(f)} {im.size[0]}x{im.size[1]}")
+                  continue
+              bg = Image.new("RGB", im.size, (251, 247, 240))
+              bg.paste(im, mask=im.split()[3])
+              bg.save(out / os.path.basename(f), optimize=True)
+              print(f"  ok  {os.path.basename(f)} {im.size[0]}x{im.size[1]}")
+          if bad:
+              sys.exit("not an App Store size: " + ", ".join(bad))
+          print(f"flattened {len(files)} screenshots")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-screenshots
+          path: store-screenshots/*.png
+          if-no-files-found: error

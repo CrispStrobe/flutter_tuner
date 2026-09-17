@@ -1,0 +1,58 @@
+name: Review Watch
+
+# Polls App Store review and TestFlight beta review, and opens an issue when
+# something moves. This used to be a process running on the developer's Mac,
+# where it was twice killed under memory pressure — and a watcher that dies
+# silently is worse than none. Here it costs nothing and cannot be killed by
+# whatever else the machine is doing.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: review-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet cryptography
+
+      - name: Query review states
+        id: status
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+        run: python3 tool/review_status.py
+
+      - name: Open an issue when something moved
+        if: steps.status.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUMMARY: ${{ steps.status.outputs.summary }}
+        run: |
+          set -euo pipefail
+          # One open issue at a time, so a 30-minute cron cannot spam.
+          existing=$(gh issue list --label review-watch --state open \
+                       --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$SUMMARY"
+          else
+            gh label create review-watch --description "App review status changes" \
+              --color FBCA04 2>/dev/null || true
+            gh issue create --title "App review status changed" \
+              --label review-watch --body "$SUMMARY"
+          fi
