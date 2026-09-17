@@ -1,5 +1,10 @@
 name: App Store Screenshots
 
+# Captures on real simulators. The primary way to produce store images is now
+# test/store_screenshots_test.dart, which renders the same widget tree in about
+# a minute with no simulator at all; this workflow is kept as a cross-check
+# that the app really looks like that when built and installed.
+
 on:
   workflow_dispatch:
     inputs:
@@ -19,7 +24,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.4'
+          flutter-version: '3.47.4'
           channel: stable
           cache: true
 
