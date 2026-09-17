@@ -53,21 +53,66 @@ jobs:
           mkdir -p screenshots
           flutter test integration_test/screenshots_test.dart \
             --dart-define=SHOT_PREFIX=iphone_${{ inputs.locale }} \
+            --dart-define=SHOT_RATIO=1 \
             --dart-define=SHOT_LOCALE=${{ inputs.locale }} \
             --dart-define=SHOT_DIR=screenshots \
             -d "$IPHONE_UDID"
+
+
+      # The simulator writes into the APP'S SANDBOX, not the workspace: a
+      # relative SHOT_DIR resolves inside the container, so the test's fallback
+      # puts the PNGs under
+      #   ~/Library/Developer/CoreSimulator/Devices/<UDID>/.../tmp/tuner-shots/
+      # Those are real host paths, so harvest them. Without this the artifact
+      # contained only the (useless) macOS renders.
+      - name: Harvest iPhone screenshots out of the simulator
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+          found=$(find ~/Library/Developer/CoreSimulator/Devices \
+                    -path '*tmp/tuner-shots/iphone_${{ inputs.locale }}*.png' 2>/dev/null || true)
+          if [ -z "$found" ]; then
+            echo "::error::no iPhone screenshots were produced"
+            exit 1
+          fi
+          echo "$found" | while read -r f; do cp "$f" screenshots/; done
+          ls -l screenshots/iphone_${{ inputs.locale }}*.png
 
       - name: Capture — iPad 13"
         if: always()
         run: |
           flutter test integration_test/screenshots_test.dart \
             --dart-define=SHOT_PREFIX=ipad_${{ inputs.locale }} \
+            --dart-define=SHOT_RATIO=1 \
             --dart-define=SHOT_LOCALE=${{ inputs.locale }} \
             --dart-define=SHOT_DIR=screenshots \
             -d "$IPAD_UDID"
 
+
+      # The simulator writes into the APP'S SANDBOX, not the workspace: a
+      # relative SHOT_DIR resolves inside the container, so the test's fallback
+      # puts the PNGs under
+      #   ~/Library/Developer/CoreSimulator/Devices/<UDID>/.../tmp/tuner-shots/
+      # Those are real host paths, so harvest them. Without this the artifact
+      # contained only the (useless) macOS renders.
+      - name: Harvest iPad screenshots out of the simulator
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+          found=$(find ~/Library/Developer/CoreSimulator/Devices \
+                    -path '*tmp/tuner-shots/ipad_${{ inputs.locale }}*.png' 2>/dev/null || true)
+          if [ -z "$found" ]; then
+            echo "::error::no iPad screenshots were produced"
+            exit 1
+          fi
+          echo "$found" | while read -r f; do cp "$f" screenshots/; done
+          ls -l screenshots/ipad_${{ inputs.locale }}*.png
+
       - name: Capture — macOS
         if: always()
+        continue-on-error: true
         run: |
           flutter config --enable-macos-desktop
           flutter test integration_test/screenshots_test.dart \
@@ -75,6 +120,30 @@ jobs:
             --dart-define=SHOT_LOCALE=${{ inputs.locale }} \
             --dart-define=SHOT_DIR=screenshots \
             -d macos
+
+      - name: Check the sizes Apple will accept
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import glob, struct, sys
+          ok = {"iphone": {(1320, 2868), (1290, 2796)},
+                "ipad":   {(2064, 2752), (2048, 2732)}}
+          bad = False
+          for f in sorted(glob.glob("screenshots/*.png")):
+              with open(f, "rb") as fh:
+                  w, h = struct.unpack(">II", fh.read(24)[16:24])
+              kind = "iphone" if "iphone" in f else "ipad" if "ipad" in f else None
+              if kind is None:
+                  print(f"  skip  {f} {w}x{h}")
+                  continue
+              good = (w, h) in ok[kind]
+              print(("  ok    " if good else "  BAD   ") + f"{f} {w}x{h}")
+              bad |= not good
+          if bad:
+              print("::error::a screenshot is not an App Store size")
+              sys.exit(1)
+          EOF
 
       - name: Upload screenshots
         if: always()
