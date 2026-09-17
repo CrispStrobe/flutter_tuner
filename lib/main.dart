@@ -7,6 +7,7 @@ import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'about_screen.dart';
 import 'audio_service.dart';
+import 'audio_service_stub.dart' as audio;
 import 'l10n/app_localizations.dart';
 import 'theme.dart';
 import 'tuner_engine.dart';
@@ -27,7 +28,14 @@ void main() {
 enum TunerStatus { idle, listening, inTune, sharp, flat, playing, permissionDenied }
 
 class TunerApp extends StatelessWidget {
-  const TunerApp({super.key});
+  /// Audio capture and tone output. Left null in the shipping app, which
+  /// creates the platform implementations; supplied by tests and by the
+  /// store-screenshot renderer, which feed synthesised audio through the real
+  /// detection pipeline instead of a microphone.
+  final audio.AudioService? audioService;
+  final audio.ToneGeneratorService? toneGenerator;
+
+  const TunerApp({super.key, this.audioService, this.toneGenerator});
 
   @override
   Widget build(BuildContext context) {
@@ -53,21 +61,27 @@ class TunerApp extends StatelessWidget {
       theme: TunerPalette.light.themeData,
       darkTheme: TunerPalette.dark.themeData,
       themeMode: ThemeMode.system,
-      home: const TunerPage(),
+      home: TunerPage(
+        audioService: audioService,
+        toneGenerator: toneGenerator,
+      ),
     );
   }
 }
 
 class TunerPage extends StatefulWidget {
-  const TunerPage({super.key});
+  final audio.AudioService? audioService;
+  final audio.ToneGeneratorService? toneGenerator;
+
+  const TunerPage({super.key, this.audioService, this.toneGenerator});
 
   @override
   State<TunerPage> createState() => _TunerPageState();
 }
 
 class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
-  late final AudioService _audioService;
-  late final ToneGeneratorService _toneGenerator;
+  late final audio.AudioService _audioService;
+  late final audio.ToneGeneratorService _toneGenerator;
   // The window must match what the rolling buffer feeds it, or YIN's lag
   // search is sized for audio it never sees.
   final _pitchDetector = PitchDetector(
@@ -119,8 +133,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _audioService = AudioService.create();
-    _toneGenerator = ToneGeneratorService.create();
+    _audioService = widget.audioService ?? AudioService.create();
+    _toneGenerator = widget.toneGenerator ?? ToneGeneratorService.create();
     WidgetsBinding.instance.addObserver(this);
     _audioService.init().then((_) => _refreshInputDevices());
     _toneGenerator.init();
@@ -495,7 +509,10 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     final note = result?.note ?? '';
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // Not transparent: nothing paints behind the app bar, so a transparent
+      // scaffold let the bare window show through as a black (or white) band
+      // above the warm background on a device.
+      backgroundColor: palette.backgroundTop,
       appBar: AppBar(
         title: Text(l10n.appTitle,
             style: TextStyle(fontSize: 18, color: palette.textPrimary)),
@@ -1239,9 +1256,10 @@ class _CustomTuningDialogState extends State<CustomTuningDialog> {
       title: Text(l10n.customTuningTitle,
           style: TextStyle(color: palette.textPrimary, fontSize: 18)),
       content: SizedBox(
-        // Take the dialog's full available width rather than asking for a
-        // fixed 320, which a small phone cannot grant.
-        width: double.maxFinite,
+        // As wide as a phone allows, but no wider than reads well: a bare
+        // double.maxFinite stretched the dialog across nearly the whole of an
+        // iPad, and a fixed 320 overflowed a small phone.
+        width: math.min(420, MediaQuery.sizeOf(context).width - 80),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
