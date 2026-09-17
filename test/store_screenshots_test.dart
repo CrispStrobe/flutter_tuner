@@ -29,13 +29,17 @@ class Device {
   final Size logical;
   final double ratio;
   final EdgeInsets safeArea;
-  const Device(this.name, this.logical, this.ratio, this.safeArea);
+  final TargetPlatform platform;
+  const Device(this.name, this.logical, this.ratio, this.safeArea,
+      [this.platform = TargetPlatform.iOS]);
 }
 
 // iPhone 16 Pro Max: 440x956 @3x = 1320x2868. iPad Pro 13": 1032x1376 @2x.
+// Mac: a 1440x900 window @2x = 2880x1800, one of the Mac App Store sizes.
 const devices = [
   Device('iphone', Size(440, 956), 3, EdgeInsets.only(top: 62, bottom: 34)),
   Device('ipad', Size(1032, 1376), 2, EdgeInsets.only(top: 24, bottom: 20)),
+  Device('mac', Size(1440, 900), 2, EdgeInsets.zero, TargetPlatform.macOS),
 ];
 
 Future<void> loadFonts() async {
@@ -74,7 +78,7 @@ void main() {
           {Map<String, Object> prefs = const {},
           Brightness brightness = Brightness.light}) async {
         SharedPreferences.setMockInitialValues(prefs);
-        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        debugDefaultTargetPlatformOverride = device.platform;
         tester.view.physicalSize = device.logical * device.ratio;
         tester.view.devicePixelRatio = device.ratio;
         final pad = FakeViewPadding(
