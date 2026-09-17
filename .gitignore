@@ -66,3 +66,7 @@ APPEAL.md
 # Local UI preview renders — regenerate with
 #   flutter test -t preview --update-goldens
 test/goldens/preview/
+
+# Rendered App Store screenshots — regenerate with
+#   flutter test -t store --update-goldens test/store_screenshots_test.dart
+test/store_screenshots/
