@@ -36,6 +36,12 @@ dart run bin/alignment.dart 12
 # after a pluck: how long until the needle is right, and does it stay
 dart run bin/notes.dart --subset solo --hop 512
 
+# tracking lag: how far the needle trails while the pitch is moving
+dart run bin/tracking.dart --subset solo --limit 60
+
+# SWIPE' against YIN on the same frames (slow — hence the subset)
+dart run bin/swipe.dart --limit 20 --hop 1024
+
 # what the partials say: inharmonicity, timbre, and whether the spectrum can
 # catch the detector's octave errors (--skip holds files out of the tuning set)
 dart run bin/harmonics.dart --subset solo --skip 20
@@ -89,6 +95,8 @@ of the maths measures nothing.
 | `lib/yin.dart` | YIN with every step a parameter — threshold, tau rule, the paper's step 6, naive or FFT difference function. Reproduces `pitch_detector_dart` 0.0.7 exactly at its defaults. |
 | `lib/mpm.dart` | McLeod's NSDF, as a comparison point. |
 | `lib/pyin.dart` | A pYIN-shaped tracker: candidate distribution per frame, Viterbi across frames. Simplified; see the file. |
+| `lib/tracking.dart`, `bin/tracking.dart` | Tracking lag during bends and slides (REPORT.md §9.1). |
+| `lib/swipe.dart`, `bin/swipe.dart` | A SWIPE′-like spectral estimator, as a comparison point (REPORT.md §4.5). |
 | `lib/note_latency.dart`, `bin/notes.dart` | Note-level latency: time from the pluck to a correct, settled reading (REPORT.md §9). |
 | `tool/basic_pitch_eval.py` | Offline evaluation of Spotify's Basic Pitch on the same corpus, by the same rules (REPORT.md §10). Python, because it is an evaluation and not app code — it needs `onnxruntime`, `numpy` and `scipy`, and the model from `basic_pitch/saved_models/icassp_2022/nmp.onnx`. |
 | `bin/harmonics.dart` | The partial measurements of REPORT.md §8, scored against the annotation. |
