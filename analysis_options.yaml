@@ -9,6 +9,14 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # `bench/` is a separate pure-Dart package with its own pubspec and its own
+    # analysis run (the "Bench" CI job). `flutter analyze` at the repo root
+    # would walk into it and report every `package:tuner_bench/...` import as
+    # unresolved, because this package's package_config knows nothing about it.
+    - bench/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

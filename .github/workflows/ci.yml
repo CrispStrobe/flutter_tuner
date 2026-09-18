@@ -49,6 +49,29 @@ jobs:
       # to look at, not assertions, and they are not checked in.
       - run: flutter test -x golden -x preview
 
+  bench:
+    name: Bench (pure Dart)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      # The benchmark copies the app's three Flutter-free files rather than
+      # path-depending on this package, which would drag in the Flutter SDK.
+      # A benchmark of a stale copy of the maths measures nothing, so the copy
+      # is verified before anything else.
+      - run: ./tool/sync_core.sh --check
+        working-directory: bench
+      - run: dart pub get
+        working-directory: bench
+      - run: dart analyze
+        working-directory: bench
+      # The corpus lives outside the repo, so this is the unit tests only:
+      # the histogram, the FFT difference function, the stiffness fit.
+      - run: dart test
+        working-directory: bench
+
   test-goldens:
     name: Test (goldens, macOS)
     runs-on: macos-latest
