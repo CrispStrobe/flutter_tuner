@@ -11,6 +11,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 /// One string's pitch contour: times (seconds) and frequencies (Hz), sorted.
 class StringContour {
@@ -20,11 +21,34 @@ class StringContour {
   const StringContour(this.string, this.times, this.frequencies);
 }
 
+/// One note event: a pluck, and what it sounded until it stopped.
+///
+/// GuitarSet's `note_midi` annotations are row-major where `pitch_contour` is
+/// columnar, and the value is a *fractional* MIDI number — the note's mean
+/// pitch, so a bend or a slide averages into it.
+class NoteEvent {
+  final int string;
+  final double onset;
+  final double duration;
+  final double midi;
+  const NoteEvent(this.string, this.onset, this.duration, this.midi);
+
+  double get offset => onset + duration;
+
+  /// Equal-tempered frequency at A440.
+  double get frequency => 440 * math.pow(2, (midi - 69) / 12).toDouble();
+
+  bool soundsAt(double t) => t >= onset && t <= offset;
+}
+
 class JamsTruth {
   final String title;
   final double duration;
   final List<StringContour> strings;
-  const JamsTruth(this.title, this.duration, this.strings);
+
+  /// Every note on every string, in onset order.
+  final List<NoteEvent> notes;
+  const JamsTruth(this.title, this.duration, this.strings, this.notes);
 
   /// The annotation hop, inferred from the median spacing inside a contour.
   double get hop {
@@ -78,9 +102,24 @@ JamsTruth readJams(String path) {
       jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
   final meta = root['file_metadata'] as Map<String, dynamic>;
   final strings = <StringContour>[];
+  final notes = <NoteEvent>[];
   int n = 0;
+  int noteString = 0;
   for (final a in (root['annotations'] as List)) {
     final ann = a as Map<String, dynamic>;
+    if (ann['namespace'] == 'note_midi') {
+      for (final e in (ann['data'] as List)) {
+        final row = e as Map<String, dynamic>;
+        notes.add(NoteEvent(
+          noteString,
+          (row['time'] as num).toDouble(),
+          (row['duration'] as num).toDouble(),
+          (row['value'] as num).toDouble(),
+        ));
+      }
+      noteString++;
+      continue;
+    }
     if (ann['namespace'] != 'pitch_contour') continue;
     final data = ann['data'] as Map<String, dynamic>;
     final times = <double>[];
@@ -99,9 +138,11 @@ JamsTruth readJams(String path) {
     strings.add(StringContour(n, times, freqs));
     n++;
   }
+  notes.sort((a, b) => a.onset.compareTo(b.onset));
   return JamsTruth(
     (meta['title'] ?? '') as String,
     (meta['duration'] as num).toDouble(),
     strings,
+    notes,
   );
 }
