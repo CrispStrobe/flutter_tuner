@@ -333,7 +333,7 @@ packages:
     source: hosted
     version: "6.0.2"
   pitch_detector_dart:
-    dependency: "direct main"
+    dependency: "direct dev"
     description:
       name: pitch_detector_dart
       sha256: "47b5dd1f1cd1fb6af553a9b920e271eba62b8a1b9e77fdfaa9421ae1dacb8a90"

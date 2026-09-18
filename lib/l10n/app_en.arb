@@ -235,5 +235,17 @@
         "example": "-9.8"
       }
     }
+  },
+  "detectorLabel": "Pitch detector",
+  "@detectorLabel": {
+    "description": "Label for the setting that chooses which pitch-detection algorithm runs"
+  },
+  "detectorYin": "YIN (recommended)",
+  "@detectorYin": {
+    "description": "Name of the default pitch detector"
+  },
+  "detectorMpm": "MPM (more sensitive)",
+  "@detectorMpm": {
+    "description": "Name of the alternative pitch detector, which reports on more frames but is wrong more often"
   }
 }

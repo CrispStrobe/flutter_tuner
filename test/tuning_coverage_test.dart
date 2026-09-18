@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:flutter_tuner/tuner_engine.dart';
 
 /// Every open string of every tuning the app offers, played through the real
@@ -33,8 +32,9 @@ void main() {
     return out;
   }
 
-  final detector = PitchDetector(
-      audioSampleRate: 44100, bufferSize: pitchWindowSize);
+  // The detector the app actually runs, not a stand-in for it.
+  final detector =
+      YinEngine(sampleRate: 44100, windowSize: pitchWindowSize);
 
   test('every open string of every tuning is detected as itself', () async {
     final engine = TunerEngine();
@@ -45,7 +45,7 @@ void main() {
       for (final tuning in tuningsFor(instrument)) {
         for (final note in tuning.strings) {
           final target = engine.getFrequencyForNote(note)!;
-          final result = await detector.getPitchFromFloatBuffer(pluck(target));
+          final result = detector.analyse(pluck(target));
           final where = '${instrument.name}/${tuning.id} $note '
               '(${target.toStringAsFixed(2)} Hz)';
           checked++;
@@ -54,7 +54,7 @@ void main() {
             failures.add('$where: not detected at all');
             continue;
           }
-          final detected = engine.detectNote(result.pitch);
+          final detected = engine.detectNote(result.frequency);
           if (detected.note != note) {
             failures.add('$where: heard as ${detected.note}');
           } else if (detected.cents.abs() > 10) {
@@ -78,12 +78,12 @@ void main() {
       for (final tuning in tuningsFor(instrument)) {
         for (final note in tuning.strings) {
           final target = engine.getFrequencyForNote(note)!;
-          final result = await detector.getPitchFromFloatBuffer(pluck(target));
+          final result = detector.analyse(pluck(target));
           if (!result.pitched) {
             failures.add('${instrument.name}/${tuning.id} $note: not detected');
             continue;
           }
-          final detected = engine.detectNote(result.pitch);
+          final detected = engine.detectNote(result.frequency);
           if (detected.note != note) {
             failures.add('${instrument.name}/${tuning.id} $note: '
                 'heard as ${detected.note}');
@@ -109,10 +109,10 @@ void main() {
       }
     }
     for (final note in [lowNote, highNote]) {
-      final result = await detector
-          .getPitchFromFloatBuffer(pluck(engine.getFrequencyForNote(note)!));
+      final result =
+          detector.analyse(pluck(engine.getFrequencyForNote(note)!));
       expect(result.pitched, isTrue, reason: '$note was not detected');
-      expect(engine.detectNote(result.pitch).note, note);
+      expect(engine.detectNote(result.frequency).note, note);
     }
     // ignore: avoid_print
     print('catalogue spans $lowNote to $highNote');

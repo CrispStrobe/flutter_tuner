@@ -293,4 +293,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String temperamentOffset(String note, String cents) {
     return '$note $cents ¢ ggü. gleichstufig';
   }
+
+  @override
+  String get detectorLabel => 'Tonhöhenerkennung';
+
+  @override
+  String get detectorYin => 'YIN (empfohlen)';
+
+  @override
+  String get detectorMpm => 'MPM (empfindlicher)';
 }

@@ -13,7 +13,6 @@ dependencies:
     sdk: flutter
   # Core audio (mobile)
   record: ^6.0.0
-  pitch_detector_dart: ^0.0.7
   fftea: ^1.5.0
   flutter_pcm_sound: ^3.3.3
 
@@ -28,6 +27,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Not shipped any more: lib/detectors.dart carries YIN itself, so that the
+  # difference function can be computed by FFT instead of the package's
+  # O(N^2) double loop. Kept here so test/detector_equivalence_test.dart can
+  # go on asserting, frame by frame, that our YIN and the package's agree.
+  pitch_detector_dart: ^0.0.7
   integration_test:
     sdk: flutter
   flutter_lints: ^3.0.1

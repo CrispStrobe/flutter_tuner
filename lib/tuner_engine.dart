@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';
 
+import 'detectors.dart';
 import 'temperament.dart';
 import 'tuner_core.dart';
 // Also imported under a prefix: the class below deliberately re-exposes
@@ -13,6 +14,8 @@ import 'tuner_core.dart';
 import 'tuner_core.dart' as core;
 import 'tunings.dart';
 
+export 'detectors.dart'
+    show DetectorKind, PitchEngine, PitchEstimate, YinEngine, MpmEngine;
 export 'temperament.dart';
 export 'tuner_core.dart'
     show
@@ -69,6 +72,8 @@ class TunerEngine extends ChangeNotifier {
   final Float64List _windowScratch = Float64List(fftSize);
 
   final PitchSmoother _smoother = PitchSmoother();
+
+  DetectorKind _detectorKind = DetectorKind.yin;
 
   NoteDetectionResult? _lastResult;
 
@@ -247,6 +252,21 @@ class TunerEngine extends ChangeNotifier {
     _lastResult = result;
     _scheduleNotify();
     return result;
+  }
+
+  /// Which detector analyses the audio.
+  ///
+  /// YIN is the default and what every number in `bench/REPORT.md` describes.
+  /// MPM answers on more frames and is wrong on more of them; it is offered
+  /// because on a weak signal its willingness to commit is sometimes what a
+  /// player wants. Changing this clears the smoothing window: the two
+  /// detectors disagree by more than the median should ever average across.
+  DetectorKind get detectorKind => _detectorKind;
+  set detectorKind(DetectorKind value) {
+    if (_detectorKind == value) return;
+    _detectorKind = value;
+    _smoother.clear();
+    notifyListeners();
   }
 
   /// Apply the median filter to smooth an already-accepted pitch.
