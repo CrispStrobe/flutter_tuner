@@ -173,7 +173,8 @@ class MethodStats {
   double get accuracyWhenReporting => reported == 0 ? 0 : correct / reported;
   double get octaveRate => reported == 0 ? 0 : octave / reported;
   double get grossRate => reported == 0 ? 0 : gross / reported;
-  double get voicingRecall => refVoiced == 0 ? 0 : refVoicedReported / refVoiced;
+  double get voicingRecall =>
+      refVoiced == 0 ? 0 : refVoicedReported / refVoiced;
   double get voicingFalseAlarm =>
       refUnvoiced == 0 ? 0 : refUnvoicedReported / refUnvoiced;
 
@@ -262,8 +263,7 @@ class MethodStats {
     s.fine.merge(CentHistogram.fromJson(j['fine'] as Map<String, dynamic>));
     s.fineSteady
         .merge(CentHistogram.fromJson(j['fineSteady'] as Map<String, dynamic>));
-    s.jitter
-        .merge(CentHistogram.fromJson(j['jitter'] as Map<String, dynamic>));
+    s.jitter.merge(CentHistogram.fromJson(j['jitter'] as Map<String, dynamic>));
     s.steadyFrames = j['steadyFrames'] as int;
     s.steadyReported = j['steadyReported'] as int;
     s.steadyCorrect = j['steadyCorrect'] as int;

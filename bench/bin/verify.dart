@@ -26,15 +26,18 @@ Future<void> main(List<String> args) async {
   final rate = wav.sampleRate.toDouble();
   const hop = 1024;
 
-  final package = PitchDetector(audioSampleRate: rate, bufferSize: pitchWindowSize);
+  final package =
+      PitchDetector(audioSampleRate: rate, bufferSize: pitchWindowSize);
   final naive = RefYin(sampleRate: rate, bufferSize: pitchWindowSize);
-  final fast = RefYin(sampleRate: rate, bufferSize: pitchWindowSize, useFft: true);
+  final fast =
+      RefYin(sampleRate: rate, bufferSize: pitchWindowSize, useFft: true);
 
   int compared = 0, mismatched = 0;
   double worstCents = 0;
   final frames = <Float64List>[];
   for (int start = 0;
-      start + pitchWindowSize <= wav.samples.length && frames.length < maxFrames;
+      start + pitchWindowSize <= wav.samples.length &&
+          frames.length < maxFrames;
       start += hop) {
     frames.add(
         Float64List.sublistView(wav.samples, start, start + pitchWindowSize));
@@ -58,7 +61,8 @@ Future<void> main(List<String> args) async {
 
   stdout.writeln('frames compared : $compared');
   stdout.writeln('mismatches      : $mismatched');
-  stdout.writeln('worst deviation : ${worstCents.toStringAsExponential(2)} cents');
+  stdout.writeln(
+      'worst deviation : ${worstCents.toStringAsExponential(2)} cents');
 
   // Timing, on the same frames, warmed up.
   double time(void Function(Float64List) f, int reps) {
@@ -86,7 +90,8 @@ Future<void> main(List<String> args) async {
   pkgSw.stop();
 
   stdout.writeln('');
-  stdout.writeln('package (naive) : ${(pkgSw.elapsedMicroseconds / 1000 / frames.length).toStringAsFixed(3)} ms/frame');
+  stdout.writeln(
+      'package (naive) : ${(pkgSw.elapsedMicroseconds / 1000 / frames.length).toStringAsFixed(3)} ms/frame');
   stdout.writeln('RefYin naive    : ${naiveMs.toStringAsFixed(3)} ms/frame');
   stdout.writeln('RefYin FFT      : ${fftMs.toStringAsFixed(3)} ms/frame');
   stdout.writeln('speed-up        : ${(naiveMs / fftMs).toStringAsFixed(1)}x');

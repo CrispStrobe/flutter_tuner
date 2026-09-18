@@ -232,8 +232,7 @@ class PyinTracker {
   /// The decoded path is quantised to [binCents]; a tuner needs better than
   /// that. Snap each decoded frame back onto the nearest *actual* candidate
   /// frequency, which carries YIN's parabolic sub-sample precision.
-  List<double> snapToCandidates(
-      List<PyinFrame> frames, List<double> decoded) {
+  List<double> snapToCandidates(List<PyinFrame> frames, List<double> decoded) {
     final out = List<double>.filled(decoded.length, 0);
     for (int t = 0; t < decoded.length; t++) {
       final f = decoded[t];

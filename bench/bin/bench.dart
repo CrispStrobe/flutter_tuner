@@ -107,17 +107,18 @@ Future<void> main(List<String> argv) async {
       });
     });
     final decoded = jsonDecode(encoded) as Map<String, dynamic>;
-    final stats =
-        MethodStats.decodeAll(jsonEncode(decoded['stats']));
+    final stats = MethodStats.decodeAll(jsonEncode(decoded['stats']));
     for (final e in stats.entries) {
       aggregate.putIfAbsent(e.key, () => MethodStats(e.key)).merge(e.value);
     }
     if (decoded['medianB'] != null) {
-      perFileB[decoded['file'] as String] = (decoded['medianB'] as num).toDouble();
+      perFileB[decoded['file'] as String] =
+          (decoded['medianB'] as num).toDouble();
     }
     done++;
     stdout.write('\r  ${done.toString().padLeft(4)}/${pairs.length} '
-        '${(sw.elapsed.inSeconds)}s  ${decoded['file']}'.padRight(78));
+            '${(sw.elapsed.inSeconds)}s  ${decoded['file']}'
+        .padRight(78));
   }
 
   // A small pool: the work is CPU-bound, so one isolate per core.
@@ -194,8 +195,7 @@ void printTable(Map<String, MethodStats> stats) {
       'polyphonic, ${any.refUnvoiced} silent');
   final poly = stats.values
       .where((s) => s.polyReported > 0)
-      .map((s) =>
-          '${s.name} ${pct(s.polyMatchedAnyString / s.polyReported)}%')
+      .map((s) => '${s.name} ${pct(s.polyMatchedAnyString / s.polyReported)}%')
       .take(3)
       .join(', ');
   stdout.writeln('on polyphonic frames, "named some sounding string": $poly');

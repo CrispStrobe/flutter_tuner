@@ -30,7 +30,9 @@ Float64List pluck(double f0, int samples, math.Random rng,
   const harmonics = [1.0, 0.55, 0.32, 0.20, 0.13, 0.08, 0.05, 0.03];
   final out = Float64List(samples);
   // A random phase per partial, or every run measures the same lucky frame.
-  final phases = [for (int i = 0; i < harmonics.length; i++) rng.nextDouble() * 2 * math.pi];
+  final phases = [
+    for (int i = 0; i < harmonics.length; i++) rng.nextDouble() * 2 * math.pi
+  ];
   for (int i = 0; i < samples; i++) {
     final t = i / rate;
     double s = 0;
@@ -67,7 +69,8 @@ void main(List<String> args) {
   const detunings = [-33.0, -12.0, -3.0, 0.0, 3.0, 12.0, 33.0];
 
   for (final c in cases) {
-    final yin = RefYin(sampleRate: rate * 1.0, bufferSize: pitchWindowSize, useFft: true);
+    final yin = RefYin(
+        sampleRate: rate * 1.0, bufferSize: pitchWindowSize, useFft: true);
     final mpm = Mpm(sampleRate: rate * 1.0, bufferSize: pitchWindowSize);
     final results = <String, CentHistogram>{
       'yin (parabolic only)': CentHistogram(),
@@ -83,12 +86,13 @@ void main(List<String> args) {
       for (final detune in detunings) {
         final f0 = base * math.pow(2, detune / 1200).toDouble();
         // Several frames per tone, at different points in the decay.
-        final signal = pluck(f0, pitchWindowSize * 4, rng, b: c.b, noise: c.noise);
+        final signal =
+            pluck(f0, pitchWindowSize * 4, rng, b: c.b, noise: c.noise);
         for (int start = 0;
             start + pitchWindowSize <= signal.length;
             start += pitchWindowSize) {
-          final block = Float64List.sublistView(
-              signal, start, start + pitchWindowSize);
+          final block =
+              Float64List.sublistView(signal, start, start + pitchWindowSize);
           frames++;
           yin.cmndf(block);
           final plain = yin.resultFromCmndf(0.15);

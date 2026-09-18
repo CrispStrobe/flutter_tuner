@@ -74,7 +74,8 @@ class JamsTruth {
 }
 
 JamsTruth readJams(String path) {
-  final root = jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+  final root =
+      jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
   final meta = root['file_metadata'] as Map<String, dynamic>;
   final strings = <StringContour>[];
   int n = 0;

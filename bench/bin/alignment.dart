@@ -49,14 +49,15 @@ void main(List<String> args) {
     final truth = readJams('$data/annotation/$base.jams');
     final wav = readWav(wavPath);
     final rate = wav.sampleRate.toDouble();
-    final yin = RefYin(sampleRate: rate, bufferSize: pitchWindowSize, useFft: true);
+    final yin =
+        RefYin(sampleRate: rate, bufferSize: pitchWindowSize, useFft: true);
     final tolerance = truth.hop / 2;
 
     for (int start = 0;
         start + pitchWindowSize <= wav.samples.length;
         start += hop) {
-      final block = Float64List.sublistView(
-          wav.samples, start, start + pitchWindowSize);
+      final block =
+          Float64List.sublistView(wav.samples, start, start + pitchWindowSize);
       yin.cmndf(block);
       final r = yin.resultFromCmndf(0.20);
       if (!r.pitched || r.probability <= 0.9) continue;
@@ -84,7 +85,8 @@ void main(List<String> args) {
   for (final o in offsets) {
     final p = plain[o]!, q = refined[o]!;
     stdout.writeln('  +$o samples '
-        '(${(1000 * o / 44100).toStringAsFixed(1)} ms)'.padRight(12) +
+                '(${(1000 * o / 44100).toStringAsFixed(1)} ms)'
+            .padRight(12) +
         '${p.absPercentile(0.5).toStringAsFixed(2).padLeft(10)}'
             '${p.absPercentile(0.9).toStringAsFixed(2).padLeft(7)}  |  '
             '${q.absPercentile(0.5).toStringAsFixed(2).padLeft(10)}'

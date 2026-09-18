@@ -117,15 +117,21 @@ const List<Variant> defaultVariants = [
   Variant('yin-raw-0.40', threshold: 0.40),
 
   // --- threshold sweep with the app's gate and median in place ---
-  Variant('app-thr-0.10', threshold: 0.10, probabilityGate: true, medianPolicy: MedianPolicy.app),
-  Variant('app-thr-0.15', threshold: 0.15, probabilityGate: true, medianPolicy: MedianPolicy.app),
+  Variant('app-thr-0.10',
+      threshold: 0.10, probabilityGate: true, medianPolicy: MedianPolicy.app),
+  Variant('app-thr-0.15',
+      threshold: 0.15, probabilityGate: true, medianPolicy: MedianPolicy.app),
 
   // --- step 6 of the YIN paper, the package's TODO ---
   Variant('yin-raw-0.20+step6', bestLocal: true),
   Variant('yin-raw-0.15+step6', threshold: 0.15, bestLocal: true),
-  Variant('app+step6', bestLocal: true, probabilityGate: true, medianPolicy: MedianPolicy.app),
+  Variant('app+step6',
+      bestLocal: true, probabilityGate: true, medianPolicy: MedianPolicy.app),
   Variant('app-thr-0.15+step6',
-      threshold: 0.15, bestLocal: true, probabilityGate: true, medianPolicy: MedianPolicy.app),
+      threshold: 0.15,
+      bestLocal: true,
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app),
 
   // --- picking the global minimum instead of the first dip ---
   Variant('yin-raw-0.20+globalmin', selection: TauSelection.globalMinimum),
@@ -194,7 +200,8 @@ FileResult evaluateFile({
   final pyin = PyinTracker(sampleRate: rate, bufferSize: window);
 
   // Ground truth, per frame, once per distinct reference offset in use.
-  final offsets = {for (final v in variants) v.referenceOffset}.toList()..sort();
+  final offsets = {for (final v in variants) v.referenceOffset}.toList()
+    ..sort();
   final refMono = {for (final o in offsets) o: <double>[]};
   final refActive = {for (final o in offsets) o: <List<double>>[]};
   // Detections, per variant, per frame (0 = nothing reported).
@@ -253,8 +260,8 @@ FileResult evaluateFile({
               // A gap since the previous frame, or a note change, means the
               // window holds nothing worth averaging with.
               final previous = lastRaw[v.name];
-              final gap = detected[v.name]!.isNotEmpty &&
-                  detected[v.name]!.last <= 0;
+              final gap =
+                  detected[v.name]!.isNotEmpty && detected[v.name]!.last <= 0;
               final jump = policy == MedianPolicy.resetOnGapOrJump &&
                   previous != null &&
                   cents(value, previous).abs() > 100;
@@ -362,8 +369,7 @@ FileResult evaluateFile({
     bValues.sort();
     medianB = bValues[bValues.length ~/ 2];
   }
-  return FileResult(
-      wavPath.split('/').last, stats, medianB, bValues.length);
+  return FileResult(wavPath.split('/').last, stats, medianB, bValues.length);
 }
 
 /// Frames per second of audio at this window and hop, for the report.

@@ -81,14 +81,11 @@ Future<void> main(List<String> args) async {
     name: 'YIN, FFT difference',
     ms: measure((b) => fast.getPitch(b), reps: 5)
   ));
-  rows.add((
-    name: 'MPM / NSDF (FFT)',
-    ms: measure((b) => mpm.getPitch(b), reps: 5)
-  ));
+  rows.add(
+      (name: 'MPM / NSDF (FFT)', ms: measure((b) => mpm.getPitch(b), reps: 5)));
   rows.add((
     name: 'instantaneous-frequency refinement alone',
-    ms: measure((b) => refineByInstantaneousFrequency(b, 196.0, rate),
-        reps: 5)
+    ms: measure((b) => refineByInstantaneousFrequency(b, 196.0, rate), reps: 5)
   ));
   rows.add((
     name: 'pYIN front end (FFT YIN + candidate set)',

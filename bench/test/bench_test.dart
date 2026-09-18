@@ -62,8 +62,8 @@ void main() {
     test('the FFT difference function matches the naive one', () {
       final block = tone(146.83);
       final naive = RefYin(sampleRate: 44100, bufferSize: pitchWindowSize);
-      final fast = RefYin(
-          sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
+      final fast =
+          RefYin(sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
       final a = Float64List.fromList(naive.cmndf(block));
       final b = fast.cmndf(block);
       double worst = 0;
@@ -77,16 +77,16 @@ void main() {
     });
 
     test('finds an open D string', () {
-      final yin = RefYin(
-          sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
+      final yin =
+          RefYin(sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
       final r = yin.getPitch(tone(146.83));
       expect(r.pitched, isTrue);
       expect(cents(r.pitch, 146.83).abs(), lessThan(1.0));
     });
 
     test('offers several candidates for pYIN to choose between', () {
-      final yin = RefYin(
-          sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
+      final yin =
+          RefYin(sampleRate: 44100, bufferSize: pitchWindowSize, useFft: true);
       yin.cmndf(tone(196.0));
       final candidates = yin.candidates();
       expect(candidates.length, greaterThan(1));

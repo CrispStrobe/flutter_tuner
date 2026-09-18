@@ -158,7 +158,10 @@ Refinement refineByInstantaneousFrequency(
   final b = slope / intercept;
   // A guitar's B is ~1e-5–1e-4; anything wilder is a bad fit, not a stiff
   // string, and the plain fit is the safer answer.
-  if (!b.isFinite || b < 0 || b > 1e-2 || (f0 - coarseF0).abs() > 0.06 * coarseF0) {
+  if (!b.isFinite ||
+      b < 0 ||
+      b > 1e-2 ||
+      (f0 - coarseF0).abs() > 0.06 * coarseF0) {
     return Refinement(plainF0, null, freqs.length);
   }
   return Refinement(f0, b, freqs.length);

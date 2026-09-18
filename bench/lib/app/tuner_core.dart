@@ -18,7 +18,18 @@ const int minMidi = 21;
 const int maxMidi = 108;
 
 const List<String> _noteNames = [
-  'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
+  'C',
+  'C#',
+  'D',
+  'D#',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'G#',
+  'A',
+  'A#',
+  'B',
 ];
 
 /// Scientific pitch name for a MIDI note number — 69 is "A4".
@@ -219,9 +230,7 @@ class PitchTable {
   /// The three candidates around the equal-tempered guess are then compared
   /// against the *tempered* targets, which can sit tens of cents off equal.
   NoteDetectionResult nearestNote(double detectedPitch) {
-    if (detectedPitch <= 0 ||
-        detectedPitch.isNaN ||
-        detectedPitch.isInfinite) {
+    if (detectedPitch <= 0 || detectedPitch.isNaN || detectedPitch.isInfinite) {
       return NoteDetectionResult.empty();
     }
 

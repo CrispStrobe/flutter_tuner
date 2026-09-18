@@ -261,8 +261,7 @@ class RefYin {
   /// Step 5, verbatim from the package (including its fixed sign).
   double _parabolicInterpolation(final int tauEstimate) {
     final int x0 = tauEstimate < 1 ? tauEstimate : tauEstimate - 1;
-    final int x2 =
-        tauEstimate + 1 < halfSize ? tauEstimate + 1 : tauEstimate;
+    final int x2 = tauEstimate + 1 < halfSize ? tauEstimate + 1 : tauEstimate;
     if (x0 == tauEstimate) {
       return _yin[tauEstimate] <= _yin[x2]
           ? tauEstimate.toDouble()
