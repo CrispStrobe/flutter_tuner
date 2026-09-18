@@ -19,7 +19,7 @@ export 'tuner_core.dart'
         NoteDetectionResult,
         TuningStatus,
         PitchTable,
-        MedianFilter,
+        PitchSmoother,
         RollingWindow,
         pitchWindowSize;
 export 'tunings.dart';
@@ -68,7 +68,7 @@ class TunerEngine extends ChangeNotifier {
   /// calls — [computeFFT] runs at display rate on the audio callback path.
   final Float64List _windowScratch = Float64List(fftSize);
 
-  final MedianFilter _medianFilter = MedianFilter();
+  final PitchSmoother _smoother = PitchSmoother();
 
   NoteDetectionResult? _lastResult;
 
@@ -249,8 +249,21 @@ class TunerEngine extends ChangeNotifier {
     return result;
   }
 
-  /// Apply the median filter to smooth raw pitch values.
-  double smoothPitch(double rawPitch) => _medianFilter.add(rawPitch);
+  /// Apply the median filter to smooth an already-accepted pitch.
+  double smoothPitch(double rawPitch) => _smoother.smooth(rawPitch);
+
+  /// Push one detector frame through the app's gate and smoothing.
+  ///
+  /// Returns the pitch to display, or null when the frame is not periodic
+  /// enough to believe — in which case the smoothing window is cleared, so
+  /// that nothing from before the gap is averaged with what comes after it.
+  double? acceptFrame({
+    required bool pitched,
+    required double probability,
+    required double pitch,
+  }) =>
+      _smoother.accept(
+          pitched: pitched, probability: probability, pitch: pitch);
 
   /// Convert raw PCM16 bytes to float samples.
   Float64List pcmToFloat(Uint8List data) => core.pcmToFloat(data);
@@ -304,7 +317,7 @@ class TunerEngine extends ChangeNotifier {
   void reset() {
     _lastResult = null;
     _fftMagnitudes = [];
-    _medianFilter.clear();
+    _smoother.clear();
     for (int i = 0; i < _pitchHistory.length; i++) {
       _pitchHistory[i] = 0;
     }

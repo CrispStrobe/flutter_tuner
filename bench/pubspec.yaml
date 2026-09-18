@@ -1,0 +1,16 @@
+name: tuner_bench
+description: >-
+  Standalone pure-Dart benchmark for CrispTuner's pitch detection against the
+  GuitarSet corpus. Deliberately Flutter-free so it runs under plain `dart run`.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.2.3 <4.0.0'
+
+dev_dependencies:
+  test: ^1.24.0
+
+dependencies:
+  pitch_detector_dart: ^0.0.7
+  fftea: ^1.5.0

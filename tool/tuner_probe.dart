@@ -271,7 +271,7 @@ Future<int> run(List<String> args) async {
       PitchDetector(audioSampleRate: sampleRate * 1.0, bufferSize: o.buffer);
   stdout.writeln('yin window  : ${o.buffer} samples '
       '(floor ${(2 * sampleRate / o.buffer).toStringAsFixed(1)} Hz)');
-  final filter = MedianFilter();
+  final smoother = PitchSmoother();
 
   final detections = <NoteDetectionResult>[];
   int frames = 0, unpitched = 0;
@@ -284,12 +284,17 @@ Future<int> run(List<String> args) async {
     frames++;
     final block = Float64List.sublistView(samples, start, start + o.buffer);
     final raw = await detector.getPitchFromFloatBuffer(block);
-    if (!raw.pitched || raw.probability <= 0.9) {
+    // Exactly the app's path: the gate and median from PitchSmoother, then
+    // the tempered nearest note.
+    final smoothed = smoother.accept(
+      pitched: raw.pitched,
+      probability: raw.probability,
+      pitch: raw.pitch,
+    );
+    if (smoothed == null) {
       unpitched++;
       continue;
     }
-    // Exactly the app's path: median filter, then the tempered nearest note.
-    final smoothed = filter.add(raw.pitch);
     final result = table.nearestNote(smoothed);
     detections.add(result);
 
