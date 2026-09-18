@@ -22,6 +22,29 @@ import 'yin.dart';
 /// What to do to a raw YIN estimate after the fact.
 enum Refinement2 { none, instantaneousFrequency, instantaneousFrequencyStiff }
 
+/// How the app's running median is managed.
+///
+/// The app's `MedianFilter` is a window over the last five *accepted* pitches,
+/// with no notion of time: if four frames in five are rejected, the median is
+/// still averaging over pitches from half a second ago. And nothing resets it
+/// when the player moves to a different note, so every note change is
+/// smeared across the next few frames.
+enum MedianPolicy {
+  /// No median at all.
+  none,
+
+  /// Exactly what ships: five accepted pitches, never reset.
+  app,
+
+  /// Clear the window whenever a frame is rejected, so it can only ever
+  /// contain consecutive frames.
+  resetOnGap,
+
+  /// Clear it on a gap, and also whenever the raw pitch jumps by more than
+  /// a semitone — i.e. when the player has plainly changed note.
+  resetOnGapOrJump,
+}
+
 /// One pipeline under test.
 class Variant {
   final String name;
@@ -34,7 +57,7 @@ class Variant {
   final bool probabilityGate;
 
   /// The app's five-frame running median over accepted pitches.
-  final bool median;
+  final MedianPolicy medianPolicy;
 
   final Refinement2 refine;
 
@@ -43,18 +66,34 @@ class Variant {
   final bool isPyin;
   final double mpmCutoff;
 
+  /// Where in the analysis window this estimator's answer belongs, in
+  /// samples from the start of the window.
+  ///
+  /// YIN's difference function only ever looks at the first half of the
+  /// window, so its answer describes the *beginning* of it; the
+  /// instantaneous-frequency refinement reads the last couple of thousand
+  /// samples instead, so its answer describes the end. Scoring both against
+  /// the same instant would flatter one and punish the other, so each is
+  /// compared against the reference where it actually lives. The values here
+  /// come from `bin/alignment.dart`, which sweeps the offset and finds the
+  /// minimum.
+  final int referenceOffset;
+
   const Variant(
     this.name, {
     this.threshold = 0.20,
     this.selection = TauSelection.firstDipBelowThreshold,
     this.bestLocal = false,
     this.probabilityGate = false,
-    this.median = false,
+    this.medianPolicy = MedianPolicy.none,
     this.refine = Refinement2.none,
     this.isMpm = false,
     this.isPyin = false,
     this.mpmCutoff = 0.9,
+    this.referenceOffset = 0,
   });
+
+  bool get median => medianPolicy != MedianPolicy.none;
 }
 
 /// The pipelines the report compares.
@@ -65,8 +104,8 @@ class Variant {
 /// different detector entirely.
 const List<Variant> defaultVariants = [
   // --- the shipped pipeline, and each of its pieces removed ---
-  Variant('app', probabilityGate: true, median: true),
-  Variant('app-no-gate', median: true),
+  Variant('app', probabilityGate: true, medianPolicy: MedianPolicy.app),
+  Variant('app-no-gate', medianPolicy: MedianPolicy.app),
   Variant('app-no-median', probabilityGate: true),
   Variant('yin-raw-0.20'),
 
@@ -78,43 +117,52 @@ const List<Variant> defaultVariants = [
   Variant('yin-raw-0.40', threshold: 0.40),
 
   // --- threshold sweep with the app's gate and median in place ---
-  Variant('app-thr-0.10', threshold: 0.10, probabilityGate: true, median: true),
-  Variant('app-thr-0.15', threshold: 0.15, probabilityGate: true, median: true),
+  Variant('app-thr-0.10', threshold: 0.10, probabilityGate: true, medianPolicy: MedianPolicy.app),
+  Variant('app-thr-0.15', threshold: 0.15, probabilityGate: true, medianPolicy: MedianPolicy.app),
 
   // --- step 6 of the YIN paper, the package's TODO ---
   Variant('yin-raw-0.20+step6', bestLocal: true),
   Variant('yin-raw-0.15+step6', threshold: 0.15, bestLocal: true),
-  Variant('app+step6', bestLocal: true, probabilityGate: true, median: true),
+  Variant('app+step6', bestLocal: true, probabilityGate: true, medianPolicy: MedianPolicy.app),
   Variant('app-thr-0.15+step6',
-      threshold: 0.15, bestLocal: true, probabilityGate: true, median: true),
+      threshold: 0.15, bestLocal: true, probabilityGate: true, medianPolicy: MedianPolicy.app),
 
   // --- picking the global minimum instead of the first dip ---
   Variant('yin-raw-0.20+globalmin', selection: TauSelection.globalMinimum),
   Variant('app+globalmin',
       selection: TauSelection.globalMinimum,
       probabilityGate: true,
-      median: true),
+      medianPolicy: MedianPolicy.app),
 
   // --- other detectors ---
   Variant('mpm', isMpm: true),
-  Variant('mpm+median', isMpm: true, median: true),
+  Variant('mpm+median', isMpm: true, medianPolicy: MedianPolicy.app),
+
+  // --- the median, made time-aware ---
+  Variant('app+median-gapreset',
+      probabilityGate: true, medianPolicy: MedianPolicy.resetOnGap),
+  Variant('app+median-jumpreset',
+      probabilityGate: true, medianPolicy: MedianPolicy.resetOnGapOrJump),
   Variant('pyin', isPyin: true),
 
   // --- precision refinements on top ---
   Variant('app+if',
       probabilityGate: true,
-      median: true,
-      refine: Refinement2.instantaneousFrequency),
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.instantaneousFrequency,
+      referenceOffset: 2560),
   Variant('app+if-stiff',
       probabilityGate: true,
-      median: true,
-      refine: Refinement2.instantaneousFrequencyStiff),
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.instantaneousFrequencyStiff,
+      referenceOffset: 2560),
   Variant('app-thr-0.15+step6+if',
       threshold: 0.15,
       bestLocal: true,
       probabilityGate: true,
-      median: true,
-      refine: Refinement2.instantaneousFrequency),
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.instantaneousFrequency,
+      referenceOffset: 2560),
 ];
 
 class FileResult {
@@ -145,24 +193,27 @@ FileResult evaluateFile({
   final mpm = Mpm(sampleRate: rate, bufferSize: window);
   final pyin = PyinTracker(sampleRate: rate, bufferSize: window);
 
-  // Ground truth, per frame.
-  final refMono = <double>[]; // reference f0, or 0 when not monophonic
-  final refActive = <List<double>>[]; // every string sounding
+  // Ground truth, per frame, once per distinct reference offset in use.
+  final offsets = {for (final v in variants) v.referenceOffset}.toList()..sort();
+  final refMono = {for (final o in offsets) o: <double>[]};
+  final refActive = {for (final o in offsets) o: <List<double>>[]};
   // Detections, per variant, per frame (0 = nothing reported).
   final detected = {for (final v in variants) v.name: <double>[]};
   final medians = {
     for (final v in variants)
       if (v.median) v.name: MedianFilter()
   };
+  final lastRaw = <String, double>{};
   final pyinFrames = <PyinFrame>[];
   final bValues = <double>[];
 
   for (int start = 0; start + window <= wav.samples.length; start += hop) {
     final block = Float64List.sublistView(wav.samples, start, start + window);
-    final centre = (start + window / 2) / rate;
-    final active = truth.activeAt(centre, tolerance);
-    refActive.add([for (final a in active) a.frequency]);
-    refMono.add(active.length == 1 ? active.first.frequency : 0);
+    for (final o in offsets) {
+      final active = truth.activeAt((start + o) / rate, tolerance);
+      refActive[o]!.add([for (final a in active) a.frequency]);
+      refMono[o]!.add(active.length == 1 ? active.first.frequency : 0);
+    }
 
     yin.cmndf(block);
     pyinFrames.add(pyin.observe(yin));
@@ -196,7 +247,22 @@ FileResult evaluateFile({
             );
             value = refined.frequency;
           }
-          if (v.median) value = medians[v.name]!.add(value);
+          if (v.median) {
+            final policy = v.medianPolicy;
+            if (policy != MedianPolicy.app) {
+              // A gap since the previous frame, or a note change, means the
+              // window holds nothing worth averaging with.
+              final previous = lastRaw[v.name];
+              final gap = detected[v.name]!.isNotEmpty &&
+                  detected[v.name]!.last <= 0;
+              final jump = policy == MedianPolicy.resetOnGapOrJump &&
+                  previous != null &&
+                  cents(value, previous).abs() > 100;
+              if (gap || jump) medians[v.name]!.clear();
+            }
+            lastRaw[v.name] = value;
+            value = medians[v.name]!.add(value);
+          }
         }
       }
       detected[v.name]!.add(value);
@@ -225,17 +291,22 @@ FileResult evaluateFile({
   // the reference to have been monophonic and within ±20 cents across that
   // span before calling the frame steady.
   const span = 5;
-  final steady = List<bool>.filled(refMono.length, false);
-  for (int i = 0; i < refMono.length; i++) {
-    if (refMono[i] <= 0 || i < span - 1) continue;
-    bool ok = true;
-    for (int k = i - span + 1; k <= i; k++) {
-      if (refMono[k] <= 0 || cents(refMono[k], refMono[i]).abs() > 20) {
-        ok = false;
-        break;
+  final steadyByOffset = <int, List<bool>>{};
+  for (final o in offsets) {
+    final ref = refMono[o]!;
+    final steady = List<bool>.filled(ref.length, false);
+    for (int i = 0; i < ref.length; i++) {
+      if (ref[i] <= 0 || i < span - 1) continue;
+      bool ok = true;
+      for (int k = i - span + 1; k <= i; k++) {
+        if (ref[k] <= 0 || cents(ref[k], ref[i]).abs() > 20) {
+          ok = false;
+          break;
+        }
       }
+      steady[i] = ok;
     }
-    steady[i] = ok;
+    steadyByOffset[o] = steady;
   }
 
   // Score.
@@ -243,9 +314,12 @@ FileResult evaluateFile({
   for (final v in variants) {
     final s = stats[v.name]!;
     final d = detected[v.name]!;
-    for (int i = 0; i < refMono.length; i++) {
+    final mono = refMono[v.referenceOffset]!;
+    final actives = refActive[v.referenceOffset]!;
+    final steady = steadyByOffset[v.referenceOffset]!;
+    for (int i = 0; i < mono.length; i++) {
       final value = d[i];
-      final active = refActive[i];
+      final active = actives[i];
 
       // Voicing, over every frame.
       if (active.isEmpty) {
@@ -257,16 +331,16 @@ FileResult evaluateFile({
       }
 
       if (active.length == 1) {
-        s.scoreMono(value > 0 ? value : null, refMono[i], steady: steady[i]);
+        s.scoreMono(value > 0 ? value : null, mono[i], steady: steady[i]);
         // Jitter: consecutive frames, both reported, reference steady.
         if (i > 0 &&
             value > 0 &&
             d[i - 1] > 0 &&
-            refActive[i - 1].length == 1 &&
-            cents(refMono[i], refMono[i - 1]).abs() < 5 &&
-            cents(value, refMono[i]).abs() <= 50 &&
-            cents(d[i - 1], refMono[i - 1]).abs() <= 50) {
-          s.jitter.add(cents(value, d[i - 1]) - cents(refMono[i], refMono[i - 1]));
+            actives[i - 1].length == 1 &&
+            cents(mono[i], mono[i - 1]).abs() < 5 &&
+            cents(value, mono[i]).abs() <= 50 &&
+            cents(d[i - 1], mono[i - 1]).abs() <= 50) {
+          s.jitter.add(cents(value, d[i - 1]) - cents(mono[i], mono[i - 1]));
         }
       } else if (active.length > 1) {
         s.polyFrames++;

@@ -8,6 +8,9 @@ version: 0.1.0
 environment:
   sdk: '>=3.2.3 <4.0.0'
 
+dev_dependencies:
+  test: ^1.24.0
+
 dependencies:
   pitch_detector_dart: ^0.0.7
   fftea: ^1.5.0
