@@ -824,7 +824,89 @@ If that mode is wanted, the measured order is: native ORT works now; pure
 Dart is within reach after the 3× above and would keep the app
 dependency-free on all six platforms including web; MT3 stays offline.
 
-## 11. What to do, now
+## 11. A bowed instrument: cello
+
+Every result above this line is guitar, and §12 has listed that as the
+report's largest limitation from the beginning. MUSERC (Zenodo 1560651,
+CC BY 4.0) closes part of it: 132 recordings of one professional and one
+amateur cellist, 48 kHz, seven notes from D3 to C♯4, in steady "tune" takes,
+"novib" takes at three dynamics, and vibrato takes. It runs on CI
+(`.github/workflows/bench-cello.yml`) rather than on a developer's machine.
+
+What that corpus can answer is narrower than GuitarSet's, and worth stating
+before the numbers. Its own ground truth is a finger-position sensor which
+needs a physical calibration to become hertz, so it is not used here. The
+filename gives the note the cellist was aiming at — enough to ask whether the
+tuner names the right note and whether it ever jumps an octave. And the
+questions that need no reference at all are the ones a player actually cares
+about: how still the needle sits, and what happens to vibrato.
+
+### Steady takes, bow attack excluded
+
+| pipeline | named correctly | octave errors | frames reported | spread p90 | jitter p90 |
+| --- | --- | --- | --- | --- | --- |
+| before the §2.1 fix | 98.7% | **0.0%** | 99.7% | 5.48 c | 0.44 c |
+| **after the fix (ships now)** | 98.7% | **0.0%** | 99.7% | 5.48 c | **0.44 c** |
+| no median at all | 99.2% | 0.0% | 99.7% | 5.48 c | 0.90 c |
+| MPM + `PitchSmoother` | 98.5% | 0.0% | 100.0% | 5.49 c | 0.45 c |
+
+**The tuner is better on a cello than on a guitar, on every axis.** Not one
+octave error in any pipeline; a reading on 99.7% of frames against 74.7% on
+guitar; and needle jitter of **0.44 cents against 3.25**. The reason is not
+subtle and it is worth saying plainly, because it also explains most of the
+guitar numbers: a bowed note is *sustained*. It does not decay into the noise
+floor while you look at it, so the detector is never working with the tail of
+a transient. Everything this report measured on guitar was measured on the
+harder case.
+
+Note also what the median does here: it halves the jitter (0.44 against 0.90)
+and costs nothing measurable in return. On a steady bowed note it is doing
+exactly the job it was put there for.
+
+### Vibrato — does the smoothing flatten it?
+
+A cellist holding a note is moving it, several times a second, by tens of
+cents. Every smoothing decision in `PitchSmoother` was made on a corpus where
+that was rare, so it needs checking rather than assuming.
+
+| pipeline | vibrato excursion recovered, p50 | p90 |
+| --- | --- | --- |
+| no median at all | **38.98 c** | 60.22 c |
+| after the fix | 35.41 c | 55.48 c |
+| before the fix | 34.01 c | 55.45 c |
+| MPM + `PitchSmoother` | 34.95 c | 55.50 c |
+
+The median costs about **9% of the vibrato** — 3.6 cents of a 39-cent
+excursion. Real, measurable, and modest: the needle still shows a cellist
+their vibrato, slightly narrowed. That is the trade for halving the jitter,
+and on this evidence it is the right one. It is also invisible to every
+guitar measurement in this report.
+
+### The cellist was not at A440
+
+| note | nominal | takes | named | spread p90 | measured offset |
+| --- | --- | --- | --- | --- | --- |
+| D3 | 146.83 Hz | 10 | 100.0% | 6.01 c | −13.2 c |
+| D♯3 | 155.56 Hz | 10 | 100.0% | 7.48 c | −26.7 c |
+| E3 | 164.81 Hz | 9 | 100.0% | 6.60 c | −35.2 c |
+| F3 | 174.61 Hz | 4 | **0.0%** | 6.05 c | **−92.1 c** |
+| B3 | 246.94 Hz | 5 | 73.8% | 4.71 c | −12.6 c |
+| C4 | 261.63 Hz | 8 | 99.5% | 4.14 c | −24.2 c |
+| C♯4 | 277.18 Hz | 9 | 100.0% | 3.81 c | −28.5 c |
+
+The median offset across takes is **−31.8 cents**, which is A = 432.0 Hz to
+within a tenth of a cent. The instrument was tuned to A432, and that is
+precisely what the app's adjustable concert pitch exists for — scored against
+A440 it looks like a third of a semitone of error, and against A432 it is a
+few cents.
+
+The F3 row is the exception and it is not the detector's: 92 cents flat of F3
+is 60 cents flat even of A432, and lands within a few cents of E3. Either
+those four takes are mislabelled or they were played badly; four takes by one
+player is not enough to say which, and it would be dishonest to score it as a
+detector error either way.
+
+## 12. What to do, now
 
 1. ~~**Replace the difference function with the FFT one.**~~ **Done** — see
    §7. YIN is vendored in `lib/detectors.dart`, asserted frame-identical to
@@ -860,16 +942,17 @@ dependency-free on all six platforms including web; MT3 stays offline.
    works — but only on native ONNX Runtime until `onnx_runtime_dart`'s
    convolutions get the same FFT treatment YIN's difference function got.
 
-## 12. What would make this measurement better
+## 13. What would make this measurement better
 
 * **The reference is itself an algorithm.** GuitarSet's contours come from
   pYIN on a hexaphonic pickup. Below a few cents, this benchmark is
   comparing two estimators, not measuring error. Held-note median errors
   around 2–3 cents should be read as an upper bound on the app's error, and
   the sub-cent claims in §4.3 rest on synthesis, not on the corpus.
-* **Guitar only.** Nothing here speaks to bass, piano, voice, or wind
-  instruments, and two of the report's conclusions (window size,
-  inharmonicity) are explicitly limited by that.
+* ~~**Guitar only.**~~ Partly closed — §11 adds cello, where the tuner does
+  better than on guitar. Still nothing on bass, piano, voice or wind, and the
+  window-size and inharmonicity conclusions remain limited by that. The cello
+  corpus is also narrow: two players, seven notes, all in one register.
 * ~~**Frame-level, not note-level.**~~ Done — §9 times the pluck, §9.1 times
   the peg turn.
 * **A busy shared VPS.** The timings are ratios worth trusting and absolutes
