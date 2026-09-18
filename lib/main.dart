@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:pitch_detector_dart/pitch_detector.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'about_screen.dart';
@@ -82,11 +81,14 @@ class TunerPage extends StatefulWidget {
 class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   late final audio.AudioService _audioService;
   late final audio.ToneGeneratorService _toneGenerator;
-  // The window must match what the rolling buffer feeds it, or YIN's lag
-  // search is sized for audio it never sees.
-  final _pitchDetector = PitchDetector(
-    audioSampleRate: 44100,
-    bufferSize: pitchWindowSize,
+  // The window must match what the rolling buffer feeds it, or the lag
+  // search is sized for audio it never sees. Rebuilt whenever the detector
+  // setting changes — each engine carries its own scratch buffers and FFT
+  // plan, so switching means a new one rather than a flag.
+  PitchEngine _pitchEngine = PitchEngine.of(
+    DetectorKind.yin,
+    sampleRate: 44100,
+    windowSize: pitchWindowSize,
   );
   final _pitchWindow = RollingWindow(pitchWindowSize);
   final _engine = TunerEngine();
@@ -113,6 +115,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   static const _prefCustomStrings = 'custom_strings';
   static const _prefTemperament = 'temperament';
   static const _prefTemperamentRoot = 'temperament_root';
+  static const _prefDetector = 'detector';
 
   /// Pre-2.2 builds stored the instrument as an index into the enum, under a
   /// key that now holds a string. Two things follow, and skipping either one
@@ -174,6 +177,11 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         .firstWhereOrNull((value) => value.name == temperamentName);
     if (temperament != null) _engine.temperament = temperament;
 
+    final detectorName = prefs.getString(_prefDetector);
+    final detector =
+        DetectorKind.values.firstWhereOrNull((d) => d.name == detectorName);
+    if (detector != null) _selectDetector(detector);
+
     final root = prefs.getInt(_prefTemperamentRoot);
     if (root != null) _engine.temperamentRoot = root;
   }
@@ -206,6 +214,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     await prefs.setStringList(_prefCustomStrings, _engine.customStrings);
     await prefs.setString(_prefTemperament, _engine.temperament.name);
     await prefs.setInt(_prefTemperamentRoot, _engine.temperamentRoot);
+    await prefs.setString(_prefDetector, _engine.detectorKind.name);
   }
 
   @override
@@ -280,6 +289,18 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _resetSilenceTimer();
   }
 
+  /// Switch detector, rebuilding the engine that carries the scratch
+  /// buffers. Cheap, and never on the audio path: this runs from settings.
+  void _selectDetector(DetectorKind kind) {
+    if (_engine.detectorKind == kind) return;
+    _engine.detectorKind = kind;
+    _pitchEngine = PitchEngine.of(
+      kind,
+      sampleRate: 44100,
+      windowSize: pitchWindowSize,
+    );
+  }
+
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
     _silenceTimer = Timer(const Duration(seconds: 2), () {
@@ -296,26 +317,26 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _pitchWindow.add(_engine.pcmToFloat(data));
     if (!_pitchWindow.isFull) return;
 
-    // Pitch detection (async, fire-and-forget).
-    _pitchDetector
-        .getPitchFromFloatBuffer(_pitchWindow.lastN(pitchWindowSize))
-        .then((result) {
-      // The gate and the median live together in the engine: a rejected
-      // frame has to clear the smoothing window, or the window goes on
-      // averaging over pitches from before the gap.
-      final smoothed = _engine.acceptFrame(
-        pitched: result.pitched,
-        probability: result.probability,
-        pitch: result.pitch,
-      );
-      if (smoothed != null) {
-        final detection = _engine.detectNote(smoothed);
-        _resetSilenceTimer();
-        if (mounted) {
-          setState(() => _status = _statusFromTuning(detection.status));
-        }
+    // Pitch detection. This used to be a fire-and-forget Future because the
+    // package's API was asynchronous; the work was always synchronous, and
+    // by FFT it now costs a fraction of one callback (bench/REPORT.md §3.3),
+    // so there is nothing left to defer.
+    final result = _pitchEngine.analyse(_pitchWindow.lastN(pitchWindowSize));
+    // The gate and the median live together in the engine: a rejected frame
+    // has to clear the smoothing window, or the window goes on averaging
+    // over pitches from before the gap.
+    final smoothed = _engine.acceptFrame(
+      pitched: result.pitched,
+      probability: result.probability,
+      pitch: result.frequency,
+    );
+    if (smoothed != null) {
+      final detection = _engine.detectNote(smoothed);
+      _resetSilenceTimer();
+      if (mounted) {
+        setState(() => _status = _statusFromTuning(detection.status));
       }
-    });
+    }
 
     // FFT — throttled to ~20 fps, over the most recent 2048 samples.
     final now = DateTime.now();
@@ -491,6 +512,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         return l10n.temperamentKirnberger;
       case Temperament.vallotti:
         return l10n.temperamentVallotti;
+    }
+  }
+
+  static String detectorName(AppLocalizations l10n, DetectorKind kind) {
+    switch (kind) {
+      case DetectorKind.yin:
+        return l10n.detectorYin;
+      case DetectorKind.mpm:
+        return l10n.detectorMpm;
     }
   }
 
@@ -1141,6 +1171,42 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               ),
             ),
           ],
+
+          const SizedBox(height: 8),
+
+          // Which detector runs. YIN is the default and is what every number
+          // in bench/REPORT.md describes; MPM answers on more frames and is
+          // wrong on more of them, which on a quiet instrument is sometimes
+          // the trade a player wants.
+          Semantics(
+            label: l10n.detectorLabel,
+            child: DropdownButtonFormField<DetectorKind>(
+              initialValue: _engine.detectorKind,
+              isDense: true,
+              isExpanded: true,
+              decoration: _fieldDecoration(
+                palette,
+                prefixIcon: Icon(Icons.graphic_eq,
+                    size: 16, color: palette.textFaint),
+              ),
+              dropdownColor: palette.surfaceStrong,
+              onChanged: isActionDisabled
+                  ? null
+                  : (DetectorKind? newValue) {
+                      if (newValue != null) {
+                        setState(() => _selectDetector(newValue));
+                        _savePreferences();
+                      }
+                    },
+              items: DetectorKind.values.map((value) {
+                return DropdownMenuItem<DetectorKind>(
+                  value: value,
+                  child: Text(detectorName(l10n, value),
+                      style: textStyle, overflow: TextOverflow.ellipsis),
+                );
+              }).toList(),
+            ),
+          ),
 
           if (_inputDevices.length > 1) ...[
             const SizedBox(height: 8),

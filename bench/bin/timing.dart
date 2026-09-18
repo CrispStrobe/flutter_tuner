@@ -12,6 +12,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:pitch_detector_dart/pitch_detector.dart';
+import 'package:tuner_bench/app/detectors.dart';
 import 'package:tuner_bench/app/tuner_core.dart';
 import 'package:tuner_bench/mpm.dart';
 import 'package:tuner_bench/pyin.dart';
@@ -41,6 +42,10 @@ Future<void> main(List<String> args) async {
   final naive = RefYin(sampleRate: rate, bufferSize: window);
   final fast = RefYin(sampleRate: rate, bufferSize: window, useFft: true);
   final mpm = Mpm(sampleRate: rate, bufferSize: window);
+  final appYin = YinEngine(sampleRate: rate, windowSize: window);
+  final appYinNaive =
+      YinEngine(sampleRate: rate, windowSize: window, naiveDifference: true);
+  final appMpm = MpmEngine(sampleRate: rate, windowSize: window);
   final pyin = PyinTracker(sampleRate: rate, bufferSize: window);
 
   double measure(void Function(Float64List) f, {int reps = 1}) {
@@ -76,6 +81,18 @@ Future<void> main(List<String> args) async {
   rows.add((
     name: 'YIN, naive difference (Float64List)',
     ms: measure((b) => naive.getPitch(b))
+  ));
+  rows.add((
+    name: 'app YinEngine, naive difference',
+    ms: measure((b) => appYinNaive.analyse(b))
+  ));
+  rows.add((
+    name: 'app YinEngine (shipped path)',
+    ms: measure((b) => appYin.analyse(b), reps: 5)
+  ));
+  rows.add((
+    name: 'app MpmEngine',
+    ms: measure((b) => appMpm.analyse(b), reps: 5)
   ));
   rows.add((
     name: 'YIN, FFT difference',

@@ -39,6 +39,37 @@ void main() {
     expect(find.text('Guitar'), findsOneWidget);
   });
 
+  testWidgets('restores a saved detector choice', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'flutter.detector': 'mpm',
+    });
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(const TunerApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('MPM (more sensitive)'), findsOneWidget);
+  });
+
+  testWidgets('defaults to YIN when the stored detector is unknown',
+      (tester) async {
+    // A setting written by a future build, or corrupted: the app must not
+    // start without a detector because a string did not match an enum.
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'flutter.detector': 'crepe',
+    });
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(const TunerApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('YIN (recommended)'), findsOneWidget);
+  });
+
   testWidgets('migrates the pre-2.2 integer instrument preference',
       (tester) async {
     // 2.1.1 stored the instrument as an index into an enum that read

@@ -1,9 +1,9 @@
 // Headless probe for CrispTuner's detection pipeline.
 //
-// Runs the *same* code the app runs — YIN pitch detection, the median filter,
-// and the tempered nearest-note search from `lib/tuner_core.dart` — against a
-// WAV file or a synthesised tone, from a terminal. No device, no simulator,
-// no microphone.
+// Runs the *same* code the app runs — the detector from `lib/detectors.dart`,
+// the gate and median filter from `lib/tuner_core.dart`, and the tempered
+// nearest-note search — against a WAV file or a synthesised tone, from a
+// terminal. No device, no simulator, no microphone.
 //
 //   dart run tool/tuner_probe.dart --note E2
 //   dart run tool/tuner_probe.dart --tone 445.3 --a4 440
@@ -17,8 +17,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:pitch_detector_dart/pitch_detector.dart';
-
+import 'package:flutter_tuner/detectors.dart';
 import 'package:flutter_tuner/temperament.dart';
 import 'package:flutter_tuner/tuner_core.dart';
 
@@ -43,6 +42,7 @@ class Options {
   bool pluck = true;
   bool quiet = false;
   int buffer = kDefaultBuffer;
+  DetectorKind detector = DetectorKind.yin;
 }
 
 void usage() {
@@ -60,8 +60,9 @@ CrispTuner headless probe
   --temperament <name>  equal | pythagorean | quarterCommaMeantone |
                         werckmeisterIII | kirnbergerIII | vallotti
   --key <note>          temperament root, e.g. C or F (default C)
-  --buffer <n>          YIN window in samples (default $kDefaultBuffer;
+  --buffer <n>          analysis window in samples (default $kDefaultBuffer;
                         the detection floor is 2*rate/n Hz)
+  --detector <name>     yin (default) | mpm
   --quiet               summary only
 ''');
 }
@@ -96,6 +97,15 @@ Options parseArgs(List<String> args) {
         o.quiet = true;
       case '--buffer':
         o.buffer = int.parse(next());
+      case '--detector':
+        final name = next();
+        o.detector = DetectorKind.values.firstWhere(
+          (d) => d.name.toLowerCase() == name.toLowerCase(),
+          orElse: () {
+            stderr.writeln('Unknown detector "$name"');
+            exit(2);
+          },
+        );
       case '--temperament':
         final name = next();
         o.temperament = Temperament.values.firstWhere(
@@ -267,10 +277,14 @@ Future<int> run(List<String> args) async {
   }
   stdout.writeln('');
 
-  final PitchDetector detector =
-      PitchDetector(audioSampleRate: sampleRate * 1.0, bufferSize: o.buffer);
-  stdout.writeln('yin window  : ${o.buffer} samples '
-      '(floor ${(2 * sampleRate / o.buffer).toStringAsFixed(1)} Hz)');
+  final PitchEngine detector = PitchEngine.of(
+    o.detector,
+    sampleRate: sampleRate * 1.0,
+    windowSize: o.buffer,
+  );
+  stdout.writeln('detector    : ${o.detector.name}');
+  stdout.writeln('window      : ${o.buffer} samples '
+      '(floor ${detector.detectionFloor.toStringAsFixed(1)} Hz)');
   final smoother = PitchSmoother();
 
   final detections = <NoteDetectionResult>[];
@@ -283,13 +297,13 @@ Future<int> run(List<String> args) async {
   for (int start = 0; start + o.buffer <= samples.length; start += o.buffer) {
     frames++;
     final block = Float64List.sublistView(samples, start, start + o.buffer);
-    final raw = await detector.getPitchFromFloatBuffer(block);
+    final raw = detector.analyse(block);
     // Exactly the app's path: the gate and median from PitchSmoother, then
     // the tempered nearest note.
     final smoothed = smoother.accept(
       pitched: raw.pitched,
       probability: raw.probability,
-      pitch: raw.pitch,
+      pitch: raw.frequency,
     );
     if (smoothed == null) {
       unpitched++;

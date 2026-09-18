@@ -83,5 +83,8 @@
   "stringNumber": "Saite {n}",
   "raiseSemitone": "{note} einen Halbton höher",
   "lowerSemitone": "{note} einen Halbton tiefer",
-  "temperamentOffset": "{note} {cents} ¢ ggü. gleichstufig"
+  "temperamentOffset": "{note} {cents} ¢ ggü. gleichstufig",
+  "detectorLabel": "Tonhöhenerkennung",
+  "detectorYin": "YIN (empfohlen)",
+  "detectorMpm": "MPM (empfindlicher)"
 }

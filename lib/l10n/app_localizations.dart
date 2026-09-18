@@ -601,6 +601,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{note} {cents} ¢ vs equal'**
   String temperamentOffset(String note, String cents);
+
+  /// Label for the setting that chooses which pitch-detection algorithm runs
+  ///
+  /// In en, this message translates to:
+  /// **'Pitch detector'**
+  String get detectorLabel;
+
+  /// Name of the default pitch detector
+  ///
+  /// In en, this message translates to:
+  /// **'YIN (recommended)'**
+  String get detectorYin;
+
+  /// Name of the alternative pitch detector, which reports on more frames but is wrong more often
+  ///
+  /// In en, this message translates to:
+  /// **'MPM (more sensitive)'**
+  String get detectorMpm;
 }
 
 class _AppLocalizationsDelegate

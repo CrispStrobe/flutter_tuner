@@ -10,6 +10,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'app/detectors.dart';
 import 'app/tuner_core.dart';
 import 'jams.dart';
 import 'metrics.dart';
@@ -61,6 +62,11 @@ class Variant {
 
   final Refinement2 refine;
 
+  /// Use one of the app's own detectors from `lib/detectors.dart`, rather
+  /// than the benchmark's instrumented YIN. Implies [coreSmoother]: this is
+  /// the whole shipped path, end to end.
+  final DetectorKind? appEngine;
+
   /// Run the gate and the median through the app's own [PitchSmoother]
   /// rather than reproducing them here — so what is scored is the shipped
   /// class, not a benchmark's idea of it.
@@ -92,6 +98,7 @@ class Variant {
     this.probabilityGate = false,
     this.medianPolicy = MedianPolicy.none,
     this.coreSmoother = false,
+    this.appEngine,
     this.refine = Refinement2.none,
     this.isMpm = false,
     this.isPyin = false,
@@ -150,8 +157,10 @@ const List<Variant> defaultVariants = [
   Variant('mpm', isMpm: true),
   Variant('mpm+median', isMpm: true, medianPolicy: MedianPolicy.app),
 
-  // --- the fix, as actually implemented in lib/tuner_core.dart ---
+  // --- the shipped path, end to end, through the app's own classes ---
   Variant('app-fixed', coreSmoother: true),
+  Variant('engine-yin', appEngine: DetectorKind.yin, coreSmoother: true),
+  Variant('engine-mpm', appEngine: DetectorKind.mpm, coreSmoother: true),
 
   // --- the median, made time-aware (modelled here, for attribution) ---
   Variant('app+median-gapreset',
@@ -224,6 +233,12 @@ FileResult evaluateFile({
     for (final v in variants)
       if (v.coreSmoother) v.name: PitchSmoother()
   };
+  final engines = {
+    for (final v in variants)
+      if (v.appEngine != null)
+        v.name: PitchEngine.of(v.appEngine!,
+            sampleRate: rate, windowSize: window)
+  };
   final pyinFrames = <PyinFrame>[];
   final bValues = <double>[];
 
@@ -242,6 +257,18 @@ FileResult evaluateFile({
 
     for (final v in variants) {
       double value;
+      if (v.appEngine != null) {
+        // The app's detector and the app's smoother, with nothing of the
+        // benchmark's own in between.
+        final e = engines[v.name]!.analyse(block);
+        final smoothed = smoothers[v.name]!.accept(
+          pitched: e.pitched,
+          probability: e.probability,
+          pitch: e.frequency,
+        );
+        detected[v.name]!.add(smoothed ?? 0);
+        continue;
+      }
       if (v.isPyin) {
         value = 0; // decoded after the loop
       } else {

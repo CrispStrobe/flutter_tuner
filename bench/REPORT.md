@@ -17,6 +17,14 @@ synthesiser. The one accuracy bug found is not in YIN at all: it is
 CrispTuner's own five-frame median, which had no notion of time and, on a
 corpus of real playing, threw away nine points of frame accuracy.
 
+Since then the detector has been made a seam and measured as one (§7): YIN
+vendored with the FFT difference function, at 6.8% of an audio callback's
+budget where the package cost 201%, with MPM offered as a setting for people
+who want a detector that commits more readily and is wrong more often. The
+partials are measured too (§8) — inharmonicity, timbre, and an octave guard
+that was built, measured and *not* shipped, because at a 0.58% octave-error
+rate it would discard more good frames than bad.
+
 ---
 
 ## 1. What was measured, and how
@@ -411,30 +419,150 @@ badly it fails when you do not.
 
 ---
 
-## 7. What to do
+## 7. Two engines, measured against each other
 
-1. **Replace the difference function with the FFT one.** ~30× less
-   arithmetic per frame, identical output to 10⁻¹² cents. The shipped
-   implementation costs more than a whole audio callback's budget on this
-   machine; this is the only finding that is unambiguously a bug. It means
-   either vendoring YIN (≈150 lines, `lib/yin.dart` here is a working
-   version) or a pull request upstream to `pitch_detector_dart`.
+The detector is now a seam (`lib/detectors.dart`) rather than a call, for two
+reasons: the FFT difference function of §3.3 had to go somewhere, and once
+there is an interface there can be an alternative — chosen in settings, and
+measured here rather than argued about.
+
+`engine-yin` and `engine-mpm` below run the app's own classes end to end:
+`PitchEngine.of(kind)` into `PitchSmoother`, with nothing of the benchmark's
+in between. `engine-yin` reproduces `app-fixed` to the digit across all
+151,882 frames, which is the check that the vendored YIN really is the
+shipped path and not a lookalike.
+
+180 solo files:
+
+| engine | RPA% | rep% | oct% | gross% | held RPA% | held \|err\| p50 | jitter p90 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **YIN** (default) | 71.88 | 74.71 | **0.59** | **3.20** | 80.80 | 2.45 | 3.25 | 71.69 | **17.07** |
+| MPM | 72.06 | 75.67 | 1.03 | 3.73 | 80.96 | 2.35 | 3.25 | 73.45 | 18.04 |
+
+180 chordal files, where neither is really applicable:
+
+| engine | RPA% | rep% | oct% | gross% | held RPA% |
+| --- | --- | --- | --- | --- | --- |
+| YIN | 32.33 | 41.30 | **6.86** | **14.87** | 52.86 |
+| MPM | 32.30 | 43.52 | 9.53 | 16.26 | 52.91 |
+
+MPM answers about a point more often and is a hair more accurate per
+reference frame; it pays for that with nearly twice the octave-error rate on
+solo material and a third more on chordal. Note how much tamer this is than
+raw MPM in §4.2 (57% false alarm): the app's `probability > 0.9` gate reads
+MPM's NSDF peak height, and demanding 0.9 clarity from an NSDF peak is a much
+stricter test than demanding it of YIN's aperiodicity. The gate does most of
+the work in both cases.
+
+**So YIN stays the default**, and MPM is offered as "more sensitive", which
+is exactly what the numbers say it is: it commits where YIN abstains, and is
+wrong more often when it does. On a quiet instrument that trade is sometimes
+the one a player wants; it is not the one to make for everybody.
+
+Cost per frame, same machine and caveats as §3.3:
+
+| | ms/frame | share of a 23 ms budget |
+| --- | --- | --- |
+| `pitch_detector_dart` 0.0.7 (what shipped) | 46.7 | 201% |
+| app `YinEngine`, naive difference (same class, FFT off) | 10.7 | 46% |
+| **app `YinEngine`** (what ships now) | **1.58** | **6.8%** |
+| app `MpmEngine` | 1.64 | 7.0% |
+
+The engine costs about a thirtieth of what the package did. Two thirds of
+that came from the FFT and a third from writing the same double loop against
+typed buffers.
+
+## 8. What the partials say
+
+`lib/harmonics.dart` measures the spectrum around the detector's answer: each
+partial's frequency from its phase advance, the stiffness coefficient B, how
+much energy is in the fundamental, and which partial the detector locked on
+to. Measured over 160 solo files — deliberately *not* the 20 the thresholds
+were tuned on — 121,834 pitched frames:
+
+| | p10 | median | p90 |
+| --- | --- | --- | --- |
+| partials measurable per frame | 5 | 10 | 12 |
+| share of measured energy in the fundamental | 0.16 | **0.48** | 0.79 |
+| inharmonicity B (53% of frames support a fit) | 2.8×10⁻⁵ | **9.3×10⁻⁵** | 2.4×10⁻⁴ |
+
+Two things worth taking away.
+
+**The fundamental is not where the sound is.** Half the frames have under
+half their measured partial energy in partial 1, and a tenth have under 16%.
+A tuner that found pitch by looking for the strongest spectral peak would be
+wrong constantly; this is the quantitative reason the period-based family
+(YIN, MPM) is the right one, and it is also why the octave-guard idea below
+does not work.
+
+**Inharmonicity on a guitar is real but small.** B ≈ 9.3×10⁻⁵ stretches the
+octave by **0.24 cents** — audible to nobody, and a quarter of the ~1 cent
+§4.4 guessed at from a cruder estimator on all frames rather than on fitted
+ones. It is measurable, the fit is validated against synthesis to within 25%,
+and it remains the right machinery for a *piano* feature. On guitar it is a
+curiosity.
+
+### 8.1 The octave guard that does not work
+
+The appealing idea: an octave error is the detector reporting partial 2 as if
+it were partial 1, so the spectrum should be able to catch it. The
+measurement says no.
+
+A first version accepted "there is a peak an octave below" as evidence, and
+claimed the detector was on the wrong partial for one frame in five. Requiring
+the *odd* partials of the candidate fundamental instead — peaks at 1.5·f and
+2.5·f, which cannot exist if f is the fundamental — quietens it down. Both
+operating points, scored against the annotation:
+
+| rule | recall on octave-wrong frames | correct frames wrongly flagged | precision |
+| --- | --- | --- | --- |
+| "a peak an octave below" | 39.7% | 28.30% | 1.0% |
+| "the odd partials are there too" (held out, 160 files) | 9.0% | **0.81%** | 6.3% |
+
+Neither is shippable, and the reason is arithmetic rather than tuning. After
+the median fix the detector makes an octave error on **0.58%** of monophonic
+frames (602 of 103,171). A guard that flags 0.81% of the correct frames to
+catch 9% of the wrong ones makes the reading worse, not better — it would
+throw away eight good frames for every bad one it caught. And the quiet rule
+misses 91% of the errors because the frames where YIN takes the wrong octave
+are exactly the frames where the fundamental is weak or the note is in
+transition — the spectrum does not know either, because the information is
+not there.
+
+So the partial analyser ships as a measurement tool and the basis of the
+inharmonicity work, and nothing in the UI consumes it. Nothing references it
+at run time, so it is tree-shaken out of the app binary; it costs a reader's
+attention and no bytes.
+
+## 9. What to do, now
+
+1. ~~**Replace the difference function with the FFT one.**~~ **Done** — see
+   §7. YIN is vendored in `lib/detectors.dart`, asserted frame-identical to
+   `pitch_detector_dart` by `test/detector_equivalence_test.dart`, and costs
+   6.8% of an audio callback's budget where the package cost 201%.
 2. ~~**Clear the median window when a frame is dropped.**~~ **Done** — see
    §2.1. `PitchSmoother` in `lib/tuner_core.dart`, measured at +9.09 points
    of frame-level RPA and gross errors 15.5% → 3.2%.
 3. **Change nothing else in the detector.** Not the threshold, which is at
    the minimum of the octave-error curve where it is; not step 6, which
    changes 0.08 points; not the window, which is sized for an instrument this
-   corpus does not contain; not the detector itself, since pYIN and MPM each
-   win on one axis by losing on the one a tuner cares about more.
+   corpus does not contain; not the default detector, since pYIN and MPM each
+   win on one axis by losing on the one a tuner cares about more. MPM is now
+   offered as a setting (§7), which is a different thing from making it the
+   default.
 4. **If latency is ever attacked**, the numbers to start from are in §1: the
    window costs ~90 ms of it, the median adds more, and reading the end of
    the window rather than the start is worth ~58 ms.
-5. **Inharmonicity is a feature idea, not a fix.** The estimator works; on
-   guitar it is worth 0.7 cents. Prototype it against piano recordings with
-   ground truth before believing anything about stretch tuning.
+5. **Inharmonicity is a feature idea, not a fix.** The estimator works and is
+   now measured across the corpus (§8): B ≈ 9.3×10⁻⁵ on guitar, which
+   stretches the octave by 0.24 cents. Prototype it against piano recordings
+   with ground truth before believing anything about stretch tuning.
+6. **Do not add a spectral octave guard.** One was built and measured
+   (§8.1). At the rate the detector now makes octave errors — 0.58% of
+   monophonic frames — every version of it discards more good frames than it
+   rescues.
 
-## 8. What would make this measurement better
+## 10. What would make this measurement better
 
 * **The reference is itself an algorithm.** GuitarSet's contours come from
   pYIN on a hexaphonic pickup. Below a few cents, this benchmark is

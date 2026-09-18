@@ -291,4 +291,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String temperamentOffset(String note, String cents) {
     return '$note $cents ¢ vs equal';
   }
+
+  @override
+  String get detectorLabel => 'Pitch detector';
+
+  @override
+  String get detectorYin => 'YIN (recommended)';
+
+  @override
+  String get detectorMpm => 'MPM (more sensitive)';
 }
