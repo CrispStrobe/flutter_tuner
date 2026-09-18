@@ -35,6 +35,18 @@ import numpy as np
 SEARCH_OFFSETS_MS = [-40, -20, -10, 0, 10, 20, 40]
 
 
+def torch_device():
+    """CUDA when there is one — on Kaggle there is, and CREPE-full on a CPU
+    is the difference between minutes and hours.
+
+    Note what this does to the cost column: timings on a GPU are not
+    comparable to YIN's 1.6 ms/frame on a CPU core, and REPORT.md says so
+    rather than quietly putting them in the same table.
+    """
+    import torch
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 # ---------------------------------------------------------------- corpus ---
 
 def read_wav_mono(path):
@@ -127,7 +139,7 @@ class TorchCrepe(Model):
             decoder=self.torchcrepe.decode.weighted_argmax,
             return_periodicity=True,
             batch_size=512,
-            device="cpu",
+            device=torch_device(),
         )
         f0 = pitch[0].numpy().astype(np.float64)
         conf = periodicity[0].numpy().astype(np.float64)
@@ -150,14 +162,14 @@ class Pesto(Model):
 
     def run(self, audio, rate):
         import torch
-        x = torch.from_numpy(audio.astype(np.float32))
+        x = torch.from_numpy(audio.astype(np.float32)).to(torch_device())
         timesteps, pitch, confidence, _ = self.pesto.predict(
             x, rate, step_size=self.step_ms, convert_to_freq=True
         )
         return (
-            timesteps.numpy().astype(np.float64) / 1000.0,
-            pitch.numpy().astype(np.float64),
-            confidence.numpy().astype(np.float64),
+            timesteps.cpu().numpy().astype(np.float64) / 1000.0,
+            pitch.cpu().numpy().astype(np.float64),
+            confidence.cpu().numpy().astype(np.float64),
         )
 
 
@@ -183,7 +195,7 @@ class Penn(Model):
             fmax=2006.0,
             checkpoint=None,
             batch_size=512,
-            gpu=None,
+            gpu=0 if torch_device() == "cuda" else None,
         )
         f0 = pitch[0].numpy().astype(np.float64)
         conf = periodicity[0].numpy().astype(np.float64)
@@ -230,6 +242,7 @@ def main():
 
     print(f"files  : {len(pairs)} ({args.subset})")
     print(f"models : {args.models}")
+    print(f"device : {torch_device()}")
     print()
 
     summary = {}

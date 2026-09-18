@@ -6,7 +6,9 @@ do not edit here; the local copy is the one that gets reviewed.
 
 It runs off-box for a plain reason: the evaluation is CPU-bound for tens of
 minutes per model, and the VPS this project is developed on is shared. Nothing
-here needs a GPU — it needs a core nobody else is using.
+here strictly needs a GPU, but Kaggle only gives a worker internet when one
+is attached (gotcha #3), and a GPU turns CREPE-full from hours into minutes —
+so the quota spent is small and the run is reliable.
 
 The corpus is fetched from Zenodo inside the kernel rather than mirrored as a
 Kaggle dataset, so nothing redistributes GuitarSet.
@@ -53,9 +55,29 @@ def fetch_guitarset():
 
 
 def install():
+    # Kaggle pre-installs torch; only the small wrappers are needed, and
+    # re-installing torch wastes minutes and risks a version conflict.
     sh(f"{sys.executable} -m pip install -q torchcrepe pesto-pitch penn")
 
 
+def require_internet():
+    """Fail loudly and early rather than hanging.
+
+    Kaggle CPU workers get no internet even with `enable_internet: "true"`,
+    and a GPU worker can lose it too. Everything here — the pip installs, the
+    model weights, the corpus — needs it, so there is no degraded mode worth
+    attempting.
+    """
+    try:
+        urllib.request.urlopen("https://zenodo.org", timeout=20).close()
+    except Exception as exc:  # noqa: BLE001 - any failure means the same thing
+        raise SystemExit(
+            f"no internet on this worker ({exc}); re-run until a connected "
+            "GPU worker is drawn, or deliver the corpus via dataset_sources"
+        )
+
+
+require_internet()
 install()
 fetch_guitarset()
 
@@ -71,6 +93,18 @@ import time
 import numpy as np
 
 SEARCH_OFFSETS_MS = [-40, -20, -10, 0, 10, 20, 40]
+
+
+def torch_device():
+    """CUDA when there is one — on Kaggle there is, and CREPE-full on a CPU
+    is the difference between minutes and hours.
+
+    Note what this does to the cost column: timings on a GPU are not
+    comparable to YIN's 1.6 ms/frame on a CPU core, and REPORT.md says so
+    rather than quietly putting them in the same table.
+    """
+    import torch
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 # ---------------------------------------------------------------- corpus ---
@@ -165,7 +199,7 @@ class TorchCrepe(Model):
             decoder=self.torchcrepe.decode.weighted_argmax,
             return_periodicity=True,
             batch_size=512,
-            device="cpu",
+            device=torch_device(),
         )
         f0 = pitch[0].numpy().astype(np.float64)
         conf = periodicity[0].numpy().astype(np.float64)
@@ -188,14 +222,14 @@ class Pesto(Model):
 
     def run(self, audio, rate):
         import torch
-        x = torch.from_numpy(audio.astype(np.float32))
+        x = torch.from_numpy(audio.astype(np.float32)).to(torch_device())
         timesteps, pitch, confidence, _ = self.pesto.predict(
             x, rate, step_size=self.step_ms, convert_to_freq=True
         )
         return (
-            timesteps.numpy().astype(np.float64) / 1000.0,
-            pitch.numpy().astype(np.float64),
-            confidence.numpy().astype(np.float64),
+            timesteps.cpu().numpy().astype(np.float64) / 1000.0,
+            pitch.cpu().numpy().astype(np.float64),
+            confidence.cpu().numpy().astype(np.float64),
         )
 
 
@@ -221,7 +255,7 @@ class Penn(Model):
             fmax=2006.0,
             checkpoint=None,
             batch_size=512,
-            gpu=None,
+            gpu=0 if torch_device() == "cuda" else None,
         )
         f0 = pitch[0].numpy().astype(np.float64)
         conf = periodicity[0].numpy().astype(np.float64)
@@ -268,6 +302,7 @@ def main():
 
     print(f"files  : {len(pairs)} ({args.subset})")
     print(f"models : {args.models}")
+    print(f"device : {torch_device()}")
     print()
 
     summary = {}
