@@ -80,7 +80,11 @@ def fetch_guitarset():
 def install():
     # Kaggle pre-installs torch; only the small wrappers are needed, and
     # re-installing torch wastes minutes and risks a version conflict.
-    sh(f"{sys.executable} -m pip install -q torchcrepe pesto-pitch penn")
+    # Kaggle pre-installs torch and tensorflow; only the small wrappers are
+    # needed. tensorflow_hub/kagglehub are for SPICE, the one model here that
+    # is not a torch model.
+    sh(f"{sys.executable} -m pip install -q torchcrepe pesto-pitch penn "
+       f"tensorflow_hub kagglehub")
 
 
 def require_internet():
@@ -135,7 +139,7 @@ def main():
         '    sys.argv = [\n'
         '        "neural_eval",\n'
         '        "--models", os.environ.get("MODELS", '
-        '"crepe-tiny,crepe-full,pesto,fcnf0++"),\n'
+        '"crepe-tiny,crepe-tiny-viterbi,crepe-full,crepe-full-viterbi,pesto,pesto-mir-1k,fcnf0++,spice"),\n'
         '        "--limit", os.environ.get("LIMIT", "60"),\n'
         '        "--out", os.path.join(WORK, "neural.json"),\n'
         '    ]\n'

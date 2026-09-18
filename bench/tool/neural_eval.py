@@ -139,11 +139,13 @@ class Model:
 
 
 class TorchCrepe(Model):
-    def __init__(self, capacity="tiny", hop_ms=10.0):
+    def __init__(self, capacity="tiny", hop_ms=10.0, decoder="weighted_argmax"):
         import torchcrepe
         self.torchcrepe = torchcrepe
         self.capacity = capacity
-        self.name = f"crepe-{capacity}"
+        self.decoder_name = decoder
+        self.name = f"crepe-{capacity}" + (
+            "" if decoder == "weighted_argmax" else f"-{decoder}")
         self.sample_rate = torchcrepe.SAMPLE_RATE
         self.hop = int(self.sample_rate * hop_ms / 1000)
         # 1024 samples at 16 kHz.
@@ -152,9 +154,12 @@ class TorchCrepe(Model):
     def run(self, audio, rate):
         import torch
         tensor = torch.from_numpy(audio)[None]
-        # `decoder=argmax` plus torchcrepe's own weighted average is the
-        # standard way to read cents out of CREPE's 20-cent bins; Viterbi
-        # would add a temporal model this comparison is not about.
+        # Two standard decoders, and the choice is not cosmetic.
+        # `weighted_argmax` reads cents out of CREPE's 20-cent bins by a local
+        # weighted average and decides each frame alone. `viterbi` adds a
+        # temporal model — the same idea pYIN adds to YIN (§4.1) — which
+        # should show up where octave errors do, so it is measured rather
+        # than assumed.
         pitch, periodicity = self.torchcrepe.predict(
             tensor,
             self.sample_rate,
@@ -162,7 +167,7 @@ class TorchCrepe(Model):
             fmin=50.0,
             fmax=2006.0,
             model=self.capacity,
-            decoder=self.torchcrepe.decode.weighted_argmax,
+            decoder=getattr(self.torchcrepe.decode, self.decoder_name),
             return_periodicity=True,
             batch_size=512,
             device=torch_device(),
@@ -177,12 +182,13 @@ class TorchCrepe(Model):
 
 
 class Pesto(Model):
-    name = "pesto"
-
-    def __init__(self, step_ms=10.0):
+    def __init__(self, step_ms=10.0, model_name="mir-1k_g7"):
         import pesto
         self.pesto = pesto
         self.step_ms = step_ms
+        self.model_name = model_name
+        # The package ships two checkpoints; the default is the g7 one.
+        self.name = "pesto" if model_name == "mir-1k_g7" else f"pesto-{model_name}"
         self.sample_rate = 44100
         # PESTO is single-frame by design: one CQT frame in, one pitch out.
         # Its CQT's lowest filters set the receptive field; ~64 ms is the
@@ -193,7 +199,8 @@ class Pesto(Model):
         import torch
         x = torch.from_numpy(audio.astype(np.float32)).to(torch_device())
         timesteps, pitch, confidence, _ = self.pesto.predict(
-            x, rate, step_size=self.step_ms, convert_to_freq=True
+            x, rate, step_size=self.step_ms, model_name=self.model_name,
+            convert_to_freq=True
         )
         return (
             timesteps.cpu().numpy().astype(np.float64) / 1000.0,
@@ -232,13 +239,73 @@ class Penn(Model):
         return times, f0, conf
 
 
+class Spice(Model):
+    """Google's SPICE (Gfeller et al. 2020), via TensorFlow Hub.
+
+    The outlier of this comparison in two ways. It is self-supervised and
+    predicts *relative* pitch, so its output is in arbitrary units that need
+    the published affine calibration to become hertz — which means a
+    systematic offset in that calibration would look exactly like a tuning
+    error, and this report cares about a couple of cents. And it needs
+    TensorFlow, which is why it only runs on Kaggle: installing TF next to
+    torch on the VPS to measure one more model was not a good trade.
+    """
+
+    name = "spice"
+    sample_rate = 16000
+
+    # Published calibration from the SPICE model card.
+    PT_OFFSET = 25.58
+    PT_SLOPE = 63.07
+    FMIN = 10.0
+    BINS_PER_OCTAVE = 12.0
+
+    def __init__(self):
+        import tensorflow_hub as hub
+        self.model = None
+        for source in (
+            lambda: __import__("kagglehub").model_download(
+                "google/spice/tensorFlow2/spice"),
+            lambda: "https://tfhub.dev/google/spice/2",
+        ):
+            try:
+                self.model = hub.load(source())
+                break
+            except Exception as exc:  # noqa: BLE001
+                print(f"spice: {exc}", flush=True)
+        if self.model is None:
+            raise SystemExit("could not load SPICE from kagglehub or tfhub")
+        # ~32 ms between frames; the model's own context is longer, and it is
+        # reported here as the frame spacing rather than guessed at.
+        self.hop = 512
+        self.receptive_field_ms = 1000 * 1024 / self.sample_rate
+
+    def run(self, audio, rate):
+        import numpy as np
+        out = self.model.signatures["serving_default"](
+            __import__("tensorflow").constant(audio, dtype="float32")
+        )
+        pitch = out["pitch"].numpy().astype(np.float64)
+        uncertainty = out["uncertainty"].numpy().astype(np.float64)
+        cqt_bin = pitch * self.PT_SLOPE + self.PT_OFFSET
+        f0 = self.FMIN * 2.0 ** (cqt_bin / self.BINS_PER_OCTAVE)
+        times = np.arange(len(f0)) * self.hop / self.sample_rate
+        return times, f0, 1.0 - uncertainty
+
+
 def build(name):
     if name.startswith("crepe-"):
-        return TorchCrepe(capacity=name.split("-", 1)[1])
-    if name == "pesto":
-        return Pesto()
+        parts = name.split("-")
+        capacity = parts[1]
+        decoder = "-".join(parts[2:]) or "weighted_argmax"
+        return TorchCrepe(capacity=capacity, decoder=decoder)
+    if name.startswith("pesto"):
+        _, _, variant = name.partition("-")
+        return Pesto(model_name=variant or "mir-1k_g7")
     if name in ("penn", "fcnf0++"):
         return Penn()
+    if name == "spice":
+        return Spice()
     raise SystemExit(f"unknown model {name}")
 
 
@@ -254,7 +321,11 @@ def main():
     ap.add_argument("--data", default="/mnt/storage/tuner-bench/datasets")
     ap.add_argument("--subset", default="solo")
     ap.add_argument("--limit", type=int, default=20)
-    ap.add_argument("--confidence", type=float, default=0.5)
+    # One fixed confidence threshold is not a fair comparison: each model's
+    # confidence is on its own scale, and SWIPE' already demonstrated how
+    # badly that can mislead (REPORT.md §4.5 — a scale mismatch rejected
+    # every frame). The model output is cached, so sweeping costs nothing.
+    ap.add_argument("--confidence", default="0.1,0.25,0.5,0.75,0.9")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -288,6 +359,7 @@ def main():
         # and the scoring both read the cached output. (Running it twice, as
         # a first version did, doubled the cost of the slowest models for
         # nothing.)
+        thresholds = [float(t) for t in str(args.confidence).split(",")]
         cached = []
         for n, (wav, jams) in enumerate(pairs, 1):
             audio, rate = read_wav_mono(wav)
@@ -314,7 +386,7 @@ def main():
                 sel = counts == 1
                 if not sel.any():
                     continue
-                ok = sel & (conf >= args.confidence) & (f0 > 0)
+                ok = sel & (conf >= thresholds[0]) & (f0 > 0)
                 offset_hits[off][0] += int(sel.sum())
                 if ok.any():
                     err = np.abs(cents(f0[ok], refs[ok]))
@@ -324,35 +396,70 @@ def main():
             offset_hits, key=lambda o: offset_hits[o][1] / max(1, offset_hits[o][0])
         )
 
-        for strings, times, f0, conf in cached:
-            counts, refs = reference_series(
-                strings, times + best_offset / 1000.0, tol
+        per_threshold = {}
+        for threshold in thresholds:
+            mono = correct = octave = gross = reported = 0
+            voiced = voiced_reported = unvoiced = unvoiced_reported = 0
+            errors = []
+            for strings, times, f0, conf in cached:
+                counts, refs = reference_series(
+                    strings, times + best_offset / 1000.0, tol
+                )
+                said = (conf >= threshold) & (f0 > 0)
+                voiced += int((counts >= 1).sum())
+                voiced_reported += int(((counts >= 1) & said).sum())
+                unvoiced += int((counts == 0).sum())
+                unvoiced_reported += int(((counts == 0) & said).sum())
+
+                sel = counts == 1
+                mono += int(sel.sum())
+                use = sel & said
+                reported += int(use.sum())
+                if use.any():
+                    err = cents(f0[use], refs[use])
+                    good = np.abs(err) <= 50
+                    correct += int(good.sum())
+                    errors.extend(np.abs(err[good]).tolist())
+                    bad = err[~good]
+                    if bad.size:
+                        octaves = bad / 1200
+                        is_octave = (
+                            np.abs(octaves - np.round(octaves)) * 1200 <= 50
+                        ) & (np.round(octaves) != 0)
+                        octave += int(is_octave.sum())
+                        gross += int((~is_octave).sum())
+
+            per_threshold[threshold] = dict(
+                mono=mono, correct=correct, reported=reported, octave=octave,
+                gross=gross, voiced=voiced, voiced_reported=voiced_reported,
+                unvoiced=unvoiced, unvoiced_reported=unvoiced_reported,
+                errors=np.asarray(errors),
             )
-            said = (conf >= args.confidence) & (f0 > 0)
-            voiced += int((counts >= 1).sum())
-            voiced_reported += int(((counts >= 1) & said).sum())
-            unvoiced += int((counts == 0).sum())
-            unvoiced_reported += int(((counts == 0) & said).sum())
 
-            sel = counts == 1
-            mono += int(sel.sum())
-            use = sel & said
-            reported += int(use.sum())
-            if use.any():
-                err = cents(f0[use], refs[use])
-                good = np.abs(err) <= 50
-                correct += int(good.sum())
-                errors.extend(np.abs(err[good]).tolist())
-                bad = err[~good]
-                if bad.size:
-                    octaves = bad / 1200
-                    is_octave = (np.abs(octaves - np.round(octaves)) * 1200 <= 50) & (
-                        np.round(octaves) != 0
-                    )
-                    octave += int(is_octave.sum())
-                    gross += int((~is_octave).sum())
+        # Report every threshold; pick none as canonical, because which one is
+        # right depends on what the tuner would rather do when unsure.
+        for threshold, r in per_threshold.items():
+            e = r["errors"]
+            print(
+                f"{model.name:12s} @{threshold:<5} "
+                f"RPA {100*r['correct']/max(1,r['mono']):5.2f}%  "
+                f"rep {100*r['reported']/max(1,r['mono']):5.2f}%  "
+                f"oct {100*r['octave']/max(1,r['reported']):4.2f}%  "
+                f"gross {100*r['gross']/max(1,r['reported']):5.2f}%  "
+                f"|err| p50 {np.percentile(e,50) if e.size else float('nan'):5.2f}  "
+                f"p90 {np.percentile(e,90) if e.size else float('nan'):6.2f}  "
+                f">5c {100*(e>5).mean() if e.size else float('nan'):5.2f}%  "
+                f"VR {100*r['voiced_reported']/max(1,r['voiced']):5.1f}%  "
+                f"FA {100*r['unvoiced_reported']/max(1,r['unvoiced']):5.1f}%",
+                flush=True,
+            )
 
-        errors = np.asarray(errors)
+        best = per_threshold[thresholds[0]]
+        mono, correct, reported = best["mono"], best["correct"], best["reported"]
+        octave, gross = best["octave"], best["gross"]
+        voiced, voiced_reported = best["voiced"], best["voiced_reported"]
+        unvoiced, unvoiced_reported = best["unvoiced"], best["unvoiced_reported"]
+        errors = best["errors"]
         row = {
             "model": model.name,
             "mono": mono,
@@ -369,6 +476,19 @@ def main():
             "realtime": 100 * seconds_compute / max(1e-9, seconds_audio),
             "offset_ms": best_offset,
             "receptive_ms": model.receptive_field_ms,
+            "by_threshold": {
+                str(t): {
+                    k: (v.tolist() if hasattr(v, "tolist") else v)
+                    for k, v in r.items()
+                    if k != "errors"
+                }
+                | {
+                    "p50": float(np.percentile(r["errors"], 50))
+                    if r["errors"].size
+                    else None
+                }
+                for t, r in per_threshold.items()
+            },
         }
         summary[model.name] = row
         print(
