@@ -32,6 +32,10 @@ dart run bin/precision.dart
 
 # where in the analysis window each estimator's answer belongs
 dart run bin/alignment.dart 12
+
+# what the partials say: inharmonicity, timbre, and whether the spectrum can
+# catch the detector's octave errors (--skip holds files out of the tuning set)
+dart run bin/harmonics.dart --subset solo --skip 20
 ```
 
 `--data` points at the corpus and defaults to
@@ -61,8 +65,9 @@ question for a tuner.
 
 ## Keeping the copied core in sync
 
-`bench/lib/app/` holds byte-identical copies of the three Flutter-free files
-from the app: `tuner_core.dart`, `temperament.dart`, `tunings.dart`. They are
+`bench/lib/app/` holds byte-identical copies of the Flutter-free files from
+the app: `tuner_core.dart`, `detectors.dart`, `harmonics.dart`,
+`temperament.dart`, `tunings.dart`. They are
 copies rather than a path dependency because a path dependency on the app
 package would drag in the Flutter SDK.
 
@@ -81,6 +86,7 @@ of the maths measures nothing.
 | `lib/yin.dart` | YIN with every step a parameter — threshold, tau rule, the paper's step 6, naive or FFT difference function. Reproduces `pitch_detector_dart` 0.0.7 exactly at its defaults. |
 | `lib/mpm.dart` | McLeod's NSDF, as a comparison point. |
 | `lib/pyin.dart` | A pYIN-shaped tracker: candidate distribution per frame, Viterbi across frames. Simplified; see the file. |
+| `bin/harmonics.dart` | The partial measurements of REPORT.md §8, scored against the annotation. |
 | `lib/refine.dart` | Instantaneous frequency from FFT phase, harmonic least squares, and the stiffness fit that yields an inharmonicity coefficient. |
 | `lib/evaluate.dart` | One file in, every variant scored out. All YIN variants share one difference function per frame. The `app-fixed` variant calls the app's own `PitchSmoother` rather than reproducing it. |
 | `lib/metrics.dart` | RPA, octave and gross error rates, voicing recall and false alarm, and cent-error histograms. |

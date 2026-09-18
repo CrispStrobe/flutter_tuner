@@ -214,38 +214,55 @@ HarmonicProfile analyseHarmonics(
 
   // --- 1. Which fundamental are we actually looking at? -------------------
   //
-  // Take the detector's answer, then ask the spectrum two questions it
-  // cannot answer for itself.
+  // Take the detector's answer, then ask the spectrum two questions it cannot
+  // answer for itself. Both need *strong* evidence rather than merely some
+  // energy in the right place: measured over GuitarSet, a rule that accepted
+  // "there is a peak an octave below" claimed the detector was on partial 2
+  // for one frame in five, on recordings where it was almost always right.
+  // A guitar in a room has low-frequency energy everywhere — the body, the
+  // room, the other five strings — and none of it is the fundamental.
+  //
+  // The signature of a fundamental an octave below is not the peak at f/2. It
+  // is the *odd* partials of f/2: peaks at 1.5·f and 2.5·f, which simply do
+  // not exist if f is the fundamental.
   double base = coarseF0;
   double detectorRatio = 1.0;
 
   final atCoarse = peakNear(coarseF0);
   final atDouble = peakNear(coarseF0 * 2);
+  final reference = math.max(
+    atCoarse?.magnitude ?? 0,
+    atDouble?.magnitude ?? 0,
+  );
 
-  // (a) The detector found twice the period — it is an octave (or a twelfth)
-  //     low, and the partial it named is not really there.
+  /// Are all of [orders] present as partials of [candidate], each at least
+  /// [floor] of the reference magnitude?
+  bool seriesPresent(double candidate, List<int> orders, double floor) {
+    if (reference <= 0) return false;
+    for (final n in orders) {
+      final peak = peakNear(candidate * n);
+      if (peak == null || peak.magnitude < floor * reference) return false;
+    }
+    return true;
+  }
+
   if (atDouble != null &&
-      (atCoarse == null || atCoarse.magnitude < 0.05 * atDouble.magnitude)) {
+      (atCoarse == null || atCoarse.magnitude < 0.05 * atDouble.magnitude) &&
+      // The detector found twice the period. Then the partial it named is
+      // missing, and so is every other odd multiple of it.
+      !seriesPresent(coarseF0, const [3], 0.05)) {
     base = coarseF0 * 2;
     detectorRatio = 0.5;
   } else if (atCoarse != null) {
-    // (b) The detector locked onto partial 2 or 3: there is a strong peak an
-    //     octave or a twelfth *below* it, with the partials to match.
+    // The detector locked onto partial 2 or 3. Require the whole series of
+    // the candidate fundamental, including the partials that only exist if
+    // it is real.
     for (final divisor in const [2.0, 3.0]) {
       final candidate = coarseF0 / divisor;
-      final sub = peakNear(candidate);
-      if (sub == null || sub.magnitude < 0.05 * atCoarse.magnitude) continue;
-      // Require the intervening partials too, or a room resonance below the
-      // note would be read as its fundamental.
-      bool supported = true;
-      for (int n = 2; n < divisor.round(); n++) {
-        final between = peakNear(candidate * n);
-        if (between == null || between.magnitude < 0.02 * atCoarse.magnitude) {
-          supported = false;
-          break;
-        }
-      }
-      if (!supported) continue;
+      // For f/2 the telling partials are 1, 3 and 5 — 3 and 5 sit between
+      // the detector's partials and cannot be a coincidence of the room.
+      final orders = divisor == 2.0 ? const [1, 3, 5] : const [1, 2, 4, 5];
+      if (!seriesPresent(candidate, orders, 0.15)) continue;
       base = candidate;
       detectorRatio = divisor;
       break;

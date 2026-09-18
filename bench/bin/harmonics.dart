@@ -36,6 +36,10 @@ class Tally {
   final List<int> partialCounts = [];
   final List<double> fundamentalShares = [];
 
+  /// How often each verdict of `detectorPartial` came up, keyed by the ratio
+  /// times 100 (so 50 is "half", 100 is "agrees", 200 is "an octave high").
+  final Map<int, int> partialVerdicts = {};
+
   // Octave guard: truth (was the detector octave-wrong?) vs the spectrum's
   // verdict (detectorPartial != 1).
   int truePositive = 0; // octave-wrong, and flagged
@@ -56,6 +60,8 @@ class Tally {
         'falsePositive': falsePositive,
         'trueNegative': trueNegative,
         'monoFrames': monoFrames,
+        'partialVerdicts':
+            partialVerdicts.map((k, v) => MapEntry(k.toString(), v)),
       };
 
   void mergeJson(Map<String, dynamic> j) {
@@ -72,6 +78,10 @@ class Tally {
     falsePositive += j['falsePositive'] as int;
     trueNegative += j['trueNegative'] as int;
     monoFrames += j['monoFrames'] as int;
+    for (final e in (j['partialVerdicts'] as Map<String, dynamic>).entries) {
+      partialVerdicts.update(int.parse(e.key), (v) => v + (e.value as int),
+          ifAbsent: () => e.value as int);
+    }
   }
 }
 
@@ -102,6 +112,8 @@ Map<String, dynamic> analyseFile(String wavPath, String jamsPath, int hop) {
     if (profile.isEmpty) continue;
     tally.withProfile++;
     tally.partialCounts.add(profile.partials.length);
+    final verdict = ((profile.detectorPartial ?? 0) * 100).round();
+    tally.partialVerdicts.update(verdict, (v) => v + 1, ifAbsent: () => 1);
     tally.fundamentalShares.add(profile.fundamentalShare);
     if (profile.inharmonicity != null) {
       tally.withB++;
@@ -139,7 +151,7 @@ double percentile(List<double> sorted, double p) =>
 Future<void> main(List<String> argv) async {
   String data = '/mnt/storage/tuner-bench/datasets';
   String subset = 'solo';
-  int limit = 0, jobs = 3, hop = 1024;
+  int limit = 0, jobs = 3, hop = 1024, skip = 0;
   for (int i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--data':
@@ -148,6 +160,11 @@ Future<void> main(List<String> argv) async {
         subset = argv[++i];
       case '--limit':
         limit = int.parse(argv[++i]);
+      // Held-out files: the thresholds in analyseHarmonics were chosen by
+      // looking at the first 20, so the honest way to quote a number is to
+      // skip those and measure the rest.
+      case '--skip':
+        skip = int.parse(argv[++i]);
       case '--jobs':
         jobs = int.parse(argv[++i]);
       case '--hop':
@@ -172,6 +189,7 @@ Future<void> main(List<String> argv) async {
     final jams = '$data/annotation/$base.jams';
     if (File(jams).existsSync()) pairs.add((wav: wav, jams: jams));
   }
+  if (skip > 0) pairs.removeRange(0, math.min(skip, pairs.length));
   if (limit > 0 && pairs.length > limit) pairs.removeRange(limit, pairs.length);
 
   stdout.writeln('files   : ${pairs.length} ($subset)');
@@ -225,6 +243,16 @@ Future<void> main(List<String> argv) async {
         math.ln2;
     stdout.writeln('  → octave stretch at the median B: '
         '${stretch.toStringAsFixed(2)} cents');
+  }
+
+  stdout.writeln('');
+  final verdicts = total.partialVerdicts.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  stdout.writeln('what the spectrum says the detector locked onto:');
+  for (final e in verdicts.take(6)) {
+    stdout.writeln('  partial ${(e.key / 100).toStringAsFixed(2).padLeft(5)} '
+        ': ${e.value} frames '
+        '(${(100 * e.value / math.max(1, total.withProfile)).toStringAsFixed(1)}%)');
   }
 
   stdout.writeln('');
