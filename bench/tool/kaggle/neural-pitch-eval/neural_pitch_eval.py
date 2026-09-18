@@ -95,16 +95,42 @@ import numpy as np
 SEARCH_OFFSETS_MS = [-40, -20, -10, 0, 10, 20, 40]
 
 
-def torch_device():
-    """CUDA when there is one — on Kaggle there is, and CREPE-full on a CPU
-    is the difference between minutes and hours.
+_DEVICE = None
 
-    Note what this does to the cost column: timings on a GPU are not
+
+def torch_device():
+    """CUDA when there is a *usable* one, else CPU.
+
+    Two traps, both from /mnt/volume1/kaggle-usage.md. Kaggle hands out P100s
+    almost exclusively (gotcha #21), and its preinstalled torch has dropped
+    sm_60, so a P100 draw kills a torch kernel outright with "no kernel image
+    is available for execution on the device" (#23). The guide's advice there
+    is to exit and re-push until a better GPU appears.
+
+    This kernel does not need to do that, because it does not actually need a
+    GPU — it needs a worker with *internet*, which on Kaggle only comes
+    attached to one. So an unusable GPU degrades to CPU and the run still
+    finishes, slower, instead of burning a draw.
+
+    Note what the device does to the cost column: a GPU timing is not
     comparable to YIN's 1.6 ms/frame on a CPU core, and REPORT.md says so
-    rather than quietly putting them in the same table.
+    rather than quietly putting them in one table.
     """
+    global _DEVICE
+    if _DEVICE is not None:
+        return _DEVICE
     import torch
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    _DEVICE = "cpu"
+    if torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        capability = major * 10 + minor
+        name = torch.cuda.get_device_name(0)
+        if capability >= 70:
+            _DEVICE = "cuda"
+        else:
+            print(f"GPU is {name} (sm_{capability}); this torch build needs "
+                  f"sm_70+, so running on CPU instead", flush=True)
+    return _DEVICE
 
 
 # ---------------------------------------------------------------- corpus ---
@@ -201,8 +227,11 @@ class TorchCrepe(Model):
             batch_size=512,
             device=torch_device(),
         )
-        f0 = pitch[0].numpy().astype(np.float64)
-        conf = periodicity[0].numpy().astype(np.float64)
+        # .cpu() before .numpy(): on a CUDA device the bare call raises
+        # "can't convert cuda:0 device type tensor to numpy", which is exactly
+        # how the first Kaggle run died after 60 files of crepe-tiny.
+        f0 = pitch[0].cpu().numpy().astype(np.float64)
+        conf = periodicity[0].cpu().numpy().astype(np.float64)
         times = np.arange(len(f0)) * self.hop / self.sample_rate
         return times, f0, conf
 
@@ -257,8 +286,8 @@ class Penn(Model):
             batch_size=512,
             gpu=0 if torch_device() == "cuda" else None,
         )
-        f0 = pitch[0].numpy().astype(np.float64)
-        conf = periodicity[0].numpy().astype(np.float64)
+        f0 = pitch[0].cpu().numpy().astype(np.float64)
+        conf = periodicity[0].cpu().numpy().astype(np.float64)
         times = np.arange(len(f0)) * 0.01
         return times, f0, conf
 
