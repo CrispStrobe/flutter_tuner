@@ -357,7 +357,51 @@ practice — is exactly the instrument this corpus cannot speak for. The
 honest position is that this is a *feature* worth prototyping against piano
 recordings, not a detector change justified by these measurements.
 
-### 4.5 Neural models
+### 4.5 SWIPE′
+
+The last of the brief's comparison points, and the one this report kept
+putting off because it is expensive to run. SWIPE′ (Camacho 2007) works in
+the spectral domain rather than the lag domain: it scores candidate pitches
+by how well a cosine kernel placed at their *prime* harmonics matches the
+square-root spectrum. Dropping the even harmonics is what is supposed to make
+it octave-robust — a kernel an octave up cannot borrow support from the
+partials it shares, because the shared ones are exactly the ones it dropped.
+
+`lib/swipe.dart` implements it in shape: log-spaced candidates, a window
+length per candidate (about eight periods) with interpolation between the two
+bracketing power-of-two sizes, square-root spectra, prime-harmonic kernels.
+It is not Camacho's MATLAB — his full estimator includes an ERB-scaled
+loudness normalisation this does not — so read these as "SWIPE′-like".
+
+20 solo files, 23,510 frames, through the same `PitchSmoother` as everything
+else:
+
+| estimator | RPA% | rep% | oct% | gross% | \|err\| p50 | >5c% | FA% | ms/frame |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| app YIN | **68.3** | 71.1 | **0.66** | **3.2** | **3.00** | **26.1** | **17.0** | **4.1** |
+| SWIPE′, global norm | 63.5 | 100 | 1.41 | 35.1 | 7.70 | 70.2 | 100 | 6.9 |
+| SWIPE′, local norm | 67.3 | 100 | 4.25 | 28.4 | 6.65 | 63.0 | 100 | 8.2 |
+| SWIPE′, global norm @ 0.7 | 47.1 | 68.8 | 0.97 | 30.6 | 7.40 | 68.6 | 42.8 | 6.9 |
+
+**It loses on every axis a tuner cares about.** Twice YIN's median cent error,
+eight to ten times its gross-error rate, and — the part that was supposed to
+be its advantage — *more* octave errors, not fewer. On clean synthetic plucks
+its intrinsic precision is about 3 cents against YIN's 0.05, and that does
+not improve with a finer candidate grid: 1/48, 1/96 and 1/192 of an octave
+give 2.6, 3.2 and 3.8 cents, so the limit is the breadth of the strength
+curve, not the quantisation.
+
+Its voicing decision is also awkward. The pitch strength lands around 0.77 on
+a clean plucked string — nowhere near the scale the app's `probability > 0.9`
+gate expects, and a first run of this file rejected literally every frame for
+that reason. Swept properly, the threshold that gives an acceptable false
+alarm rate throws away a third of the true frames.
+
+A more faithful implementation would do better than this one. It would have
+to close a 2× gap in precision and an 8× gap in gross errors while costing
+more per frame, which is not where the evidence points.
+
+### 4.6 Neural models
 
 Not measured, and the argument for skipping them is the shape of the results
 above rather than a prejudice. CREPE and SPICE are frame-level classifiers
@@ -603,9 +647,50 @@ pipelines alike: a reading goes wrong again in the last 150 ms of the note,
 where the string has decayed into the noise floor. That is a property of
 plucked notes ending, not of a pipeline.
 
+### 9.1 While the pitch is moving
+
+§9 times the tuner's cold start. The other half of the experience is what
+happens *while you turn the peg*: the pitch slides and the needle follows it
+at some remove. Every frame-level metric in this report is blind to that — a
+pipeline that is uniformly 60 ms late scores a perfect RPA.
+
+GuitarSet has no peg-turning, but it has the same signal musically: bends and
+slides, where the annotated pitch moves smoothly within one sounding string.
+`bin/tracking.dart` finds how far the detected contour has to be shifted in
+time to best match the annotated one. Only *monotonic* movement of at least
+40 cents counts — vibrato is movement too, but it is periodic, so a 5 Hz
+wobble fits a lag of 0 ms and 200 ms equally well, and including it would
+report aliases as measurements.
+
+60 solo files, 739 qualifying segments, 512-sample hop:
+
+| pipeline | tracking lag p10 / p50 / p90 | RMS error at best lag | RMS error unshifted |
+| --- | --- | --- | --- |
+| before the §2.1 fix | −0 / **26** / 93 ms | 4.51 cents | **16.58 cents** |
+| **after the fix** | −12 / **17** / 76 ms | 3.50 cents | **5.94 cents** |
+| no median at all | −18 / **−0** / 58 ms | 4.00 cents | 5.23 cents |
+| MPM + `PitchSmoother` | −12 / 17 / 70 ms | 3.42 cents | 5.65 cents |
+
+**Unsmoothed YIN tracks a moving pitch with no lag at all** — a median of
+zero, to the resolution of the hop. That is a second, independent
+confirmation of §1's alignment finding: YIN's answer really does describe the
+start of its window, because assuming so makes the lag vanish.
+
+**The median costs 17 ms of tracking lag**, and that is what it is worth
+asking whether to pay. It buys the tail and the jitter of §2.1; it costs a
+needle that trails the string by about a frame and a half while you are
+turning the peg. Before the fix it cost 26 ms *and* left the displayed value
+**16.6 cents** off the true pitch during a bend, against 5.9 after — because
+a window that reaches back across a gap is averaging pitches from a fifth of
+a second ago, which on a moving string is a different pitch entirely.
+
+There is a design suggestion buried in that last column, not acted on here:
+the median is helping on a held note and hurting on a moving one, and the
+pipeline already knows which it is looking at.
+
 ## 10. Neural transcription: Basic Pitch and MT3, measured
 
-§4.5 argued against neural models from the shape of the other results rather
+§4.6 argued against neural models from the shape of the other results rather
 than from measurement. Two GGUF conversions — `cstr/basic-pitch-GGUF` and
 `cstr/mt3-GGUF` — made it cheap to stop arguing, so `tool/basic_pitch_eval.py`
 runs Spotify's Basic Pitch over the same corpus, scored by the same rules as
@@ -664,31 +749,58 @@ inference time plus hop — not the 2 seconds the input length suggests.
 | runtime | per 2 s window | share of real time | parity |
 | --- | --- | --- | --- |
 | ONNX Runtime, C++ CPU | 174–270 ms | 9–14% | reference |
-| `onnx_runtime_dart` 0.10.7, pure Dart JIT | ~2.5 s | ~125% | **exact** — contour sum 4766.68 vs 4766.676, same argmaxes, no missing operators |
+| `onnx_runtime_dart` 0.10.7, pure Dart JIT | ~1.5 s | ~75% | **exact** — contour sum 4766.68 vs 4766.676, same argmaxes, no missing operators |
 | same, AOT (`dart compile exe`) | ~3.0 s | ~150% | exact |
+| **after optimisation** (see below) | **498 ms** best, 600–730 ms typical under load | 25–37% | **bitwise identical** |
 
 Native ORT leaves room for a sliding window updated two to four times a
-second at a fraction of a core. Pure Dart, today, does not: at ~15× ORT it
-cannot even keep up with the audio, let alone overlap windows. AOT is not
-faster than JIT here, which is ordinary for hot numeric loops.
+second at a fraction of a core. Pure Dart did not, at first: ~5.6–8.7× ORT.
+(AOT is *slower* than JIT here, which is ordinary for hot numeric loops.)
 
-That 15× is not spread thinly, though. Profiling the graph by operator:
+So the runtime was optimised, and the result is worth recording because the
+obvious hypothesis was wrong.
 
-| operator | share of node time |
+Profiling the graph with **native ORT** attributes 66% of node time to `Conv`,
+with the nnAudio CQT front end — convolutions with very long kernels —
+prominent among them. Long-kernel convolution is exactly what an FFT does
+cheaply, the same trade §3.3 made for YIN's difference function at 10×. That
+was the plan.
+
+**Profiling it in Dart said something else.** The 256-tap CQT convolutions are
+about 6% of the Dart cost. What dominates is *small-output-channel* 2-D
+convolutions, and the reason is an implementation detail rather than
+arithmetic: an im2col GEMM materialises a column matrix of
+`cPerGroup·kh·kw × oh·ow` floats and reuses each entry only `mPerGroup`
+times, so the model's 8→8-channel 3×39 convolution was building a **170 MB
+column matrix to perform 340 MMAC**. Replacing im2col with a direct,
+`Float32x4`-accumulated kernel for few-channel convolutions was worth 11.1×
+on that shape alone.
+
+| change | worth |
 | --- | --- |
-| `Conv` | **66%** (31 nodes per run) |
-| `Concat` | 7% |
-| `Mul` | 7% |
-| everything else | 20% |
+| im2col-free direct conv for few output channels | 1.8–11.1× per shape |
+| `Slice` contiguous-run fast path | 112 ms → 8.6 ms in-graph |
+| `ReduceSum`/`Pad`/`Concat` fast paths, cached `Tensor.length` | 1.9–9.4× per op |
+| register-rotated input window | 1.13–1.24× on the affected convs |
+| **total** | **1509 ms → 498 ms, ~3×** |
 
-Two thirds of it is convolution, and much of that is the nnAudio CQT front
-end, which is implemented as convolutions with very long kernels. Long-kernel
-convolution is exactly what an FFT does cheaply — the same trade this report
-made for YIN's difference function in §3.3, worth 10× there. Between that,
-`Float32x4` in the inner loops, and a blocked GEMM instead of naive
-accumulation, a large part of the gap looks addressable. This is an estimate,
-not a measurement, and the honest version is: *the pure-Dart path is not
-viable today and its cost sits in one operator family.*
+Parity is not approximate: each kernel accumulates in the same order as the
+GEMM it replaces, so conv outputs are **bitwise identical**, and the model's
+353-test fixture suite passes unchanged. The FFT idea was assessed with
+numbers and *not* implemented: for the dominant 39-tap convolution a 512-point
+real FFT is ~5× fewer operations, but scalar-complex ones against a
+`Float32x4` direct kernel — under 2× on that node, at the cost of
+reassociating the arithmetic and losing bitwise parity.
+
+That work is a PR against `CrispStrobe/onnx_runtime_dart`, not part of this
+repository. What it means here: **pure-Dart Basic Pitch now runs at roughly a
+quarter to a third of real time on one core of a loaded shared VPS**, which
+puts a sliding window updated once or twice a second within reach on a decent
+device — without any native dependency, on every platform including web. The
+next step, if it is wanted, is multi-core: convolution is now 86% of the
+profile and one node is 38% of a run, so banding it across isolates is the
+obvious 2–3× — but the pool copies the whole activation per message today,
+which has to be fixed first.
 
 ### 10.2 MT3
 
@@ -709,8 +821,8 @@ What Basic Pitch could add is the thing the current app cannot do at all —
 phrase. Those are features, not accuracy improvements, and they would run as
 a separate mode with its own budget, leaving the tuner path exactly as it is.
 If that mode is wanted, the measured order is: native ORT works now; pure
-Dart (which would keep the app dependency-free on all six platforms including
-web) needs the convolution work first; MT3 stays offline.
+Dart is within reach after the 3× above and would keep the app
+dependency-free on all six platforms including web; MT3 stays offline.
 
 ## 11. What to do, now
 
@@ -739,7 +851,9 @@ web) needs the convolution work first; MT3 stays offline.
    (§8.1). At the rate the detector now makes octave errors — 0.58% of
    monophonic frames — every version of it discards more good frames than it
    rescues.
-7. **Neural models stay off the tuning path** (§10). Basic Pitch is better
+7. **Neural models stay off the tuning path** (§10), and SWIPE′ is not worth
+   adopting either (§4.5): it loses to YIN on precision, gross errors and —
+   its own selling point — octave errors, while costing more per frame. Basic Pitch is better
    than YIN at naming notes and 10× worse at cents, which is the only
    question the needle asks. If polyphonic transcription is wanted as a
    separate mode, it is feasible — effectively causal, so a sliding window
@@ -756,9 +870,8 @@ web) needs the convolution work first; MT3 stays offline.
 * **Guitar only.** Nothing here speaks to bass, piano, voice, or wind
   instruments, and two of the report's conclusions (window size,
   inharmonicity) are explicitly limited by that.
-* ~~**Frame-level, not note-level.**~~ Done — §9. What remains missing is the
-  other half of that question: how long a *correction* takes to show, i.e.
-  the delay between turning the peg and the needle agreeing.
+* ~~**Frame-level, not note-level.**~~ Done — §9 times the pluck, §9.1 times
+  the peg turn.
 * **A busy shared VPS.** The timings are ratios worth trusting and absolutes
   worth re-measuring on a phone.
 
