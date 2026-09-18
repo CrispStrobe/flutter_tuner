@@ -559,15 +559,30 @@ latency, because the user is charged for it too.
 | no median at all | 96 / 126 | 101 / 142 | 90 | 80% | 0% |
 | MPM + `PitchSmoother` | 95 / 120 | 101 / 145 | 89 | 80% | 0% |
 
-Three things fall out of this table that the frame-level numbers could not
+The same 951 notes at a 1024-sample hop — 23 ms between readings, closer to
+what a phone's audio callback actually delivers:
+
+| pipeline | first reading p50 / p90 | first correct p50 / p90 | settled p50 | correct share | stale before settling (p90) |
+| --- | --- | --- | --- | --- | --- |
+| before the §2.1 fix | 102 / 134 | 148 / 188 | 125 | 72% | **25%** |
+| **after the fix** | 102 / 134 | **107 / 152** | **84** | 80% | **0%** |
+| no median at all | 102 / 134 | 107 / 150 | 84 | 80% | 0% |
+| MPM + `PitchSmoother` | 101 / 130 | 107 / 153 | 84 | 80% | 0% |
+
+Three things fall out of these tables that the frame-level numbers could not
 say.
 
-**The median fix is worth 20 ms of visible latency**, and it removes the
-stale display completely. "Stale before settling" is the share of readings
+**The median fix is worth 20 to 41 ms of visible latency**, and it removes
+the stale display completely. "Stale before settling" is the share of readings
 between the pluck and settling that were within 50 cents of the note you
-played *previously* — at the 90th percentile, 13% of them were, before the
-fix. That is the concrete form of the bug: for a moment after you move to a
-new string, the old one is still on the dial.
+played *previously* — at the 90th percentile, 13% of them were before the fix
+at a 512-sample hop, and **25% at 1024**. That is the concrete form of the
+bug: for a moment after you move to a new string, the old one is still on the
+dial. It also explains why the cost scales with the hop: the stale window
+spans five *accepted* readings, so the longer each reading takes to arrive,
+the further back it reaches. On a device with large audio callbacks the old
+behaviour was materially worse than these solo numbers suggest, and nothing
+in the frame-level metrics would have shown that.
 
 **The floor is the window, and the detector cannot beat it.** First reading
 lands at 96 ms, and 4096 samples *is* 92.9 ms. Every millisecond of the
@@ -578,9 +593,10 @@ few periods; that is why the floor is a little under the full window rather
 than exactly it.)
 
 **The median is nearly free once it is time-aware.** Its remaining cost is
-inside the noise against no median at all (101 vs 101 ms, 90 vs 90 ms), while
-it still buys the tail and the jitter of §2.1. Before the fix it cost 20 ms
-and 13% staleness for the same benefit.
+inside the noise against no median at all (107 vs 107 ms, 84 vs 84 ms at the
+larger hop), while it still buys the tail and the jitter of §2.1. Before the
+fix it cost 41 ms and a quarter of the post-pluck readings for the same
+benefit.
 
 Note that ~20% of notes never "settle" under this definition, for all four
 pipelines alike: a reading goes wrong again in the last 150 ms of the note,
