@@ -4,7 +4,9 @@ A measurement of the shipped detection pipeline against 360 real recordings
 with ground truth, and of every alternative that looked promising enough to
 be worth the arithmetic.
 
-**Short version.** The detector is fine. The three things that looked wrong
+**Short version.** The detector is fine, and one thing around it was not:
+the app's own median filter, now fixed and re-measured (§2.1) at +9.09 points
+of frame-level accuracy. The three things that looked wrong
 in `pitch_detector_dart` turn out to be: one that is wrong in the opposite
 direction from the complaint (the threshold), one that changes almost nothing
 (the missing step 6), and one that is a genuine and large problem but has
@@ -12,9 +14,8 @@ nothing to do with accuracy (the O(N²) difference function costs more than
 the entire real-time budget). pYIN, MPM and phase-based refinement all lose to
 what is already there, once it is measured against real audio rather than a
 synthesiser. The one accuracy bug found is not in YIN at all: it is
-CrispTuner's own five-frame median, which has no notion of time and, on a
-corpus of real playing, throws away about ten points of frame accuracy that a
-one-line change gets back.
+CrispTuner's own five-frame median, which had no notion of time and, on a
+corpus of real playing, threw away nine points of frame accuracy.
 
 ---
 
@@ -121,9 +122,47 @@ ago, from a different note. It earns its place on the tail (held-note p99
 Clearing on a gap recovers nearly all of the lost accuracy, *keeps* the tail
 benefit the median was there for, and lowers needle wobble as well. Adding a
 jump reset on top changes nothing measurable — the gap reset already catches
-note changes, because a note change drops frames. This is a one-line change
-to `MedianFilter`'s caller and it is the only change in this report with a
-clear before/after case.
+note changes, because a note change drops frames.
+
+### 2.1 The fix, implemented and re-measured
+
+This is the one finding in the report that was acted on. The gate and the
+median used to be two statements at the call site in `main.dart`, behind a
+Flutter import where nothing could measure them; they are now
+`PitchSmoother` in `lib/tuner_core.dart`, which gates the frame, smooths it,
+and **clears the window whenever a frame is rejected**. `main.dart`,
+`TunerEngine` and `tool/tuner_probe.dart` all go through it, and the
+benchmark scores that class itself — the `app-fixed` variant below calls the
+shipped code, not a model of it.
+
+180 solo files, 151,882 monophonic frames, both variants in the same run:
+
+| | RPA% | oct% | gross% | oct+gross% | held RPA% | held gross% | held p99 | jitter p90 | rep% | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| before (`app`) | 62.79 | 0.43 | 15.52 | 15.95 | 80.86 | 0.91 | 16.25 | 3.65 | 74.71 | 71.69 | 17.07 |
+| after (`app-fixed`) | **71.88** | 0.59 | **3.20** | **3.79** | 80.80 | 0.87 | 16.20 | **3.25** | 74.71 | 71.69 | 17.07 |
+
+**+9.09 points of frame-level accuracy, gross errors down from 15.5% to
+3.2%, and 11% less needle wobble.** The modelled `app+median-gapreset`
+variant produces identical numbers to three decimal places, which is the
+check that the model and the implementation are the same thing.
+
+Two honest caveats. First, the gain is entirely in *transitions*: on held
+notes the numbers are unchanged to within a rounding error (80.86 → 80.80
+RPA, p99 16.25 → 16.20), because a held note drops few frames and the stale
+window rarely reaches back past the attack. What improves is the half-second
+after you move to a new string, where the old behaviour could display a
+pitch belonging to the previous note. Second, the octave-error rate goes
+*up* slightly, 0.43% → 0.59% of reported frames. That is not a regression in
+detection: it is the stale median having previously overwritten some
+octave-wrong frames with stale-but-right-octave values, turning an octave
+error into a gross error. Adding the two together, 15.95% → 3.79%, is the
+fair comparison.
+
+Nothing else changes: the gate is untouched, so the report rate, voicing
+recall and false-alarm rate are identical to the digit. On the chordal
+`_comp` set — material a tuner is not built for, §6 — the same change is
+worth RPA 28.51 → 32.33 and gross errors 23.53% → 14.87%.
 
 ---
 
@@ -356,12 +395,15 @@ The 180 `_comp` files, which are chordal and which a monophonic tuner is not
 built for. 31,032 monophonic frames, 163,102 polyphonic ones.
 
 On the frames that happen to be monophonic, everything degrades roughly in
-proportion (shipped `app`: 28.98% RPA, 8.27% octave errors — nineteen times
-the solo rate, because a "monophonic" instant inside chordal playing still
-has other strings ringing in the window). On genuinely polyphonic frames, the
-shipped pipeline names *some* sounding string 21% of the time it says
-anything at all (57% in the solo set, where the polyphonic frames are mostly
-one note ringing under the next).
+proportion (`app` before the §2.1 fix: 28.51% RPA, 7.45% octave errors —
+seventeen times the solo rate, because a "monophonic" instant inside chordal
+playing still has other strings ringing in the window). On genuinely
+polyphonic frames, the pipeline names *some* sounding string 22% of the time
+it says anything at all (58% in the solo set, where the polyphonic frames are
+mostly one note ringing under the next).
+
+The median fix helps here too, for the same reason and by less: RPA 28.51 →
+32.33, gross errors 23.53% → 14.87%, held-note p99 25.45 → 24.65 cents.
 
 This is not a defect to fix. It is the reason a tuner asks you to play one
 string at a time, and the numbers are here so that nobody has to guess how
@@ -377,10 +419,9 @@ badly it fails when you do not.
    machine; this is the only finding that is unambiguously a bug. It means
    either vendoring YIN (≈150 lines, `lib/yin.dart` here is a working
    version) or a pull request upstream to `pitch_detector_dart`.
-2. **Clear the median window when a frame is dropped.** +9 points of
-   frame-level RPA, gross errors 15.5% → 3.2%, less jitter, tail benefit
-   retained. One line at the call site, or a `clear()` in the rejection
-   branch of `_processAudioData`.
+2. ~~**Clear the median window when a frame is dropped.**~~ **Done** — see
+   §2.1. `PitchSmoother` in `lib/tuner_core.dart`, measured at +9.09 points
+   of frame-level RPA and gross errors 15.5% → 3.2%.
 3. **Change nothing else in the detector.** Not the threshold, which is at
    the minimum of the octave-error curve where it is; not step 6, which
    changes 0.08 points; not the window, which is sized for an instrument this

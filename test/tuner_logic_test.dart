@@ -382,6 +382,57 @@ void main() {
     });
   });
 
+  group('acceptFrame (the gate and the median together)', () {
+    test('rejects a frame the detector is not confident about', () {
+      final engine = TunerEngine();
+      expect(
+        engine.acceptFrame(pitched: false, probability: 0.99, pitch: 440.0),
+        isNull,
+      );
+      expect(
+        engine.acceptFrame(pitched: true, probability: 0.5, pitch: 440.0),
+        isNull,
+      );
+    });
+
+    test('smooths across consecutive accepted frames', () {
+      final engine = TunerEngine();
+      engine.acceptFrame(pitched: true, probability: 0.99, pitch: 440.0);
+      engine.acceptFrame(pitched: true, probability: 0.99, pitch: 445.0);
+      expect(
+        engine.acceptFrame(pitched: true, probability: 0.99, pitch: 442.0),
+        442.0,
+      );
+    });
+
+    test('a rejected frame clears the window, so nothing is averaged '
+        'across the gap', () {
+      final engine = TunerEngine();
+      // Four frames of an open A, then the player stops.
+      for (int i = 0; i < 4; i++) {
+        engine.acceptFrame(pitched: true, probability: 0.99, pitch: 110.0);
+      }
+      expect(
+        engine.acceptFrame(pitched: false, probability: 0.0, pitch: -1),
+        isNull,
+      );
+      // A different string now. Without the clear, the median would still be
+      // sitting on 110 Hz — a fifth away — for the next two frames.
+      expect(
+        engine.acceptFrame(pitched: true, probability: 0.99, pitch: 164.81),
+        164.81,
+      );
+      expect(
+        engine.acceptFrame(pitched: true, probability: 0.99, pitch: 164.9),
+        164.9,
+      );
+      expect(
+        engine.acceptFrame(pitched: true, probability: 0.99, pitch: 164.85),
+        164.85,
+      );
+    });
+  });
+
   group('pcmToFloat', () {
     test('converts silence (zeros) correctly', () {
       final engine = TunerEngine();

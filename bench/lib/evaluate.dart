@@ -61,6 +61,11 @@ class Variant {
 
   final Refinement2 refine;
 
+  /// Run the gate and the median through the app's own [PitchSmoother]
+  /// rather than reproducing them here — so what is scored is the shipped
+  /// class, not a benchmark's idea of it.
+  final bool coreSmoother;
+
   /// Non-YIN detectors.
   final bool isMpm;
   final bool isPyin;
@@ -86,6 +91,7 @@ class Variant {
     this.bestLocal = false,
     this.probabilityGate = false,
     this.medianPolicy = MedianPolicy.none,
+    this.coreSmoother = false,
     this.refine = Refinement2.none,
     this.isMpm = false,
     this.isPyin = false,
@@ -144,7 +150,10 @@ const List<Variant> defaultVariants = [
   Variant('mpm', isMpm: true),
   Variant('mpm+median', isMpm: true, medianPolicy: MedianPolicy.app),
 
-  // --- the median, made time-aware ---
+  // --- the fix, as actually implemented in lib/tuner_core.dart ---
+  Variant('app-fixed', coreSmoother: true),
+
+  // --- the median, made time-aware (modelled here, for attribution) ---
   Variant('app+median-gapreset',
       probabilityGate: true, medianPolicy: MedianPolicy.resetOnGap),
   Variant('app+median-jumpreset',
@@ -211,6 +220,10 @@ FileResult evaluateFile({
       if (v.median) v.name: MedianFilter()
   };
   final lastRaw = <String, double>{};
+  final smoothers = {
+    for (final v in variants)
+      if (v.coreSmoother) v.name: PitchSmoother()
+  };
   final pyinFrames = <PyinFrame>[];
   final bValues = <double>[];
 
@@ -239,6 +252,16 @@ FileResult evaluateFile({
         } else {
           r = yin.resultFromCmndf(v.threshold,
               selection: v.selection, bestLocal: v.bestLocal);
+        }
+        if (v.coreSmoother) {
+          // The app's own class decides everything from here.
+          final smoothed = smoothers[v.name]!.accept(
+            pitched: r.pitched,
+            probability: r.probability,
+            pitch: r.pitch,
+          );
+          detected[v.name]!.add(smoothed ?? 0);
+          continue;
         }
         if (!r.pitched || (v.probabilityGate && r.probability <= 0.9)) {
           value = 0;

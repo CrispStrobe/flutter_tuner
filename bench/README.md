@@ -82,7 +82,7 @@ of the maths measures nothing.
 | `lib/mpm.dart` | McLeod's NSDF, as a comparison point. |
 | `lib/pyin.dart` | A pYIN-shaped tracker: candidate distribution per frame, Viterbi across frames. Simplified; see the file. |
 | `lib/refine.dart` | Instantaneous frequency from FFT phase, harmonic least squares, and the stiffness fit that yields an inharmonicity coefficient. |
-| `lib/evaluate.dart` | One file in, every variant scored out. All YIN variants share one difference function per frame. |
+| `lib/evaluate.dart` | One file in, every variant scored out. All YIN variants share one difference function per frame. The `app-fixed` variant calls the app's own `PitchSmoother` rather than reproducing it. |
 | `lib/metrics.dart` | RPA, octave and gross error rates, voicing recall and false alarm, and cent-error histograms. |
 | `lib/jams.dart`, `lib/wav.dart` | Just enough of each format. |
 | `bin/bench.dart` | The corpus run, one isolate per core. |

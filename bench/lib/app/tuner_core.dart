@@ -18,18 +18,7 @@ const int minMidi = 21;
 const int maxMidi = 108;
 
 const List<String> _noteNames = [
-  'C',
-  'C#',
-  'D',
-  'D#',
-  'E',
-  'F',
-  'F#',
-  'G',
-  'G#',
-  'A',
-  'A#',
-  'B',
+  'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
 ];
 
 /// Scientific pitch name for a MIDI note number — 69 is "A4".
@@ -104,6 +93,60 @@ class MedianFilter {
   }
 
   void clear() => _window.clear();
+}
+
+/// The gate and the smoothing that sit between the detector and the note
+/// lookup.
+///
+/// This used to be spelled out at the call site in `main.dart` — a
+/// `probability > 0.9` test, then `MedianFilter.add` — which put two
+/// decisions with real consequences behind a Flutter import, where nothing
+/// could measure them. They live here now, and `bench/` scores this class
+/// itself rather than a copy of what it is believed to do.
+///
+/// The gate is an aperiodicity threshold of 0.1 applied *after* YIN has
+/// chosen a period with a threshold of 0.2. That combination is not an
+/// accident worth tidying: choosing the period loosely and accepting the
+/// frame strictly measures better on real playing than either threshold used
+/// for both jobs — 0.43% octave errors against 2.22% for a 0.1 threshold
+/// throughout (bench/REPORT.md §2).
+class PitchSmoother {
+  /// A frame must be at least this periodic to be believed.
+  static const double minProbability = 0.9;
+
+  final MedianFilter _median;
+
+  PitchSmoother({int windowSize = 5})
+      : _median = MedianFilter(size: windowSize);
+
+  /// Feed one detector frame in; get the pitch to display, or null if the
+  /// frame should be ignored.
+  ///
+  /// Rejecting a frame **clears the median window**, and that is the whole
+  /// point of this class. The window holds the last five *accepted* pitches
+  /// and has no notion of time, so when frames are dropped — one in four, on
+  /// real playing — it goes on averaging over pitches from a quarter of a
+  /// second ago, which by then belong to a different note. Measured over
+  /// GuitarSet that cost nine points of frame accuracy and turned 3.2% gross
+  /// errors into 15.5%. A gap in the frames is a gap in time, and nothing
+  /// either side of it should be averaged together.
+  double? accept({
+    required bool pitched,
+    required double probability,
+    required double pitch,
+  }) {
+    if (!pitched || probability <= minProbability || pitch <= 0) {
+      _median.clear();
+      return null;
+    }
+    return _median.add(pitch);
+  }
+
+  /// Smooth a pitch that has already been accepted. Exposed for callers that
+  /// do their own gating.
+  double smooth(double pitch) => _median.add(pitch);
+
+  void clear() => _median.clear();
 }
 
 /// The YIN window the app analyses, in samples.
@@ -230,7 +273,9 @@ class PitchTable {
   /// The three candidates around the equal-tempered guess are then compared
   /// against the *tempered* targets, which can sit tens of cents off equal.
   NoteDetectionResult nearestNote(double detectedPitch) {
-    if (detectedPitch <= 0 || detectedPitch.isNaN || detectedPitch.isInfinite) {
+    if (detectedPitch <= 0 ||
+        detectedPitch.isNaN ||
+        detectedPitch.isInfinite) {
       return NoteDetectionResult.empty();
     }
 

@@ -300,8 +300,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _pitchDetector
         .getPitchFromFloatBuffer(_pitchWindow.lastN(pitchWindowSize))
         .then((result) {
-      if (result.pitched && result.probability > 0.9) {
-        final smoothed = _engine.smoothPitch(result.pitch);
+      // The gate and the median live together in the engine: a rejected
+      // frame has to clear the smoothing window, or the window goes on
+      // averaging over pitches from before the gap.
+      final smoothed = _engine.acceptFrame(
+        pitched: result.pitched,
+        probability: result.probability,
+        pitch: result.pitch,
+      );
+      if (smoothed != null) {
         final detection = _engine.detectNote(smoothed);
         _resetSilenceTimer();
         if (mounted) {
