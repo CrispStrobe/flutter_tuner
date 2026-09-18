@@ -1,0 +1,91 @@
+name: Bench (cello, MUSERC)
+
+# The pitch benchmark against a bowed instrument, run on CI rather than on a
+# developer's machine.
+#
+# It is here for two reasons. The corpus is 1.4 GB and cannot live in the
+# repository (CC BY 4.0 — redistributable, but this repo is not a mirror), so
+# every run has to fetch it anyway; and the analysis is CPU-bound for several
+# minutes, which is exactly the kind of work that should not be competing with
+# an interactive session on a shared box.
+#
+# Manual dispatch only: nothing here gates a pull request, and it downloads
+# 1.4 GB from Zenodo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hop:
+        description: 'Analysis hop in samples (512 = 10.7 ms at 48 kHz)'
+        required: false
+        default: '512'
+      window:
+        description: 'Analysis window in samples'
+        required: false
+        default: '4096'
+
+jobs:
+  cello:
+    name: MUSERC cello benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      # The benchmark copies the app's Flutter-free files rather than
+      # path-depending on the app package; a stale copy would measure the
+      # wrong code, so this fails first if they have drifted.
+      - run: ./tool/sync_core.sh --check
+        working-directory: bench
+
+      - run: dart pub get
+        working-directory: bench
+
+      - name: Cache MUSERC
+        id: cache-muserc
+        uses: actions/cache@v4
+        with:
+          path: corpus/muserc
+          key: muserc-sa-v1
+
+      - name: Fetch MUSERC (Zenodo 1560651, CC BY 4.0)
+        if: steps.cache-muserc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p corpus/muserc
+          curl -sL --retry 3 -o /tmp/MUSERC.zip \
+            "https://zenodo.org/records/1560651/files/MUSERC.zip?download=1"
+          # Only the SA/ folder is wanted: audio plus sensor CSVs, 72 MB of
+          # the 1.4 GB. The rest is high-speed video.
+          unzip -q -o /tmp/MUSERC.zip 'MUSERC/SA/*' -d corpus/muserc
+          rm -f /tmp/MUSERC.zip
+          ls corpus/muserc/MUSERC/SA | wc -l
+
+      - name: Run the cello benchmark
+        working-directory: bench
+        run: |
+          dart run bin/cello.dart \
+            --data ../corpus/muserc/MUSERC/SA \
+            --window ${{ inputs.window || '4096' }} \
+            --hop ${{ inputs.hop || '512' }} \
+            | tee cello-results.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cello-results
+          path: bench/cello-results.txt
+          retention-days: 30
+
+      - name: Summary
+        working-directory: bench
+        run: |
+          {
+            echo '## MUSERC cello benchmark'
+            echo ''
+            echo '```'
+            cat cello-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
