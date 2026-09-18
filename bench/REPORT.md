@@ -534,7 +534,169 @@ inharmonicity work, and nothing in the UI consumes it. Nothing references it
 at run time, so it is tree-shaken out of the app binary; it costs a reader's
 attention and no bytes.
 
-## 9. What to do, now
+## 9. After the pluck: what the needle actually does
+
+Everything above counts frames. A frame is not what anyone experiences: a
+player plucks a string and watches, and what they notice is how long the
+needle takes to mean anything and whether it stays put. Two pipelines with
+identical RPA can feel completely different — a lagging median scores well on
+a held note and still shows the *previous* note for a fifth of a second after
+the pluck.
+
+So `bin/notes.dart` takes GuitarSet's `note_midi` onsets, runs the pipeline in
+time order, and times every reading from the pluck that produced it. A reading
+is timed at the moment it could be **displayed** — when the last sample of its
+window has arrived — which deliberately charges the analysis window to the
+latency, because the user is charged for it too.
+
+951 isolated notes (300 ms or longer, nothing else sounding across the pluck),
+180 solo files, 512-sample hop. Times in ms from the pluck:
+
+| pipeline | first reading p50 / p90 | first correct p50 / p90 | settled p50 | correct share | stale before settling (p90) |
+| --- | --- | --- | --- | --- | --- |
+| before the §2.1 fix | 96 / 126 | 121 / 161 | 110 | 76% | **13%** |
+| **after the fix (ships now)** | 96 / 126 | **101 / 144** | **90** | 80% | **0%** |
+| no median at all | 96 / 126 | 101 / 142 | 90 | 80% | 0% |
+| MPM + `PitchSmoother` | 95 / 120 | 101 / 145 | 89 | 80% | 0% |
+
+Three things fall out of this table that the frame-level numbers could not
+say.
+
+**The median fix is worth 20 ms of visible latency**, and it removes the
+stale display completely. "Stale before settling" is the share of readings
+between the pluck and settling that were within 50 cents of the note you
+played *previously* — at the 90th percentile, 13% of them were, before the
+fix. That is the concrete form of the bug: for a moment after you move to a
+new string, the old one is still on the dial.
+
+**The floor is the window, and the detector cannot beat it.** First reading
+lands at 96 ms, and 4096 samples *is* 92.9 ms. Every millisecond of the
+tuner's responsiveness beyond that is window and hop, not algorithm — so the
+window is where latency work has to start, not the detector. (A window
+straddling the pluck can sometimes already be right, since YIN needs only a
+few periods; that is why the floor is a little under the full window rather
+than exactly it.)
+
+**The median is nearly free once it is time-aware.** Its remaining cost is
+inside the noise against no median at all (101 vs 101 ms, 90 vs 90 ms), while
+it still buys the tail and the jitter of §2.1. Before the fix it cost 20 ms
+and 13% staleness for the same benefit.
+
+Note that ~20% of notes never "settle" under this definition, for all four
+pipelines alike: a reading goes wrong again in the last 150 ms of the note,
+where the string has decayed into the noise floor. That is a property of
+plucked notes ending, not of a pipeline.
+
+## 10. Neural transcription: Basic Pitch and MT3, measured
+
+§4.5 argued against neural models from the shape of the other results rather
+than from measurement. Two GGUF conversions — `cstr/basic-pitch-GGUF` and
+`cstr/mt3-GGUF` — made it cheap to stop arguing, so `tool/basic_pitch_eval.py`
+runs Spotify's Basic Pitch over the same corpus, scored by the same rules as
+`bin/bench.dart`: same annotations, same monophonic-frame definition, same
+50-cent rule, same octave/gross split, alignment swept the way §1 swept it.
+
+60 solo files, 96,302 monophonic frames, ONNX Runtime on CPU:
+
+| | Basic Pitch | app YIN (§7) |
+| --- | --- | --- |
+| RPA | **86.15%** | 71.88% |
+| reported | 92.28% | 74.71% |
+| accuracy when reporting | 93.35% | **96.18%** |
+| octave errors | **0.18%** | 0.59% |
+| gross errors | 6.47% | **3.20%** |
+| \|err\| p50 / p90 / p99 | **27.5 / 34.6 / 46.1 cents** | **2.45 / 7.70 / 16.25** |
+| frames beyond 5 cents | 98.95% | 22.18% |
+| voicing recall / false alarm | 93.6% / 30.1% | 71.7% / **17.1%** |
+| cost per unit of audio | 270 ms per 2 s window | 1.58 ms per 93 ms window |
+
+**It names notes well and cannot measure cents at all.** That is the finding,
+and it is structural rather than a matter of tuning: the contour head is a
+posteriogram at 3 bins per semitone — 33 cents a bin — and even with parabolic
+interpolation across the peak the median error is **27 cents**. Nearly every
+frame is beyond the ±5 cents a tuner exists to resolve. No amount of inference
+speed changes that; it is what the output layer can represent.
+
+Everywhere else it is a genuinely strong model: it answers on 92% of frames
+against YIN's 75%, and its octave-error rate is a third of YIN's. It is
+better than YIN at the question *it* was built for — which note, and when —
+and useless at the question a tuner asks.
+
+### 10.1 Could it run in something like real time?
+
+Two numbers decide that, and they point in opposite directions.
+
+**It is effectively causal, which was not obvious.** Every frame Basic Pitch
+emits sits inside a fixed 2-second window and is computed with audio from
+*after* it, so the natural assumption is that a realtime sliding-window
+implementation would have to display frames that had no right-context and
+were therefore worse. Measured, they are not:
+
+| audio following the frame inside its window | accuracy |
+| --- | --- |
+| 0–99 ms (what a realtime implementation would show) | 92.85% |
+| 400–499 ms | 93.55% |
+| 1500–1599 ms | 94.02% |
+
+Under a point of difference between the newest frame and the most
+comfortably-padded one. So a sliding window is viable, and the latency is
+inference time plus hop — not the 2 seconds the input length suggests.
+
+**The cost is the problem, and it depends entirely on the runtime.** On this
+(shared, loaded) VPS core:
+
+| runtime | per 2 s window | share of real time | parity |
+| --- | --- | --- | --- |
+| ONNX Runtime, C++ CPU | 174–270 ms | 9–14% | reference |
+| `onnx_runtime_dart` 0.10.7, pure Dart JIT | ~2.5 s | ~125% | **exact** — contour sum 4766.68 vs 4766.676, same argmaxes, no missing operators |
+| same, AOT (`dart compile exe`) | ~3.0 s | ~150% | exact |
+
+Native ORT leaves room for a sliding window updated two to four times a
+second at a fraction of a core. Pure Dart, today, does not: at ~15× ORT it
+cannot even keep up with the audio, let alone overlap windows. AOT is not
+faster than JIT here, which is ordinary for hot numeric loops.
+
+That 15× is not spread thinly, though. Profiling the graph by operator:
+
+| operator | share of node time |
+| --- | --- |
+| `Conv` | **66%** (31 nodes per run) |
+| `Concat` | 7% |
+| `Mul` | 7% |
+| everything else | 20% |
+
+Two thirds of it is convolution, and much of that is the nnAudio CQT front
+end, which is implemented as convolutions with very long kernels. Long-kernel
+convolution is exactly what an FFT does cheaply — the same trade this report
+made for YIN's difference function in §3.3, worth 10× there. Between that,
+`Float32x4` in the inner loops, and a blocked GEMM instead of naive
+accumulation, a large part of the gap looks addressable. This is an estimate,
+not a measurement, and the honest version is: *the pure-Dart path is not
+viable today and its cost sits in one operator family.*
+
+### 10.2 MT3
+
+96 MB, 46.9M parameters, a T5 encoder–decoder emitting event tokens
+autoregressively over multi-second context. Nothing about that is compatible
+with a tuner's latency budget, and it would multiply the app's download size
+many times over. As an offline "record a phrase, get a MIDI file" feature it
+is plausible; as anything on the audio path it is not, and it was not
+measured here because the architecture answers the question by itself.
+
+### 10.3 So what would it be for?
+
+Not the needle. YIN keeps that: 2.45 cents against 27, at a six-hundredth of
+the cost per unit of audio.
+
+What Basic Pitch could add is the thing the current app cannot do at all —
+**polyphony**. Strum once and tune six strings; show a chord; transcribe a
+phrase. Those are features, not accuracy improvements, and they would run as
+a separate mode with its own budget, leaving the tuner path exactly as it is.
+If that mode is wanted, the measured order is: native ORT works now; pure
+Dart (which would keep the app dependency-free on all six platforms including
+web) needs the convolution work first; MT3 stays offline.
+
+## 11. What to do, now
 
 1. ~~**Replace the difference function with the FFT one.**~~ **Done** — see
    §7. YIN is vendored in `lib/detectors.dart`, asserted frame-identical to
@@ -561,8 +723,14 @@ attention and no bytes.
    (§8.1). At the rate the detector now makes octave errors — 0.58% of
    monophonic frames — every version of it discards more good frames than it
    rescues.
+7. **Neural models stay off the tuning path** (§10). Basic Pitch is better
+   than YIN at naming notes and 10× worse at cents, which is the only
+   question the needle asks. If polyphonic transcription is wanted as a
+   separate mode, it is feasible — effectively causal, so a sliding window
+   works — but only on native ONNX Runtime until `onnx_runtime_dart`'s
+   convolutions get the same FFT treatment YIN's difference function got.
 
-## 10. What would make this measurement better
+## 12. What would make this measurement better
 
 * **The reference is itself an algorithm.** GuitarSet's contours come from
   pYIN on a hexaphonic pickup. Below a few cents, this benchmark is
@@ -572,9 +740,9 @@ attention and no bytes.
 * **Guitar only.** Nothing here speaks to bass, piano, voice, or wind
   instruments, and two of the report's conclusions (window size,
   inharmonicity) are explicitly limited by that.
-* **Frame-level, not note-level.** A tuner's real unit is "how long until the
-  reading is right and stays right after a pluck". That is a different
-  experiment, and a better one.
+* ~~**Frame-level, not note-level.**~~ Done — §9. What remains missing is the
+  other half of that question: how long a *correction* takes to show, i.e.
+  the delay between turning the peg and the needle agreeing.
 * **A busy shared VPS.** The timings are ratios worth trusting and absolutes
   worth re-measuring on a phone.
 
