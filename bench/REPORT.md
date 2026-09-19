@@ -977,7 +977,74 @@ those four takes are mislabelled or they were played badly; four takes by one
 player is not enough to say which, and it would be dishonest to score it as a
 detector error either way.
 
-## 12. What to do, now
+## 12. Chords: the measurement the transcription mode rests on
+
+Every neural number above came from GuitarSet's `_solo` files. That is
+single-line playing, and for judging a *polyphonic* transcriber it is the
+wrong material: it measures how well Basic Pitch does a job YIN already does,
+and says nothing about whether it can name several notes at once. Since the
+app now has a transcription mode built on exactly that claim, it needed
+testing.
+
+`bench/tool/kaggle/polyphonic-eval` scores the note head against the chordal
+half of the corpus with the metric that applies to sets rather than to single
+values: per-frame precision, recall and F1 over the notes sounding,
+micro-averaged. 60 files, 128,558 reference frames, and the material is
+genuinely polyphonic —
+
+| notes sounding | share of frames |
+| --- | --- |
+| 1 | 13.1% |
+| 2 | 17.8% |
+| 3 | 22.1% |
+| 4 | 24.5% |
+| 5 | 16.8% |
+| 6 | 5.7% |
+
+— averaging 3.31 notes at once, which sets the ceiling for anything
+monophonic. **A perfect single-note detector can reach 30.2% recall on this
+material and no more**, because naming one note of three and a third is all
+it can do.
+
+| threshold | precision | recall | F1 |
+| --- | --- | --- | --- |
+| 0.3 | 81.3% | **80.1%** | **80.7%** |
+| 0.4 | 86.7% | 72.0% | 78.7% |
+| 0.5 | 90.3% | 61.3% | 73.0% |
+| 0.6 | 92.8% | 46.3% | 61.8% |
+| 0.7 | 95.0% | 27.7% | 42.9% |
+
+**2.7× the recall a monophonic detector could reach, at 81% precision.** That
+is the justification for the mode existing, and it is the first number in
+this report that argues *for* adding something rather than against.
+
+The app ships the 0.4 threshold rather than the F1-optimal 0.3: a display is
+not an F1 score, and a note shown that is not being played is the worse error,
+because the player can see what they are holding.
+
+### 12.1 How this nearly went the other way
+
+The first run of this evaluation returned **28.1% F1 with 21.2% recall** —
+below the monophonic ceiling, which would have meant a polyphonic model that
+cannot beat naming one note, and the honest conclusion would have been to
+delete the mode.
+
+It was wrong. The ONNX export names neither of its two 88-wide heads, and the
+order is not the obvious one: `StatefulPartitionedCall:1` is the note head,
+`:2` is onset. Having assumed otherwise, I had scored the **onset** head as
+if it were notes. Onsets fire for a few frames at a note's start; note
+activations are sustained for its duration, so the mistake shows up as a
+plausible-looking bad model rather than as an error.
+
+Two things now prevent it recurring: the kernel identifies the heads at
+runtime by how long their activations run — 59 frames against 11.5 on real
+audio — and prints its decision, and the app hard-codes the answer with a
+test asserting it. Worth stating in full because the failure mode is general:
+**an unlabelled model output does not announce that it has been misread, and
+a wrong answer that looks like a mediocre model is the hardest kind to
+notice.**
+
+## 13. What to do, now
 
 1. ~~**Replace the difference function with the FFT one.**~~ **Done** — see
    §7. YIN is vendored in `lib/detectors.dart`, asserted frame-identical to
@@ -1013,7 +1080,7 @@ detector error either way.
    works — but only on native ONNX Runtime until `onnx_runtime_dart`'s
    convolutions get the same FFT treatment YIN's difference function got.
 
-## 13. What would make this measurement better
+## 14. What would make this measurement better
 
 * **The reference is itself an algorithm.** GuitarSet's contours come from
   pYIN on a hexaphonic pickup. Below a few cents, this benchmark is

@@ -303,4 +303,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get detectorSwipe => 'SWIPE′ (experimental)';
+
+  @override
+  String get transcriptionTitle => 'Chord transcription';
+
+  @override
+  String get transcriptionEnable => 'Detect chords';
+
+  @override
+  String get transcriptionListening => 'Listening for notes…';
+
+  @override
+  String get transcriptionUnsupported => 'Not available in the browser';
+
+  @override
+  String get transcriptionNotForTuning =>
+      'Names notes only — use the meter above to tune';
 }

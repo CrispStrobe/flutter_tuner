@@ -14,6 +14,15 @@ dependencies:
   # Core audio (mobile)
   record: ^6.0.0
   fftea: ^1.5.0
+  # Pure-Dart ONNX inference for the transcription mode: no FFI, so it does
+  # not add a native build to any of the six platforms. Pinned to the repo
+  # rather than pub because the published 0.10.7 predates the convolution
+  # work that made Basic Pitch 3x faster (1509 ms -> 498 ms per 2 s window);
+  # move to a pub version once one is published.
+  onnx_runtime_dart:
+    git:
+      url: https://github.com/CrispStrobe/onnx_runtime_dart.git
+      ref: main
   flutter_pcm_sound: ^3.3.3
 
   # Utilities
@@ -43,6 +52,9 @@ flutter:
 
   assets:
     - assets/icon/
+    # Spotify's Basic Pitch (ICASSP 2022), Apache-2.0 — 225 KB. Polyphonic
+    # note transcription, which the tuner's own detector cannot do at all.
+    - assets/models/
 
 flutter_launcher_icons:
   android: true

@@ -625,6 +625,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'SWIPE′ (experimental)'**
   String get detectorSwipe;
+
+  /// Title of the panel that lists every note currently detected, as opposed to the single note the tuner shows
+  ///
+  /// In en, this message translates to:
+  /// **'Chord transcription'**
+  String get transcriptionTitle;
+
+  /// Label of the switch that turns polyphonic note detection on
+  ///
+  /// In en, this message translates to:
+  /// **'Detect chords'**
+  String get transcriptionEnable;
+
+  /// Shown in the transcription panel while it has not yet detected anything
+  ///
+  /// In en, this message translates to:
+  /// **'Listening for notes…'**
+  String get transcriptionListening;
+
+  /// Shown instead of the chord transcription panel on the web, where the model cannot run fast enough
+  ///
+  /// In en, this message translates to:
+  /// **'Not available in the browser'**
+  String get transcriptionUnsupported;
+
+  /// Warning that the chord detector is not accurate enough in cents to tune with
+  ///
+  /// In en, this message translates to:
+  /// **'Names notes only — use the meter above to tune'**
+  String get transcriptionNotForTuning;
 }
 
 class _AppLocalizationsDelegate

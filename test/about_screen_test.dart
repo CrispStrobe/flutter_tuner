@@ -55,8 +55,14 @@ void main() {
       expect(find.text('fftea'), findsOneWidget);
       expect(find.text('record'), findsOneWidget);
       expect(find.text('flutter_pcm_sound'), findsOneWidget);
-      // Licence names shown next to the components.
-      expect(find.text('Apache-2.0'), findsOneWidget);
+      // The transcription mode ships a model file, which is not a pub
+      // package and so is not discovered automatically — it has to be listed
+      // here or its Apache-2.0 attribution appears nowhere.
+      expect(find.text('Basic Pitch (model weights)'), findsOneWidget);
+      expect(find.text('onnx_runtime_dart'), findsOneWidget);
+      // Licence names shown next to the components. Two components are
+      // Apache-2.0 now: fftea and the model weights.
+      expect(find.text('Apache-2.0'), findsNWidgets(2));
       expect(find.text('Unlicense'), findsOneWidget);
       expect(find.text('BSD 3-Clause'), findsWidgets);
     });

@@ -305,4 +305,20 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get detectorSwipe => 'SWIPE′ (experimentell)';
+
+  @override
+  String get transcriptionTitle => 'Akkorderkennung';
+
+  @override
+  String get transcriptionEnable => 'Akkorde erkennen';
+
+  @override
+  String get transcriptionListening => 'Warte auf Töne …';
+
+  @override
+  String get transcriptionUnsupported => 'Im Browser nicht verfügbar';
+
+  @override
+  String get transcriptionNotForTuning =>
+      'Nur Tonnamen — zum Stimmen die Anzeige oben verwenden';
 }
