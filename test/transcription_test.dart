@@ -141,6 +141,59 @@ void main() {
     expect(kNoteHead, isNot(kOnsetHead));
   });
 
+  group('BasicPitchDecoder.decodeFrames', () {
+    // 3 frames x 88 bins, one bin (MIDI 60 = bin 39) dipping in the middle.
+    Float64List activations(List<double> perFrame) {
+      const bins = BasicPitchGeometry.noteBins;
+      final out = Float64List(perFrame.length * bins);
+      for (int f = 0; f < perFrame.length; f++) {
+        out[f * bins + (60 - BasicPitchGeometry.lowestMidi)] = perFrame[f];
+      }
+      return out;
+    }
+
+    test('without hysteresis a dip stops the note', () {
+      final seq = const BasicPitchDecoder(noteThreshold: 0.4)
+          .decodeFrames(activations([0.9, 0.25, 0.9]), frames: 3);
+      expect(seq.map((s) => s.contains(60)).toList(), [true, false, true]);
+    });
+
+    test('a sustain threshold spans the dip', () {
+      final seq =
+          const BasicPitchDecoder(noteThreshold: 0.4, sustainThreshold: 0.2)
+              .decodeFrames(activations([0.9, 0.25, 0.9]), frames: 3);
+      expect(seq.map((s) => s.contains(60)).toList(), [true, true, true]);
+    });
+
+    test('a dip below the sustain threshold still ends the note', () {
+      final seq =
+          const BasicPitchDecoder(noteThreshold: 0.4, sustainThreshold: 0.2)
+              .decodeFrames(activations([0.9, 0.1, 0.9]), frames: 3);
+      expect(seq.map((s) => s.contains(60)).toList(), [true, false, true]);
+    });
+
+    test('a note below the start threshold never starts, however long', () {
+      // Hysteresis must not lower the bar for *starting* — otherwise it
+      // would buy recall by inventing notes rather than by sustaining them.
+      final seq =
+          const BasicPitchDecoder(noteThreshold: 0.4, sustainThreshold: 0.2)
+              .decodeFrames(activations([0.3, 0.35, 0.3]), frames: 3);
+      expect(seq.every((s) => s.isEmpty), isTrue);
+    });
+
+    test('carry continues a note across a window boundary', () {
+      final seq =
+          const BasicPitchDecoder(noteThreshold: 0.4, sustainThreshold: 0.2)
+              .decodeFrames(activations([0.25]), frames: 1, carry: {60});
+      expect(seq.single, contains(60));
+    });
+
+    test('the default is the old behaviour exactly', () {
+      const d = BasicPitchDecoder();
+      expect(d.sustainThreshold, d.noteThreshold);
+    });
+  });
+
   // --- the second runtime ------------------------------------------------
   //
   // CrispASR's ggml arm is measured in bench/REPORT.md §17 and implemented

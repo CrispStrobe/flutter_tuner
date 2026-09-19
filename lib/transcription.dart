@@ -181,6 +181,21 @@ class BasicPitchDecoder {
   /// one-line change if you disagree.
   final double noteThreshold;
 
+  /// Activation a note already sounding must stay above to *keep* sounding.
+  ///
+  /// A single threshold treats every frame independently, so a note whose
+  /// activation dips for two frames is reported as having stopped and
+  /// started. Real notes do not do that; the activation does. This is the
+  /// standard Schmitt-trigger answer — a high bar to start, a lower one to
+  /// continue — and it is why §17 found CrispASR recalling eight points more
+  /// notes for the same model: it emits segmented note *events*, and an
+  /// event spans the dip.
+  ///
+  /// Defaults to [noteThreshold], which is exactly the old behaviour.
+  /// `null` is not accepted: the equality is the point, so that turning
+  /// hysteresis off is a value rather than a code path.
+  final double sustainThreshold;
+
   /// Onset activation above which a note is called newly struck.
   final double onsetThreshold;
 
@@ -198,9 +213,40 @@ class BasicPitchDecoder {
 
   const BasicPitchDecoder({
     this.noteThreshold = 0.4,
+    double? sustainThreshold,
     this.onsetThreshold = 0.5,
     this.tailFrames = defaultTailFrames,
-  });
+  }) : sustainThreshold = sustainThreshold ?? noteThreshold;
+
+  /// Decode a whole window frame by frame, with hysteresis across frames.
+  ///
+  /// Returns one set of MIDI numbers per frame. This is the *sequence*
+  /// decode — it sees a note's history, which [decode] cannot, because
+  /// [decode] answers "what is sounding now" from a tail average and has no
+  /// past to consult.
+  ///
+  /// [carry] is the set sounding at the end of the previous window, so a
+  /// streamed sequence of windows decodes as one signal rather than as
+  /// independent fragments. Pass null at the start.
+  List<Set<int>> decodeFrames(Float64List note,
+      {int frames = BasicPitchGeometry.frames, Set<int>? carry}) {
+    const bins = BasicPitchGeometry.noteBins;
+    final out = <Set<int>>[];
+    final sounding = <int>{...?carry};
+    for (int f = 0; f < frames; f++) {
+      for (int b = 0; b < bins; b++) {
+        final midi = BasicPitchGeometry.lowestMidi + b;
+        final a = note[f * bins + b];
+        if (sounding.contains(midi)) {
+          if (a < sustainThreshold) sounding.remove(midi);
+        } else if (a >= noteThreshold) {
+          sounding.add(midi);
+        }
+      }
+      out.add(Set<int>.of(sounding));
+    }
+    return out;
+  }
 
   /// [note] and [onset] are `frames × 88`, row-major.
   List<TranscribedNote> decode(Float64List note, Float64List onset,
