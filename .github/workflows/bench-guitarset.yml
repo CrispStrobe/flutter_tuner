@@ -1,0 +1,103 @@
+name: Bench (GuitarSet)
+
+# The Dart benchmarks that need the guitar corpus, run on CI rather than on a
+# shared developer box.
+#
+# The corpus is ~700 MB and cannot live in the repository (CC BY 4.0 —
+# redistributable, but this repo is not a mirror), so every run fetches it;
+# the cache makes that a one-off per key. Manual dispatch only.
+#
+# `swipe` is the reason this exists: SWIPE′ costs tens of milliseconds a
+# frame, so REPORT.md §4.5 quoted it on 20 files while everything else ran on
+# 180 — a subset chosen by what a laptop would tolerate rather than by what
+# the measurement needed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: 'Which benchmark to run'
+        required: true
+        default: 'swipe'
+        type: choice
+        options: [swipe, bench, notes, tracking, harmonics]
+      limit:
+        description: 'Files to use (0 = all 180 of the subset)'
+        required: false
+        default: '0'
+      subset:
+        description: 'solo or comp'
+        required: false
+        default: 'solo'
+
+jobs:
+  guitarset:
+    name: ${{ inputs.tool }} on GuitarSet
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: ./tool/sync_core.sh --check
+        working-directory: bench
+
+      - run: dart pub get
+        working-directory: bench
+
+      - name: Cache GuitarSet
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: corpus/guitarset
+          key: guitarset-mono-mic-v1
+
+      - name: Fetch GuitarSet (Zenodo 3371780, CC BY 4.0)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p corpus/guitarset/audio corpus/guitarset/annotation
+          curl -sL --retry 3 -o /tmp/annotation.zip \
+            "https://zenodo.org/records/3371780/files/annotation.zip?download=1"
+          unzip -q -o /tmp/annotation.zip -d corpus/guitarset/annotation
+          curl -sL --retry 3 -o /tmp/audio.zip \
+            "https://zenodo.org/records/3371780/files/audio_mono-mic.zip?download=1"
+          unzip -q -o /tmp/audio.zip -d corpus/guitarset/audio
+          rm -f /tmp/annotation.zip /tmp/audio.zip
+          echo "audio: $(ls corpus/guitarset/audio | wc -l), annotations: $(ls corpus/guitarset/annotation | wc -l)"
+
+      - name: Run
+        working-directory: bench
+        run: |
+          # `swipe` takes its own flags; the rest share --subset/--limit.
+          if [ "${{ inputs.tool }}" = "swipe" ]; then
+            dart run bin/swipe.dart \
+              --data ../corpus/guitarset \
+              --limit ${{ inputs.limit }} \
+              --jobs 4 --hop 1024 | tee results.txt
+          else
+            dart run bin/${{ inputs.tool }}.dart \
+              --data ../corpus/guitarset \
+              --subset ${{ inputs.subset }} \
+              --limit ${{ inputs.limit }} \
+              --jobs 4 | tee results.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.tool }}-results
+          path: bench/results.txt
+          retention-days: 30
+
+      - name: Summary
+        working-directory: bench
+        run: |
+          {
+            echo "## ${{ inputs.tool }} on GuitarSet (${{ inputs.subset }})"
+            echo ''
+            echo '```'
+            cat results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -159,7 +159,9 @@ Future<void> main(List<String> argv) async {
     final jams = '$data/annotation/$base.jams';
     if (File(jams).existsSync()) pairs.add((wav: wav, jams: jams));
   }
-  if (pairs.length > limit) pairs.removeRange(limit, pairs.length);
+  if (limit > 0 && pairs.length > limit) {
+    pairs.removeRange(limit, pairs.length);
+  }
 
   stdout.writeln('files     : ${pairs.length} (solo)');
   stdout.writeln('hop       : $hop samples, SWIPE\' thresholds $thresholds');

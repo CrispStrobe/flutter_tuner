@@ -127,7 +127,7 @@ def main():
     from scipy.signal import resample_poly
 
     subset = os.environ.get("SUBSET", "comp")
-    limit = int(os.environ.get("LIMIT", "60"))
+    limit = int(os.environ.get("LIMIT", "180"))
     threshold = float(os.environ.get("THRESHOLD", "0.5"))
 
     session = ort.InferenceSession(MODEL, providers=["CPUExecutionProvider"])
