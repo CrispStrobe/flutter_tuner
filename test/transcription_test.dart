@@ -248,6 +248,29 @@ void main() {
     });
   });
 
+  group('poolWorkersFor', () {
+    test('never returns one — one worker is worse than none', () {
+      // A single worker pays the per-conv message copy and gains no
+      // parallelism, so it is strictly worse than not pooling at all.
+      for (int cores = 1; cores <= 64; cores++) {
+        expect(poolWorkersFor(cores), greaterThanOrEqualTo(2),
+            reason: 'cores=$cores');
+      }
+    });
+
+    test('caps at four, where the CI measurements stopped improving', () {
+      expect(poolWorkersFor(4), 4);
+      expect(poolWorkersFor(8), 4);
+      expect(poolWorkersFor(64), 4);
+    });
+
+    test('a small machine still pools', () {
+      expect(poolWorkersFor(1), 2);
+      expect(poolWorkersFor(2), 2);
+      expect(poolWorkersFor(3), 3);
+    });
+  });
+
   // --- the second runtime ------------------------------------------------
   //
   // CrispASR's ggml arm is measured in bench/REPORT.md §17 and implemented

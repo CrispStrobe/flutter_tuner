@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:onnx_runtime_dart/onnx_runtime_dart.dart';
 
+import 'cpu_count.dart';
 import 'transcription.dart';
 import 'transcription_backend.dart';
 
@@ -38,6 +39,30 @@ const String kBasicPitchAsset = 'assets/models/basic_pitch.onnx';
 const String kNoteHead = 'StatefulPartitionedCall:1';
 const String kOnsetHead = 'StatefulPartitionedCall:2';
 const String kContourHead = 'StatefulPartitionedCall:0';
+
+/// Worker isolates the inference pool spawns, for [cpuCount] cores.
+///
+/// `onnx_runtime_dart` ships a pool — `parallelize(poolConv:)` fans each
+/// convolution out across isolates by output-row band — and this app did not
+/// use it. Measured on CI, one arm per process, median of three
+/// (`bench/REPORT.md` §19):
+///
+/// | | single isolate | 2 workers | 4 workers |
+/// | --- | --- | --- | --- |
+/// | Apple Silicon | 353 ms | 174 | **159** |
+/// | x86-64 Linux | 208 ms | 148 | **143** |
+/// | x86-64 Windows | 222 ms | 164 | **153** |
+///
+/// Four wins or ties everywhere, so the cap is four; two captures most of it
+/// on a smaller machine. The floor is two because one worker is strictly
+/// worse than not pooling — it pays the message copy and gains nothing.
+///
+/// The package's own doc comment predicts this will *lose* for CNNs, because
+/// each conv message carries the whole input activation to every worker.
+/// That is right about most CNNs and wrong about this one: at 172 × 264 × 8
+/// the banded compute outweighs the copy. Weight replication costs nothing
+/// worth counting either — the model is 35.7k parameters, about 143 KB.
+int poolWorkersFor(int cores) => cores < 3 ? 2 : (cores > 4 ? 4 : cores);
 
 class TranscriptionService implements TranscriptionBackend {
   @override
@@ -156,20 +181,35 @@ void _workerMain(_WorkerStart start) {
   start.reply.send(inbox.sendPort);
 
   OnnxModel? model;
+  bool pooled = false;
   // Stateful, unlike the decoder it wraps: hysteresis has to remember which
   // notes were sounding when the previous window ended, or a note whose
   // activation dips across a window boundary is reported as two notes.
   final tracker = LiveNoteTracker();
 
-  inbox.listen((message) {
+  inbox.listen((message) async {
     if (message == null) {
+      model?.dispose();
       inbox.close();
       return;
     }
     if (message is! Float64List) return;
     final stopwatch = Stopwatch()..start();
     try {
-      model ??= OnnxModel.fromBytes(start.model);
+      final m = model ??= OnnxModel.fromBytes(start.model);
+      if (!pooled) {
+        // Once, on the first window: spawning the pool costs isolate
+        // startup and weight replication, so it is not worth doing before
+        // we know a window is actually coming. A failure here is not fatal
+        // — the single-isolate path is the same answer, only slower.
+        pooled = true;
+        try {
+          await m.parallelize(
+              workers: poolWorkersFor(cpuCount), poolConv: true);
+        } catch (_) {
+          // Keep going unpooled rather than failing the mode.
+        }
+      }
 
       final input = Float32List(BasicPitchGeometry.windowSamples);
       final n = message.length < input.length ? message.length : input.length;
@@ -184,7 +224,9 @@ void _workerMain(_WorkerStart start) {
       // at a note's start; note activations are sustained for its duration,
       // so the two are separable by how long their activations run, and
       // [_identifyHeads] does that once against real audio.
-      final outputs = model!.run(
+      // runAsync executes on the pool; it falls back to the same work on
+      // this isolate when parallelize did not take.
+      final outputs = await model!.runAsync(
         {
           'serving_default_input_2:0':
               Tensor.float(input, [1, input.length, 1]),

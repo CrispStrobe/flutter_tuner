@@ -1656,19 +1656,60 @@ under IDENTICAL load, back-to-back — a noisy box fabricates wins", and it
 cost nothing to follow once remembered. `--only <arm>` exists now so the
 harness cannot make that mistake again.
 
-### 19.2 Not shipped yet, and why
+### 19.2 On hardware nobody here owns
 
-1.41× is real and it is on the path that actually reaches users — every
-platform, web included. It is not wired into the app in this commit, for one
-reason: every number above comes from one shared VPS core under eleven
-concurrent agent sessions, and the decision it would drive is how many
-isolates to spawn *inside* the transcription isolate on a phone.
+The VPS numbers were never going to decide this. `bench-platforms.yml` runs
+the same four arms, one process each, median of three, on CI:
 
-§14 measured Apple Silicon at 324 ms per window single-threaded against this
-box's 621. A 4-worker pool that helps here may be the wrong default on a
-device with different core counts, different memory bandwidth, and a battery.
-`bench-platforms.yml` already measures Apple Silicon, x86-64 Linux and
-Windows on CI; the pooled arm belongs there before a default moves.
+| | single isolate | `p(2, poolConv)` | `p(4, poolConv)` | gain |
+| --- | --- | --- | --- | --- |
+| Apple Silicon (3 cores) | 353 ms | 174 | **159** | **2.22×** |
+| x86-64 Linux (4) | 208 ms | 148 | **143** | 1.45× |
+| x86-64 Windows (4) | 222 ms | 164 | **153** | 1.45× |
+| this VPS (4, shared) | 621 ms | 476 | 441 | 1.41× |
+
+**It wins everywhere, and most where it matters most.** Apple Silicon is the
+closest proxy available for the phones this app actually ships to, and it
+gains the most: a two-second window drops from 353 ms to 159, which against
+the mode's 500 ms update interval is a duty cycle of 32% rather than 71%.
+That is the real result — nobody was waiting on the latency, but a mode that
+holds a core busy two-thirds of the time is a battery and thermal problem on
+a device that is not plugged in.
+
+Four workers wins or ties on all four machines, so the cap is four; two
+captures most of it on a smaller machine. The floor is two, because one
+worker is strictly worse than not pooling — it pays the per-conv message
+copy and gains no parallelism, and `poolWorkersFor` is tested to never
+return it.
+
+The memory objection also failed to survive contact: weight replication
+across workers sounded expensive until counted. Basic Pitch is 35.7k
+parameters — about 143 KB — so four copies is not a number worth writing
+down.
+
+### 19.3 Shipped
+
+`TranscriptionService` now calls `parallelize(workers: poolWorkersFor(cpuCount),
+poolConv: true)` on its first window and `runAsync` thereafter. Three details
+worth stating because each was a decision rather than an obvious step:
+
+* **The pool is built lazily, on the first window, not at `start()`.**
+  Spawning isolates and replicating weights is work that should not happen
+  because a user toggled a switch and toggled it back.
+* **A pool failure is not a mode failure.** If `parallelize` throws, the
+  worker keeps going unpooled; `runAsync` computes the same answer on the
+  calling isolate. The mode gets slower, never broken.
+* **Core count goes through a conditional export** (`cpu_count.dart`), for
+  the same reason `crispasr_backend.dart` does: `dart:io` in anything
+  reachable from a web entry point fails the build. The web answer is 1,
+  which is also true — the mode does not run there.
+
+One loose end, recorded rather than smoothed over: `parallelize` *without*
+`poolConv` measured 6–17% faster than `run()` on all four machines, and it
+should have measured nothing at all, because the graph has zero `MatMul` for
+it to partition. It may be that `runAsync` differs from `run` in some way
+beyond pooling. The effect is small, consistent, and **unexplained**, so
+nothing here depends on it.
 
 ---
 
