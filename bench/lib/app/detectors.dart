@@ -23,7 +23,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:fftea/fftea.dart';
+import 'fft_real.dart';
 
 /// One frame's answer from a detector.
 class PitchEstimate {
@@ -94,52 +94,35 @@ class _LagDomain {
   final int halfSize;
   final Float64List squares; // prefix sums of x²
   final Float64List correlation; // r(tau) for tau in [0, halfSize)
-  final FFT _fft;
-  final int _fftSize;
+  final FftAutocorrelation _autocorrelation;
 
-  _LagDomain(this.windowSize)
-      : halfSize = windowSize ~/ 2,
+  _LagDomain(int windowSize)
+      : windowSize = windowSize,
+        halfSize = windowSize ~/ 2,
         squares = Float64List(windowSize + 1),
         correlation = Float64List(windowSize ~/ 2),
-        _fftSize = _nextPowerOfTwo(2 * windowSize),
-        _fft = FFT(_nextPowerOfTwo(2 * windowSize));
-
-  static int _nextPowerOfTwo(int n) {
-    int p = 1;
-    while (p < n) {
-      p <<= 1;
-    }
-    return p;
-  }
+        _autocorrelation = FftAutocorrelation(
+          headLength: windowSize ~/ 2,
+          wholeLength: windowSize,
+          lags: windowSize ~/ 2,
+        );
 
   /// r(tau) = Σ_{i<W} x[i]·x[i+tau], by FFT.
   ///
   /// Reversing the first half turns correlation into convolution, so one
   /// forward transform of each side and one inverse gives every lag at once:
-  /// O(N log N) where the double loop is O(N²). Zero-padded well past the
-  /// 3W/2 the result occupies, so the circular convolution cannot wrap onto
-  /// the lags that are read back.
+  /// O(N log N) where the double loop is O(N²).
+  ///
+  /// The transform is `fft_real.dart` rather than `fftea` for one measured
+  /// reason: `fftea` returns a `Float64x2List`, dart2js has no SIMD, and in a
+  /// browser that makes a single 8192-point transform cost 15.6 ms against
+  /// 0.38 ms natively. See the table in `fft_real.dart`.
   void compute(List<double> window) {
-    final w = halfSize;
     squares[0] = 0;
     for (int i = 0; i < windowSize; i++) {
       squares[i + 1] = squares[i] + window[i] * window[i];
     }
-
-    final a = Float64List(_fftSize);
-    final b = Float64List(_fftSize);
-    for (int i = 0; i < w; i++) {
-      a[w - 1 - i] = window[i];
-    }
-    for (int i = 0; i < windowSize; i++) {
-      b[i] = window[i];
-    }
-    final fa = _fft.realFft(a);
-    fa.complexMultiply(_fft.realFft(b));
-    final conv = _fft.realInverseFft(fa);
-    for (int tau = 0; tau < w; tau++) {
-      correlation[tau] = conv[w - 1 + tau];
-    }
+    _autocorrelation.compute(window, correlation);
   }
 
   /// Σ x[i]² over the first half — the head segment's energy.

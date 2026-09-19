@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:collection/collection.dart';
-import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';
 
 import 'detectors.dart';
+import 'fft_real.dart';
 import 'temperament.dart';
 import 'tuner_core.dart';
 // Also imported under a prefix: the class below deliberately re-exposes
@@ -62,14 +62,16 @@ class TunerEngine extends ChangeNotifier {
   List<double> _fftMagnitudes = [];
 
   static const int fftSize = 2048;
-  final FFT _fft = FFT(fftSize);
+  final RealSpectrum _fft = RealSpectrum(fftSize);
 
   // Pre-computed Hann window coefficients
   late final Float64List _hannWindow;
 
-  /// Scratch buffer for the windowed samples handed to the FFT. Reused across
-  /// calls — [computeFFT] runs at display rate on the audio callback path.
+  /// Scratch buffers for the windowed samples and the magnitudes. Reused
+  /// across calls — [computeFFT] runs at display rate on the audio callback
+  /// path, so neither should allocate.
   final Float64List _windowScratch = Float64List(fftSize);
+  final Float64List _magnitudeScratch = Float64List(fftSize ~/ 2);
 
   final PitchSmoother _smoother = PitchSmoother();
 
@@ -298,15 +300,13 @@ class TunerEngine extends ChangeNotifier {
       _windowScratch[i] = samples[i] * _hannWindow[i];
     }
 
-    final fftResult = _fft.realFft(_windowScratch);
-    final magnitudes = fftResult.discardConjugates().magnitudes();
-
-    // Copy out only the bins we display, in one pass — `.toList()` followed by
-    // `.sublist()` allocated the full spectrum then threw 3/4 of it away.
-    final int usefulBins = magnitudes.length ~/ 4;
+    // Only the first quarter of the bins is displayed (up to ~5.5 kHz at
+    // 44.1 kHz), so only that quarter is computed.
+    const int usefulBins = fftSize ~/ 4;
+    _fft.magnitudes(_windowScratch, _magnitudeScratch, usefulBins);
     final trimmed = List<double>.filled(usefulBins, 0.0);
     for (int i = 0; i < usefulBins; i++) {
-      trimmed[i] = magnitudes[i];
+      trimmed[i] = _magnitudeScratch[i];
     }
 
     _fftMagnitudes = trimmed;
