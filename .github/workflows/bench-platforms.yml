@@ -1,0 +1,85 @@
+name: Bench (platforms)
+
+# What the detectors and the transcription model cost on hardware nobody in
+# this project owns.
+#
+# Every timing in REPORT.md before this workflow came from one shared VPS core
+# under a load average that ranged from 2 to 30, and the report says so in
+# several places. The questions that matters to shipping — can a phone or a
+# laptop run this — deserve a number rather than an extrapolation, and
+# GitHub's macos runners are Apple Silicon, so one of those answers is simply
+# available.
+#
+# No corpus: the signal is synthesised, so every platform measures identical
+# work and the numbers are comparable across the matrix.
+
+on:
+  workflow_dispatch:
+  # Also on a push that touches the detectors, because a performance
+  # regression on a platform nobody develops on is otherwise invisible.
+  push:
+    branches: [main]
+    paths:
+      - lib/detectors.dart
+      - lib/fft_real.dart
+      - lib/swipe.dart
+      - bench/bin/platform_timing.dart
+
+jobs:
+  timing:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: Apple Silicon (macOS)
+          - os: ubuntu-latest
+            label: x86-64 (Linux)
+          - os: windows-latest
+            label: x86-64 (Windows)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: dart pub get
+        working-directory: bench
+
+      - name: Machine
+        run: |
+          echo "runner: ${{ matrix.os }}"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            sysctl -n machdep.cpu.brand_string || true
+            sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || true
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            grep -m1 'model name' /proc/cpuinfo || true
+          fi
+        shell: bash
+
+      - name: Time it
+        working-directory: bench
+        run: dart run bin/platform_timing.dart ../assets/models/basic_pitch.onnx | tee timing.txt
+        shell: bash
+
+      - name: Summary
+        working-directory: bench
+        run: |
+          {
+            echo "## ${{ matrix.label }}"
+            echo ''
+            echo '```'
+            cat timing.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timing-${{ matrix.os }}
+          path: bench/timing.txt
+          retention-days: 30
