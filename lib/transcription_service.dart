@@ -20,6 +20,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:onnx_runtime_dart/onnx_runtime_dart.dart';
 
 import 'transcription.dart';
+import 'transcription_backend.dart';
 
 /// Where the model ships.
 const String kBasicPitchAsset = 'assets/models/basic_pitch.onnx';
@@ -38,7 +39,22 @@ const String kNoteHead = 'StatefulPartitionedCall:1';
 const String kOnsetHead = 'StatefulPartitionedCall:2';
 const String kContourHead = 'StatefulPartitionedCall:0';
 
-class TranscriptionService {
+class TranscriptionService implements TranscriptionBackend {
+  @override
+  String get id => 'basic-pitch-onnx';
+
+  @override
+  String get displayName => 'Basic Pitch (on-device)';
+
+  @override
+  bool get isAvailable => isSupported;
+
+  @override
+  int get inputSampleRate => BasicPitchGeometry.sampleRate;
+
+  @override
+  int get windowSamples => BasicPitchGeometry.windowSamples;
+
   /// Whether this platform can run the mode at all.
   ///
   /// Not a capability check on the device — a statement about the platform.
@@ -52,9 +68,11 @@ class TranscriptionService {
   Completer<TranscriptionResult>? _pending;
   bool _starting = false;
 
+  @override
   bool get isRunning => _toWorker != null;
 
   /// Load the model and start the worker. Safe to call twice.
+  @override
   Future<void> start() async {
     if (_toWorker != null || _starting) return;
     if (!isSupported) {
@@ -99,6 +117,7 @@ class TranscriptionService {
   /// Returns null if an inference is already in flight: this mode is
   /// deliberately drop-latest rather than queueing, because a queue of stale
   /// windows is the thing that makes a slow device feel broken.
+  @override
   Future<TranscriptionResult>? transcribe(Float64List window) {
     final port = _toWorker;
     if (port == null || _pending != null) return null;
@@ -108,6 +127,7 @@ class TranscriptionService {
     return completer.future;
   }
 
+  @override
   Future<void> stop() async {
     _toWorker?.send(null);
     _toWorker = null;
