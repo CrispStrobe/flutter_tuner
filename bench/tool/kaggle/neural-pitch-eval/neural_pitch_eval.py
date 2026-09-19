@@ -102,6 +102,26 @@ SEARCH_OFFSETS_MS = [-40, -20, -10, 0, 10, 20, 40]
 _DEVICE = None
 
 
+def make_deterministic():
+    """Pin cuDNN so two runs of the same model give the same numbers.
+
+    Measured the hard way: two Kaggle runs of crepe-tiny, same corpus, same
+    alignment (+0 ms), same threshold, gave |err| p50 5.58 and 6.06 cents and
+    >5c 53.96% and 57.14%. PESTO was bit-identical across the same two runs.
+    The difference is cuDNN picking different convolution algorithms per run;
+    CREPE reads its pitch from an argmax over 20-cent bins plus a local
+    weighted average, so frames sitting near a bin edge flip and the cent
+    distribution moves with them.
+
+    Half a cent of run-to-run noise would not matter for "which note" — it
+    matters a great deal for a report whose whole question is cents.
+    """
+    import torch
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.manual_seed(0)
+
+
 def torch_device():
     """CUDA when there is a *usable* one, else CPU.
 
@@ -410,8 +430,17 @@ def main():
     print()
 
     summary = {}
+    make_deterministic()
+    failures = {}
     for model_name in args.models.split(","):
-        model = build(model_name.strip())
+        model_name = model_name.strip()
+        try:
+            model = build(model_name)
+        except Exception as exc:  # noqa: BLE001
+            failures[model_name] = f"{type(exc).__name__}: {exc}"
+            print(f"{model_name:12s} FAILED TO LOAD — {failures[model_name]}",
+                  flush=True)
+            continue
         mono = correct = octave = gross = reported = 0
         voiced = voiced_reported = unvoiced = unvoiced_reported = 0
         errors = []
@@ -425,135 +454,145 @@ def main():
         # nothing.)
         thresholds = [float(t) for t in str(args.confidence).split(",")]
         cached = []
-        for n, (wav, jams) in enumerate(pairs, 1):
-            audio, rate = read_wav_mono(wav)
-            if rate != model.sample_rate:
-                from scipy.signal import resample_poly
-                from math import gcd
-                g = gcd(int(model.sample_rate), int(rate))
-                audio_m = resample_poly(audio, model.sample_rate // g, rate // g)
-            else:
-                audio_m = audio
-            seconds_audio += len(audio_m) / model.sample_rate
+        # One model failing must not cost the rest of the run: the first
+        # attempt at this comparison lost five completed models because
+        # pesto-mir-1k raised mid-sweep, and a GPU session is not free.
+        try:
+            for n, (wav, jams) in enumerate(pairs, 1):
+                audio, rate = read_wav_mono(wav)
+                if rate != model.sample_rate:
+                    from scipy.signal import resample_poly
+                    from math import gcd
+                    g = gcd(int(model.sample_rate), int(rate))
+                    audio_m = resample_poly(audio, model.sample_rate // g, rate // g)
+                else:
+                    audio_m = audio
+                seconds_audio += len(audio_m) / model.sample_rate
 
-            t0 = time.perf_counter()
-            times, f0, conf = model.run(audio_m.astype(np.float32), model.sample_rate)
-            seconds_compute += time.perf_counter() - t0
-            cached.append((load_truth(jams), times, f0, conf))
-            print(f"\r  {model.name}: {n}/{len(pairs)}", end="", flush=True)
-        print()
+                t0 = time.perf_counter()
+                times, f0, conf = model.run(audio_m.astype(np.float32), model.sample_rate)
+                seconds_compute += time.perf_counter() - t0
+                cached.append((load_truth(jams), times, f0, conf))
+                print(f"\r  {model.name}: {n}/{len(pairs)}", end="", flush=True)
+            print()
 
-        tol = 256 / 44100 / 2
-        for strings, times, f0, conf in cached:
-            for off in SEARCH_OFFSETS_MS:
-                counts, refs = reference_series(strings, times + off / 1000.0, tol)
-                sel = counts == 1
-                if not sel.any():
-                    continue
-                ok = sel & (conf >= thresholds[0]) & (f0 > 0)
-                offset_hits[off][0] += int(sel.sum())
-                if ok.any():
-                    err = np.abs(cents(f0[ok], refs[ok]))
-                    offset_hits[off][1] += int((err <= 50).sum())
-
-        best_offset = max(
-            offset_hits, key=lambda o: offset_hits[o][1] / max(1, offset_hits[o][0])
-        )
-
-        per_threshold = {}
-        for threshold in thresholds:
-            mono = correct = octave = gross = reported = 0
-            voiced = voiced_reported = unvoiced = unvoiced_reported = 0
-            errors = []
+            tol = 256 / 44100 / 2
             for strings, times, f0, conf in cached:
-                counts, refs = reference_series(
-                    strings, times + best_offset / 1000.0, tol
+                for off in SEARCH_OFFSETS_MS:
+                    counts, refs = reference_series(strings, times + off / 1000.0, tol)
+                    sel = counts == 1
+                    if not sel.any():
+                        continue
+                    ok = sel & (conf >= thresholds[0]) & (f0 > 0)
+                    offset_hits[off][0] += int(sel.sum())
+                    if ok.any():
+                        err = np.abs(cents(f0[ok], refs[ok]))
+                        offset_hits[off][1] += int((err <= 50).sum())
+
+            best_offset = max(
+                offset_hits, key=lambda o: offset_hits[o][1] / max(1, offset_hits[o][0])
+            )
+
+            per_threshold = {}
+            for threshold in thresholds:
+                mono = correct = octave = gross = reported = 0
+                voiced = voiced_reported = unvoiced = unvoiced_reported = 0
+                errors = []
+                for strings, times, f0, conf in cached:
+                    counts, refs = reference_series(
+                        strings, times + best_offset / 1000.0, tol
+                    )
+                    said = (conf >= threshold) & (f0 > 0)
+                    voiced += int((counts >= 1).sum())
+                    voiced_reported += int(((counts >= 1) & said).sum())
+                    unvoiced += int((counts == 0).sum())
+                    unvoiced_reported += int(((counts == 0) & said).sum())
+
+                    sel = counts == 1
+                    mono += int(sel.sum())
+                    use = sel & said
+                    reported += int(use.sum())
+                    if use.any():
+                        err = cents(f0[use], refs[use])
+                        good = np.abs(err) <= 50
+                        correct += int(good.sum())
+                        errors.extend(np.abs(err[good]).tolist())
+                        bad = err[~good]
+                        if bad.size:
+                            octaves = bad / 1200
+                            is_octave = (
+                                np.abs(octaves - np.round(octaves)) * 1200 <= 50
+                            ) & (np.round(octaves) != 0)
+                            octave += int(is_octave.sum())
+                            gross += int((~is_octave).sum())
+
+                per_threshold[threshold] = dict(
+                    mono=mono, correct=correct, reported=reported, octave=octave,
+                    gross=gross, voiced=voiced, voiced_reported=voiced_reported,
+                    unvoiced=unvoiced, unvoiced_reported=unvoiced_reported,
+                    errors=np.asarray(errors),
                 )
-                said = (conf >= threshold) & (f0 > 0)
-                voiced += int((counts >= 1).sum())
-                voiced_reported += int(((counts >= 1) & said).sum())
-                unvoiced += int((counts == 0).sum())
-                unvoiced_reported += int(((counts == 0) & said).sum())
 
-                sel = counts == 1
-                mono += int(sel.sum())
-                use = sel & said
-                reported += int(use.sum())
-                if use.any():
-                    err = cents(f0[use], refs[use])
-                    good = np.abs(err) <= 50
-                    correct += int(good.sum())
-                    errors.extend(np.abs(err[good]).tolist())
-                    bad = err[~good]
-                    if bad.size:
-                        octaves = bad / 1200
-                        is_octave = (
-                            np.abs(octaves - np.round(octaves)) * 1200 <= 50
-                        ) & (np.round(octaves) != 0)
-                        octave += int(is_octave.sum())
-                        gross += int((~is_octave).sum())
+            # Report every threshold; pick none as canonical, because which one is
+            # right depends on what the tuner would rather do when unsure.
+            for threshold, r in per_threshold.items():
+                e = r["errors"]
+                print(
+                    f"{model.name:12s} @{threshold:<5} "
+                    f"RPA {100*r['correct']/max(1,r['mono']):5.2f}%  "
+                    f"rep {100*r['reported']/max(1,r['mono']):5.2f}%  "
+                    f"oct {100*r['octave']/max(1,r['reported']):4.2f}%  "
+                    f"gross {100*r['gross']/max(1,r['reported']):5.2f}%  "
+                    f"|err| p50 {np.percentile(e,50) if e.size else float('nan'):5.2f}  "
+                    f"p90 {np.percentile(e,90) if e.size else float('nan'):6.2f}  "
+                    f">5c {100*(e>5).mean() if e.size else float('nan'):5.2f}%  "
+                    f"VR {100*r['voiced_reported']/max(1,r['voiced']):5.1f}%  "
+                    f"FA {100*r['unvoiced_reported']/max(1,r['unvoiced']):5.1f}%",
+                    flush=True,
+                )
 
-            per_threshold[threshold] = dict(
-                mono=mono, correct=correct, reported=reported, octave=octave,
-                gross=gross, voiced=voiced, voiced_reported=voiced_reported,
-                unvoiced=unvoiced, unvoiced_reported=unvoiced_reported,
-                errors=np.asarray(errors),
-            )
+            best = per_threshold[thresholds[0]]
+            mono, correct, reported = best["mono"], best["correct"], best["reported"]
+            octave, gross = best["octave"], best["gross"]
+            voiced, voiced_reported = best["voiced"], best["voiced_reported"]
+            unvoiced, unvoiced_reported = best["unvoiced"], best["unvoiced_reported"]
+            errors = best["errors"]
+            row = {
+                "model": model.name,
+                "mono": mono,
+                "rpa": 100 * correct / max(1, mono),
+                "reported": 100 * reported / max(1, mono),
+                "octave": 100 * octave / max(1, reported),
+                "gross": 100 * gross / max(1, reported),
+                "p50": float(np.percentile(errors, 50)) if errors.size else None,
+                "p90": float(np.percentile(errors, 90)) if errors.size else None,
+                "p99": float(np.percentile(errors, 99)) if errors.size else None,
+                "beyond5": 100 * float((errors > 5).mean()) if errors.size else None,
+                "vr": 100 * voiced_reported / max(1, voiced),
+                "fa": 100 * unvoiced_reported / max(1, unvoiced),
+                "realtime": 100 * seconds_compute / max(1e-9, seconds_audio),
+                "offset_ms": best_offset,
+                "receptive_ms": model.receptive_field_ms,
+                "by_threshold": {
+                    str(t): {
+                        k: (v.tolist() if hasattr(v, "tolist") else v)
+                        for k, v in r.items()
+                        if k != "errors"
+                    }
+                    | {
+                        "p50": float(np.percentile(r["errors"], 50))
+                        if r["errors"].size
+                        else None
+                    }
+                    for t, r in per_threshold.items()
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            failures[model_name] = f"{type(exc).__name__}: {exc}"
+            print(f"{model_name:12s} FAILED — {failures[model_name]}",
+                  flush=True)
+            continue
 
-        # Report every threshold; pick none as canonical, because which one is
-        # right depends on what the tuner would rather do when unsure.
-        for threshold, r in per_threshold.items():
-            e = r["errors"]
-            print(
-                f"{model.name:12s} @{threshold:<5} "
-                f"RPA {100*r['correct']/max(1,r['mono']):5.2f}%  "
-                f"rep {100*r['reported']/max(1,r['mono']):5.2f}%  "
-                f"oct {100*r['octave']/max(1,r['reported']):4.2f}%  "
-                f"gross {100*r['gross']/max(1,r['reported']):5.2f}%  "
-                f"|err| p50 {np.percentile(e,50) if e.size else float('nan'):5.2f}  "
-                f"p90 {np.percentile(e,90) if e.size else float('nan'):6.2f}  "
-                f">5c {100*(e>5).mean() if e.size else float('nan'):5.2f}%  "
-                f"VR {100*r['voiced_reported']/max(1,r['voiced']):5.1f}%  "
-                f"FA {100*r['unvoiced_reported']/max(1,r['unvoiced']):5.1f}%",
-                flush=True,
-            )
-
-        best = per_threshold[thresholds[0]]
-        mono, correct, reported = best["mono"], best["correct"], best["reported"]
-        octave, gross = best["octave"], best["gross"]
-        voiced, voiced_reported = best["voiced"], best["voiced_reported"]
-        unvoiced, unvoiced_reported = best["unvoiced"], best["unvoiced_reported"]
-        errors = best["errors"]
-        row = {
-            "model": model.name,
-            "mono": mono,
-            "rpa": 100 * correct / max(1, mono),
-            "reported": 100 * reported / max(1, mono),
-            "octave": 100 * octave / max(1, reported),
-            "gross": 100 * gross / max(1, reported),
-            "p50": float(np.percentile(errors, 50)) if errors.size else None,
-            "p90": float(np.percentile(errors, 90)) if errors.size else None,
-            "p99": float(np.percentile(errors, 99)) if errors.size else None,
-            "beyond5": 100 * float((errors > 5).mean()) if errors.size else None,
-            "vr": 100 * voiced_reported / max(1, voiced),
-            "fa": 100 * unvoiced_reported / max(1, unvoiced),
-            "realtime": 100 * seconds_compute / max(1e-9, seconds_audio),
-            "offset_ms": best_offset,
-            "receptive_ms": model.receptive_field_ms,
-            "by_threshold": {
-                str(t): {
-                    k: (v.tolist() if hasattr(v, "tolist") else v)
-                    for k, v in r.items()
-                    if k != "errors"
-                }
-                | {
-                    "p50": float(np.percentile(r["errors"], 50))
-                    if r["errors"].size
-                    else None
-                }
-                for t, r in per_threshold.items()
-            },
-        }
         summary[model.name] = row
         print(
             f"{row['model']:12s} RPA {row['rpa']:5.2f}%  rep {row['reported']:5.2f}%  "
@@ -564,9 +603,15 @@ def main():
             f"window {row['receptive_ms']:.0f} ms)"
         )
 
+    if failures:
+        print()
+        print("models that did not complete:")
+        for name, why in failures.items():
+            print(f"  {name}: {why}")
+
     if args.out:
         with open(args.out, "w") as f:
-            json.dump(summary, f, indent=1)
+            json.dump({"results": summary, "failures": failures}, f, indent=1)
         print(f"\nwrote {args.out}")
 
 
