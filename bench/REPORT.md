@@ -1144,7 +1144,155 @@ test asserting it. Worth stating in full because the failure mode is general:
 a wrong answer that looks like a mediocre model is the hardest kind to
 notice.**
 
-## 13. What to do, now
+## 13. Every number in one place
+
+Two corpora, one set of rules: a 4096-sample window, the frame scored at the
+instant the estimator's answer actually describes (§1), correct within 50
+cents, octave errors separated from gross ones.
+
+### Guitar — GuitarSet, 180 solo files, 151,882 monophonic frames
+
+| pipeline | RPA% | rep% | oct% | gross% | \|err\| p50 | >5c% | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **app, as it ships** | 71.88 | 74.71 | **0.59** | **3.20** | **2.45** | **22.2** | 71.7 | **17.1** |
+| app before the §2.1 fix | 62.79 | 74.71 | 0.43 | 15.52 | 2.45 | 22.2 | 71.7 | 17.1 |
+| app with no median | 72.68 | 74.71 | 0.62 | 2.09 | 1.85 | 15.6 | 71.7 | 17.1 |
+| MPM + `PitchSmoother` | 72.06 | 75.67 | 1.03 | 3.73 | 2.35 | 21.4 | 73.5 | 18.0 |
+| SWIPE′ (global norm) | 74.46 | 100 | 1.26 | 24.28 | 7.15 | 66.2 | 100 | 100 |
+| raw YIN, no gate or median | 79.90 | 86.23 | 1.95 | 5.39 | 1.95 | 18.1 | 86.1 | 33.8 |
+| pYIN (offline Viterbi) | 83.38 | 89.85 | 0.96 | 6.23 | 2.05 | 19.5 | 89.5 | 39.5 |
+| crepe-full @0.75 | 80.71 | 83.02 | 0.24 | 2.54 | 5.23 | 51.8 | 78.3 | 22.1 |
+| crepe-tiny @0.75 | 74.32 | 76.03 | 0.27 | 1.98 | 5.16 | 51.2 | 69.8 | 15.0 |
+| crepe-full-viterbi @0.75 | 69.16 | 70.81 | **0.07** | 2.25 | 8.12 | 67.6 | 65.6 | 15.9 |
+| pesto @0.25 | 53.86 | 57.70 | 0.47 | 6.19 | 8.70 | 69.9 | 57.6 | 13.5 |
+| fcnf0++ @0.25 | 40.12 | 49.07 | 4.67 | 13.56 | 7.23 | 64.8 | 46.5 | 16.3 |
+| spice @0.9 | 52.02 | 56.54 | 0.05 | 7.93 | 6.74 | 62.9 | 48.7 | 27.7 |
+| Basic Pitch @0.5 | 86.15 | 92.28 | 0.18 | 6.47 | 27.5 | 99.0 | 93.6 | 30.1 |
+
+Guitar, in time rather than in frames (§9, §9.1):
+
+| | first reading | first correct | tracking lag |
+| --- | --- | --- | --- |
+| app, as it ships | 96 ms | **101 ms** | **17 ms** |
+| app before the fix | 96 ms | 121 ms | 26 ms |
+| app with no median | 96 ms | 101 ms | −0 ms |
+
+### Cello — MUSERC, steady takes with a trustworthy label
+
+| pipeline | reported | named | octave | spread p90 | jitter p90 | offset |
+| --- | --- | --- | --- | --- | --- | --- |
+| **app, as it ships** | 99.7% | **100%** | **0.0%** | 5.48 c | **0.44 c** | −3.6 c |
+| app before the §2.1 fix | 99.7% | 100% | 0.0% | 5.48 c | 0.44 c | −3.6 c |
+| app with no median | 99.7% | 100% | 0.0% | 5.48 c | 0.90 c | −3.6 c |
+| MPM + `PitchSmoother` | 100% | 100% | 0.0% | 5.49 c | 0.45 c | −3.6 c |
+| crepe-full @0.5 | 99.8% | 100% | 0.0% | **1.10 c** | — | +3.0 c |
+| fcnf0++ @0.5 | 90.3% | 100% | 0.0% | 6.53 c | — | −5.7 c |
+| crepe-tiny @0.5 | 99.7% | 100% | 0.0% | 16.79 c | — | +2.0 c |
+| pesto @0.5 | 83.3% | 100% | 0.0% | — | — | −0.0 c |
+
+Cello, in time (§13.1): **85 ms** to a first reading after the bow starts,
+**96 ms** to a correct one, and nothing wrong after it — identical across all
+four pipelines, because on a bowed note there is nothing for the smoothing to
+rescue.
+
+### Chords — GuitarSet, 180 comp files, 377,956 frames
+
+| | precision | recall | F1 |
+| --- | --- | --- | --- |
+| Basic Pitch @0.4 (ships) | 84.9% | 72.1% | 78.0% |
+| Basic Pitch @0.3 | 78.6% | 80.1% | **79.3%** |
+| any monophonic detector | — | **32.9% ceiling** | — |
+
+### The one-line summary
+
+The shipped pipeline is the best thing here for the job it does. Three
+estimators beat it on raw pitch accuracy — pYIN, raw YIN and SWIPE′ — and
+every one of them does so by answering more often and being wrong more often
+when it does. Nothing comes within a factor of two of it on cents, which is
+the only number a needle shows.
+
+### 13.1 Using the cello corpus's sensor track
+
+MUSERC ships more than audio: every take has a 752 Hz CSV carrying the
+finger position on the fingerboard, three accelerometer axes, and a low-rate
+copy of the audio. §11 did not use it, which was defensible for the steady
+takes — the filename gives the note — and not for the vibrato takes, where
+the filename gives one number for a pitch that moves five times a second.
+
+Turning position into hertz needs a physical model, and the useful one is
+simple. For a string stopped at distance `x` from the nut,
+`f = f_open · L / (L − x)`, so **1/f is linear in finger position** — the
+calibration is a straight-line fit over the steady takes, whose pitch the
+label gives, with no free parameters beyond two coefficients.
+
+It holds structurally and imprecisely: **R² = 0.974** on both sensors, with a
+residual of **6.2 and 12.1 cents**. So it is a *contour* reference — good for
+when the pitch moved, useless for scoring anyone's intonation. Two details
+that mattered more than the fit: the CSV's `Time` column runs on the
+session's clock (one take's starts at 140.45 s), and rebasing on the first
+timestamp still leaves 10–30 ms of drift, which is fatal when the effect
+being measured is about 20 ms. The CSV's own audio column makes that
+measurable per take rather than assumed away — the applied correction has a
+median of −5 ms and a p10–p90 of −19 to +13 ms.
+
+Tracking lag against that reference, over 70 vibrato takes:
+
+| pipeline | lag p10 | p50 | p90 |
+| --- | --- | --- | --- |
+| before the §2.1 fix | −11 ms | **+11 ms** | +32 ms |
+| after the fix | −11 ms | **+11 ms** | +32 ms |
+| no median at all | −32 ms | **−21 ms** | +11 ms |
+
+**The median costs about 32 ms of tracking on cello vibrato**, against the
+17 ms §9.1 measured on guitar bends — the same effect, larger here because
+the hop is longer at 48 kHz. What is *not* trustworthy is the absolute
+column: the reference carries ±20 ms of its own timing error, so the lag of
+a single pipeline is not meaningful to better than that. The *difference*
+between pipelines is, because they share the reference exactly.
+
+A note on why the search window matters. Vibrato is periodic, so a lag of
+zero and a lag of one whole cycle fit equally well — the aliasing that made
+§9.1 exclude vibrato from the guitar measurement. A first run of this with a
+±192 ms search returned percentiles pinned to the boundary, which looked like
+a wide distribution and was really a fit with no unique answer. Holding the
+search inside a half-cycle is what makes the numbers above mean anything.
+
+## 14. What a phone or a laptop would do with this
+
+Every timing above came from one shared VPS core whose load average ranged
+from 2 to 30 over the course of this work, and several sections say so. The
+question that actually matters — can a phone run it — deserved a number
+rather than an extrapolation, and GitHub's macOS runners are Apple Silicon,
+so `bench-platforms.yml` simply asks.
+
+Identical synthesised work, minimum of several rounds:
+
+| | YIN | MPM | SWIPE′ | Basic Pitch, one 2 s window |
+| --- | --- | --- | --- | --- |
+| **Apple Silicon** (macos runner) | **0.83 ms** | 0.74 ms | 0.94 ms | **324 ms** — 16% of real time |
+| x86-64 Xeon (ubuntu runner) | 0.51 ms | 0.51 ms | 0.78 ms | 214 ms — 11% |
+| this VPS, one shared core | 1.40 ms | 1.54 ms | 1.86 ms | 638 ms — 32% |
+
+Read against the 23 ms budget one analysis hop allows: on Apple Silicon the
+detector uses **3.6% of it**. The needle has never been the problem, on any
+hardware measured.
+
+The transcription mode is the interesting column. **324 ms per two-second
+window in pure Dart on Apple Silicon** — no FFI, no CoreML, no native
+build — is comfortably enough for a display updating twice a second. An
+iPhone's core is in the same family and typically a little slower than a Mac's
+under a sustained load, so somewhere around 350–450 ms is the reasonable
+expectation; that is an inference from the same architecture, not a
+measurement, and it is the one number here that has not been measured on the
+hardware it describes.
+
+**CoreML was not tried and would change this picture.** A 35.7k-parameter CNN
+is exactly what the Neural Engine is for, and single-digit milliseconds would
+be unsurprising. It would also mean a converted model, a platform channel, and
+a second inference path to maintain — the trade §10.4 declined. At 324 ms
+nothing forces that trade.
+
+## 15. What to do, now
 
 1. ~~**Replace the difference function with the FFT one.**~~ **Done** — see
    §7. YIN is vendored in `lib/detectors.dart`, asserted frame-identical to
@@ -1183,7 +1331,7 @@ notice.**
    works — but only on native ONNX Runtime until `onnx_runtime_dart`'s
    convolutions get the same FFT treatment YIN's difference function got.
 
-## 14. What would make this measurement better
+## 16. What would make this measurement better
 
 * **The reference is itself an algorithm.** GuitarSet's contours come from
   pYIN on a hexaphonic pickup. Below a few cents, this benchmark is
@@ -1196,8 +1344,9 @@ notice.**
   corpus is also narrow: two players, seven notes, all in one register.
 * ~~**Frame-level, not note-level.**~~ Done — §9 times the pluck, §9.1 times
   the peg turn.
-* **A busy shared VPS.** The timings are ratios worth trusting and absolutes
-  worth re-measuring on a phone.
+* ~~**A busy shared VPS.**~~ Partly closed — §14 measures Apple Silicon,
+  x86-64 Linux and Windows on CI. An actual iPhone, and CoreML, remain
+  unmeasured.
 
 ---
 
