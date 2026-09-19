@@ -1489,14 +1489,25 @@ Both are far below what the hardware can do, and the disassembly says why.
 `bp_conv2d` compiles to **SSE only** — `mulps`/`addps` on 4-wide `%xmm`,
 **zero AVX, zero FMA, no `%ymm`** — because the build sets
 `CMAKE_CXX_FLAGS` empty and takes only `-O3 -DNDEBUG`, i.e. baseline
-x86-64. A tuned im2col + SGEMM with AVX2/FMA reaches 10–25 GMAC/s on one
-core of this class, so the arithmetic says **6–15× is sitting on the table**,
-before any threading.
+x86-64.
 
-The irony is exact: the header declined a ggml graph because it "would only
-add scheduling overhead", and ggml's `conv_2d` is precisely im2col plus a
-threaded, FMA-vectorised `mul_mat`. The reasoning was right about scheduling
-and wrong about arithmetic.
+> **Correction.** This paragraph first went on to estimate that "a tuned
+> im2col + SGEMM with AVX2/FMA reaches 10–25 GMAC/s on one core of this
+> class, so **6–15× is sitting on the table**". §20 measured it: **1.45×**.
+> The estimate assumed dense-GEMM efficiency that this layer's shape cannot
+> reach — `contour_conv` has only **8 output channels**, so each input
+> element is read about eight times against 936 multiply-adds of reuse in a
+> real GEMM. The kernel is bound by loads and dependencies, not by
+> floating-point throughput, which §20 confirms from the other end: FMA buys
+> nothing at all over plain AVX2, and AVX-512 is no better than AVX2. A MAC
+> count tells you the work; it does not tell you the achievable rate.
+
+The irony is *partial*, not exact: the header declined a ggml graph because
+it "would only add scheduling overhead", and ggml's `conv_2d` is im2col plus
+a threaded, FMA-vectorised `mul_mat`. The reasoning was wrong about the
+network being cheap and **right to avoid the graph** — see §20, where the
+im2col matrix for `contour_conv` is 170 MB per window against a 1.45 MB
+largest activation, and with `OC=8` amortises nothing.
 
 Two caveats on this sub-section, stated because they are the parts not
 directly measured. `perf` is unavailable on the measurement host
@@ -1710,6 +1721,74 @@ should have measured nothing at all, because the graph has zero `MatMul` for
 it to partition. It may be that `runAsync` differs from `run` in some way
 beyond pooling. The effect is small, consistent, and **unexplained**, so
 nothing here depends on it.
+
+## 20. Optimising the native path
+
+Commissioned after §17.3, on `/mnt/volume1/CrispASR` branch
+`perf/basic-pitch-conv`. The work followed CrispASR's own development guide:
+both paths kept, gated on `CRISPASR_BASIC_PITCH_FASTCONV` (default **off**),
+old path still the default until a clean box proves the threading half.
+
+Runtime-dispatched AVX2 / AVX-512 / AVX2+FMA kernels, reusing the tree's
+existing `Isa` dispatch rather than a new one, no `-march=native`, plus
+`core_parallel::for_each_chunk` over the disjoint `(oc, h)` output rows — so
+`n_threads`, which previously reached only the GGUF loader (§17.3), now
+reaches all six call sites. CPU time is primary because the box sat at load
+15–26 throughout; separate processes per arm, cold run discarded.
+
+| arm | CPU ms/window (conv only) | GMAC/s | vs ref |
+| --- | --- | --- | --- |
+| reference (SSE) | 237 | 2.04 | 1.00× |
+| **AVX2** | **163** | **2.96** | **1.45×** |
+| AVX-512F | 167 | 2.90 | 1.42× |
+| AVX2 + FMA | 163 | 2.98 | 1.46× |
+
+Whole file 4.36 s → 3.31 s CPU (1.32×); essentially all of the win is
+`contour_conv`, 148 → 90 ms. Output is **byte-identical** — FNV over raw
+float bits plus L2 norms on all three heads, and every note event unchanged
+— with a hermetic test asserting `memcmp == 0` on the six real shapes, which
+was checked to actually fail when forced onto a different kernel.
+
+### 20.1 What it corrects in this report
+
+* **The headroom estimate, by an order of magnitude.** 6–15× predicted,
+  1.45× delivered. See the correction in §17.3.
+* **"Nothing gets AVX2" was half wrong.** `GGML_AVX2:BOOL=OFF` in the cache
+  is superseded by `GGML_NATIVE:BOOL=ON`, and `libggml-cpu.so` carries 19,886
+  `%ymm` references. It is CrispASR's own `src/` that compiles baseline —
+  `basic_pitch.cpp.o` has 1,460 `%xmm` and zero `%ymm`. An asymmetry between
+  the vendored library and the project's own sources, not a blanket. That
+  asymmetry is a larger and cheaper lever than any kernel.
+* **`ggml_conv_2d` is the wrong answer here, and memory is only half the
+  reason.** 170 MB per window against a 1.45 MB largest activation, yes —
+  but the decisive point is that `contour_conv` has `OC=8`, making the GEMM
+  `M=45408, K=936, N=8`, where every element of that 170 MB is read
+  essentially once. im2col amortises nothing at this shape. `onset_conv` is
+  the exception worth measuring later: 12.1 MB, `OC=32`, 20% of the work.
+
+### 20.2 One number that did not reconcile
+
+The agent's reference build reports **153** note events on
+`00_BN1-129-Eb_comp_mic.wav` where this report's harness reports **151**,
+and attributed the difference to the harness. It is not the harness: re-run
+against `libcrispasr.so.0.8.33` it still gives 151, deterministically, with
+the same pitch set and the same earliest event (midi 51 at 35 ms, velocity
+74). The `.so` was built on 17 September and the agent compiled current
+`src/`, which has moved since.
+
+Both numbers are therefore right for their own build, and the A/B is
+unaffected — byte-identity was established between reference and fast paths
+*within one build*, which is what the comparison requires. Recorded because
+§17's published baseline is 151 and should stay reproducible.
+
+### 20.3 Whether it generalises
+
+Recommendation, not work done: screen each backend with one multiplication —
+im2col bytes `(H·W_out)·(IC·KH·KW)·4` against `OC`. CREPE and
+piano-transcription likely sit on the favourable side; **mt3 is a T5 and
+attention-bound**, which is precisely the "inverse-default regime" the
+development guide warns about. Before any of that, the `src/`-is-baseline
+finding above is the bigger and cheaper lever.
 
 ---
 
