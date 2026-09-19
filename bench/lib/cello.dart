@@ -55,6 +55,18 @@ class CelloTake {
   /// Steady takes: what a tuner is normally pointed at.
   bool get steady => !vibrato;
 
+  /// Whether the filename's note describes what the take actually contains.
+  ///
+  /// It does not, for the `tune` takes, and assuming otherwise cost a set of
+  /// published numbers. They are the cellist *tuning the instrument*:
+  /// `pro_60_tune_1` is labelled 60 and holds a 220 Hz open A;
+  /// `pro_53_tune_2` is labelled 53 and holds a 97 Hz open G. For every other
+  /// take the label is a genuine MIDI note — `amateur_60_p_novib` measures
+  /// 261.0 Hz against its 261.63 nominal — so only these are excluded, and
+  /// only from the metrics that need a reference. Stillness and jitter need
+  /// none, so they keep every take.
+  bool get hasReliableNominal => dynamic != 'tune';
+
   String get label => '$player $midi $dynamic${vibrato ? " vib" : ""}';
 }
 
@@ -93,6 +105,10 @@ class CelloOutcome {
   /// Frames whose nearest equal-tempered note is the one in the filename.
   final int namedCorrectly;
 
+  /// Frames the nominal-referenced metrics were computed over — zero for a
+  /// `tune` take, whose filename does not describe its contents.
+  final int nominalFrames;
+
   /// Frames an octave (or more) away from the nominal note.
   final int octaveAway;
 
@@ -117,6 +133,7 @@ class CelloOutcome {
     required this.frames,
     required this.reported,
     required this.namedCorrectly,
+    required this.nominalFrames,
     required this.octaveAway,
     required this.medianOffsetCents,
     required this.spreadP90,
@@ -144,7 +161,7 @@ CelloOutcome measureTake(
   final legacy = MedianFilter();
 
   final pitches = <double>[];
-  int frames = 0, reported = 0, named = 0, octaveAway = 0;
+  int frames = 0, reported = 0, named = 0, octaveAway = 0, nominalFrames = 0;
   final skipSamples = (skipSeconds * rate).round();
 
   for (int start = 0; start + window <= wav.samples.length; start += hop) {
@@ -176,6 +193,8 @@ CelloOutcome measureTake(
     reported++;
     pitches.add(value);
 
+    if (!take.hasReliableNominal) continue;
+    nominalFrames++;
     final error = cents(value, take.nominal);
     if (error.abs() <= 50) {
       named++;
@@ -194,6 +213,7 @@ CelloOutcome measureTake(
       frames: frames,
       reported: 0,
       namedCorrectly: 0,
+      nominalFrames: 0,
       octaveAway: 0,
       medianOffsetCents: double.nan,
       spreadP90: double.nan,
@@ -239,7 +259,9 @@ CelloOutcome measureTake(
     reported: reported,
     namedCorrectly: named,
     octaveAway: octaveAway,
-    medianOffsetCents: cents(median, take.nominal),
+    nominalFrames: nominalFrames,
+    medianOffsetCents:
+        take.hasReliableNominal ? cents(median, take.nominal) : double.nan,
     spreadP90: percentile(deviations, 0.9),
     jitterP90: percentile(jumps, 0.9),
     excursion: highest - lowest,

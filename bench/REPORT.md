@@ -373,35 +373,54 @@ bracketing power-of-two sizes, square-root spectra, prime-harmonic kernels.
 It is not Camacho's MATLAB — his full estimator includes an ERB-scaled
 loudness normalisation this does not — so read these as "SWIPE′-like".
 
-20 solo files, 23,510 frames, through the same `PitchSmoother` as everything
-else:
+**180 solo files, 235,560 frames**, through the same `PitchSmoother` as
+everything else. (An earlier version of this section quoted 20 files, a
+subset chosen by what one loaded VPS core would tolerate; the CI workflow
+`bench-guitarset.yml` removed that constraint, and two of the conclusions
+below changed when it did.)
 
 | estimator | RPA% | rep% | oct% | gross% | \|err\| p50 | >5c% | FA% | ms/frame |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| app YIN | **68.3** | 71.1 | **0.66** | **3.2** | **3.00** | **26.1** | **17.0** | **4.1** |
-| SWIPE′, global norm | 63.5 | 100 | 1.41 | 35.1 | 7.70 | 70.2 | 100 | 6.9 |
-| SWIPE′, local norm | 67.3 | 100 | 4.25 | 28.4 | 6.65 | 63.0 | 100 | 8.2 |
-| SWIPE′, global norm @ 0.7 | 47.1 | 68.8 | 0.97 | 30.6 | 7.40 | 68.6 | 42.8 | 6.9 |
+| app YIN | 71.88 | 74.71 | **0.59** | **3.20** | **3.00** | **28.6** | **17.1** | **1.02** |
+| SWIPE′, global norm | **74.46** | 100 | 1.26 | 24.28 | 7.15 | 66.2 | 100 | 1.20 |
+| SWIPE′, local norm | 59.01 | 100 | 8.71 | 32.28 | 6.80 | 64.5 | 100 | 1.20 |
 
-**It loses on every axis a tuner cares about.** Twice YIN's median cent error,
-eight to ten times its gross-error rate, and — the part that was supposed to
-be its advantage — *more* octave errors, not fewer. On clean synthetic plucks
-its intrinsic precision is about 3 cents against YIN's 0.05, and that does
-not improve with a finer candidate grid: 1/48, 1/96 and 1/192 of an octave
-give 2.6, 3.2 and 3.8 cents, so the limit is the breadth of the strength
-curve, not the quantisation.
+Two corrections to what the 20-file subset suggested, both worth stating
+because they went against the earlier reading.
 
-Its voicing decision is also awkward. The pitch strength lands around 0.77 on
-a clean plucked string — nowhere near the scale the app's `probability > 0.9`
-gate expects, and a first run of this file rejected literally every frame for
-that reason. Swept properly, the threshold that gives an acceptable false
-alarm rate throws away a third of the true frames.
+**It is not several times more expensive; it is 18% more.** 1.20 ms a frame
+against YIN's 1.02, measured in the same process on the same frames. The
+earlier "several times" came from a standalone timing on a machine under load
+10–30, where JIT warm-up and scheduling dominated. The structural argument —
+several transforms per frame against YIN's one — is real, but `fftea` on a
+quiet core absorbs it.
 
-A more faithful implementation would do better than this one. It would have
-to close a 2× gap in precision and an 8× gap in gross errors while costing
-more per frame, which is not where the evidence points.
+**And on the full corpus it out-scores YIN on raw pitch accuracy**, 74.46%
+against 71.88%, which the subset did not show. That needs its context rather
+than a headline: it answers on *100%* of frames where YIN answers on 75%, so
+it collects correct frames YIN declines to guess at — and pays with a
+false-alarm rate of 100%. It never rejects anything. A tuner whose needle
+moves confidently in a silent room is worse than one that waits, which is why
+this does not translate into a recommendation.
 
-### 4.6 Neural models
+**What has not changed is everything a tuner is for.** Twice YIN's median
+cent error (7.15 against 3.00), eight times the gross-error rate (24.3%
+against 3.2%), and no usable voicing decision at any threshold — the
+local-norm variant's strengths cluster so close to 1 that every threshold
+from 0.2 to 0.75 gives the identical answer. Its intrinsic precision on clean
+synthetic plucks is about 3 cents against YIN's 0.05, and a finer candidate
+grid does not help (2.6 / 3.2 / 3.8 cents at 1/48, 1/96, 1/192 of an octave),
+so the limit is the breadth of the strength curve rather than quantisation.
+
+Recorded in the code because it is a trap: SWIPE′'s strength lands around
+0.77 on a clean pluck, nothing like YIN's periodicity scale, so the app's
+`probability > 0.9` gate rejects *every* frame. The first run of
+`bin/swipe.dart` reported 0.00% across the board for exactly that reason.
+
+This is a SWIPE′-*like* implementation, not Camacho's MATLAB — his full
+estimator includes an ERB-scaled loudness normalisation this does not.
+
+### 4.6 Neural models### 4.6 Neural models
 
 Not measured, and the argument for skipping them is the shape of the results
 above rather than a prejudice. CREPE and SPICE are frame-level classifiers
@@ -914,21 +933,24 @@ about: how still the needle sits, and what happens to vibrato.
 
 ### Steady takes, bow attack excluded
 
+**With the `tune` takes excluded, and that exclusion is the point of §11.1.**
+
 | pipeline | named correctly | octave errors | frames reported | spread p90 | jitter p90 |
 | --- | --- | --- | --- | --- | --- |
-| before the §2.1 fix | 98.7% | **0.0%** | 99.7% | 5.48 c | 0.44 c |
-| **after the fix (ships now)** | 98.7% | **0.0%** | 99.7% | 5.48 c | **0.44 c** |
-| no median at all | 99.2% | 0.0% | 99.7% | 5.48 c | 0.90 c |
-| MPM + `PitchSmoother` | 98.5% | 0.0% | 100.0% | 5.49 c | 0.45 c |
+| before the §2.1 fix | 100.0% | **0.0%** | 99.7% | 5.48 c | 0.44 c |
+| **after the fix (ships now)** | 100.0% | **0.0%** | 99.7% | 5.48 c | **0.44 c** |
+| no median at all | 100.0% | 0.0% | 99.7% | 5.48 c | 0.90 c |
+| MPM + `PitchSmoother` | 100.0% | 0.0% | 100.0% | 5.49 c | 0.45 c |
 
 **The tuner is better on a cello than on a guitar, on every axis.** Not one
 octave error in any pipeline; a reading on 99.7% of frames against 74.7% on
-guitar; and needle jitter of **0.44 cents against 3.25**. The reason is not
-subtle and it is worth saying plainly, because it also explains most of the
-guitar numbers: a bowed note is *sustained*. It does not decay into the noise
-floor while you look at it, so the detector is never working with the tail of
-a transient. Everything this report measured on guitar was measured on the
-harder case.
+guitar; needle jitter of **0.44 cents against 3.25**; and on the takes whose
+label can be trusted, it names the right note on *every* frame.
+
+The reason is not subtle and it reframes most of this report: a bowed note is
+*sustained*. It does not decay into the noise floor while you look at it, so
+the detector is never working with the tail of a transient. Everything
+measured on guitar was measured on the harder case.
 
 Note also what the median does here: it halves the jitter (0.44 against 0.90)
 and costs nothing measurable in return. On a steady bowed note it is doing
@@ -953,29 +975,52 @@ their vibrato, slightly narrowed. That is the trade for halving the jitter,
 and on this evidence it is the right one. It is also invisible to every
 guitar measurement in this report.
 
-### The cellist was not at A440
+### Per note, and one anomaly that is the corpus's
 
 | note | nominal | takes | named | spread p90 | measured offset |
 | --- | --- | --- | --- | --- | --- |
-| D3 | 146.83 Hz | 10 | 100.0% | 6.01 c | −13.2 c |
-| D♯3 | 155.56 Hz | 10 | 100.0% | 7.48 c | −26.7 c |
-| E3 | 164.81 Hz | 9 | 100.0% | 6.60 c | −35.2 c |
-| F3 | 174.61 Hz | 4 | **0.0%** | 6.05 c | **−92.1 c** |
-| B3 | 246.94 Hz | 5 | 73.8% | 4.71 c | −12.6 c |
-| C4 | 261.63 Hz | 8 | 99.5% | 4.14 c | −24.2 c |
-| C♯4 | 277.18 Hz | 9 | 100.0% | 3.81 c | −28.5 c |
+| D3 | 146.83 Hz | 10 | 100.0% | 5.23 c | +1.9 c |
+| D♯3 | 155.56 Hz | 10 | 100.0% | 11.06 c | +1.9 c |
+| E3 | 164.81 Hz | 9 | 100.0% | 6.26 c | −1.1 c |
+| **F3** | 174.61 Hz | 4 | **0.0%** | 6.05 c | **−86.2 c** |
 
-The median offset across takes is **−31.8 cents**, which is A = 432.0 Hz to
-within a tenth of a cent. The instrument was tuned to A432, and that is
-precisely what the app's adjustable concert pitch exists for — scored against
-A440 it looks like a third of a semitone of error, and against A432 it is a
-few cents.
+Median offset across takes: **−3.6 cents**. The instrument was at A440, and
+the tuner agrees with it to within a few cents on every note but one.
 
-The F3 row is the exception and it is not the detector's: 92 cents flat of F3
-is 60 cents flat even of A432, and lands within a few cents of E3. Either
-those four takes are mislabelled or they were played badly; four takes by one
-player is not enough to say which, and it would be dishonest to score it as a
-detector error either way.
+The F3 row is the corpus's, not the detector's. All four takes labelled 53
+measure 165.5–169 Hz — **E3**, some 90 cents below the F3 the label claims —
+and an independent FFT of the raw audio agrees with the detector to within a
+few cents. Either those files are mislabelled or the note was played nearly a
+semitone flat four times running by a professional; four takes cannot settle
+which, and scoring it as a detector error would be wrong either way.
+
+### 11.1 The numbers this section used to carry were wrong
+
+An earlier version of this section reported "named 98.7%" and a median offset
+of **−31.8 cents**, and concluded from the second of those that the cellist
+had tuned to A = 432 Hz — a tidy story, and false.
+
+MUSERC's takes come in four kinds, and I read the filenames as though they
+came in one. The `tune` takes are the cellist *tuning the instrument*:
+`pro_60_tune_1` is labelled 60 and contains a 220 Hz open A;
+`pro_53_tune_2` is labelled 53 and contains a 97 Hz open G. Scored against
+the label, 23 of the 55 "steady" takes were being compared to a note they do
+not contain, and the −31.8 cent "A432 tuning" was the median of that damage
+rather than a property of the instrument. With them excluded the offset is
+−3.6 cents: A440, as one would expect.
+
+Two things kept it standing longer than it should have. The headline figures
+were medians *over takes*, which survive a minority of bad takes almost
+unchanged — that robustness hid the problem instead of exposing it. And the
+error had an explanation ready to hand: a cellist at A432 is a perfectly
+ordinary thing, so the number looked like a finding rather than a bug.
+
+It was caught by running the neural models over the same corpus and noticing
+they disagreed with the labels far more than with each other — CREPE reported
+220 Hz for a file labelled C4, stably, to within one cent. The generalisable
+lesson is that **a plausible explanation is not evidence**, and the check
+that mattered was the cheap one nobody had run: looking at the actual
+spectrum of one file.
 
 ## 12. Chords: the measurement the transcription mode rests on
 
@@ -989,32 +1034,35 @@ testing.
 `bench/tool/kaggle/polyphonic-eval` scores the note head against the chordal
 half of the corpus with the metric that applies to sets rather than to single
 values: per-frame precision, recall and F1 over the notes sounding,
-micro-averaged. 60 files, 128,558 reference frames, and the material is
-genuinely polyphonic —
+micro-averaged. **All 180 files, 377,956 reference frames**, and the material
+is genuinely polyphonic —
 
 | notes sounding | share of frames |
 | --- | --- |
-| 1 | 13.1% |
-| 2 | 17.8% |
-| 3 | 22.1% |
-| 4 | 24.5% |
-| 5 | 16.8% |
-| 6 | 5.7% |
+| 1 | 16.3% |
+| 2 | 18.6% |
+| 3 | 25.3% |
+| 4 | 27.1% |
+| 5 | 9.5% |
+| 6 | 3.2% |
 
-— averaging 3.31 notes at once, which sets the ceiling for anything
-monophonic. **A perfect single-note detector can reach 30.2% recall on this
-material and no more**, because naming one note of three and a third is all
-it can do.
+— averaging 3.04 notes at once, which sets the ceiling for anything
+monophonic. **A perfect single-note detector can reach 32.9% recall on this
+material and no more**, because naming one note of three is all it can do.
 
 | threshold | precision | recall | F1 |
 | --- | --- | --- | --- |
-| 0.3 | 81.3% | **80.1%** | **80.7%** |
-| 0.4 | 86.7% | 72.0% | 78.7% |
-| 0.5 | 90.3% | 61.3% | 73.0% |
-| 0.6 | 92.8% | 46.3% | 61.8% |
-| 0.7 | 95.0% | 27.7% | 42.9% |
+| 0.3 | 78.6% | **80.1%** | **79.3%** |
+| **0.4 (shipped)** | 84.9% | 72.1% | 78.0% |
+| 0.5 | 89.2% | 61.6% | 72.8% |
+| 0.6 | 92.3% | 46.8% | 62.1% |
+| 0.7 | 94.9% | 28.6% | 44.0% |
 
-**2.7× the recall a monophonic detector could reach, at 81% precision.** That
+**2.4× the recall a monophonic detector could reach, at 85% precision** at
+the threshold the app ships. This table is the whole corpus; an earlier run
+on 60 of the 180 files gave 86.7% precision and 72.0% recall at the same
+threshold, so the subset was not misleading here — which is worth knowing,
+since it was not something to assume. That
 is the justification for the mode existing, and it is the first number in
 this report that argues *for* adding something rather than against.
 
@@ -1073,7 +1121,10 @@ notice.**
    rescues.
 7. **Neural models stay off the tuning path** (§10), and SWIPE′ is not worth
    adopting either (§4.5): it loses to YIN on precision, gross errors and —
-   its own selling point — octave errors, while costing more per frame. Basic Pitch is better
+   its own selling point on the 20-file subset. On the full corpus it
+   actually out-scores YIN on raw pitch accuracy, by answering on every frame
+   and never rejecting anything — a 100% false-alarm rate, which is the wrong
+   trade for a needle. Basic Pitch is better
    than YIN at naming notes and 10× worse at cents, which is the only
    question the needle asks. If polyphonic transcription is wanted as a
    separate mode, it is feasible — effectively causal, so a sliding window
