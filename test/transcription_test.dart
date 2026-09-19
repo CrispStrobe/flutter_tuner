@@ -153,7 +153,9 @@ void main() {
     }
 
     test('without hysteresis a dip stops the note', () {
-      final seq = const BasicPitchDecoder(noteThreshold: 0.4)
+      // BasicPitchDecoder.stateless is how this shipped before §18: one
+      // threshold, every frame judged alone.
+      final seq = BasicPitchDecoder.stateless
           .decodeFrames(activations([0.9, 0.25, 0.9]), frames: 3);
       expect(seq.map((s) => s.contains(60)).toList(), [true, false, true]);
     });
@@ -188,9 +190,61 @@ void main() {
       expect(seq.single, contains(60));
     });
 
-    test('the default is the old behaviour exactly', () {
+    test('the defaults are the measured pair, not a single threshold', () {
+      // 0.5/0.25 was chosen in bench/REPORT.md §18 because it is strictly
+      // better than the old 0.4/0.4 on BOTH precision and recall over all
+      // 180 chordal files. If someone collapses these back to one value,
+      // that is a regression rather than a simplification.
       const d = BasicPitchDecoder();
-      expect(d.sustainThreshold, d.noteThreshold);
+      expect(d.noteThreshold, 0.5);
+      expect(d.sustainThreshold, 0.25);
+      expect(d.sustainThreshold, lessThan(d.noteThreshold),
+          reason: 'a Schmitt trigger needs the bars to differ');
+      expect(BasicPitchDecoder.stateless.sustainThreshold,
+          BasicPitchDecoder.stateless.noteThreshold);
+    });
+  });
+
+  group('LiveNoteTracker', () {
+    Float64List heads(List<double> perFrame) {
+      const bins = BasicPitchGeometry.noteBins;
+      final out = Float64List(perFrame.length * bins);
+      for (int f = 0; f < perFrame.length; f++) {
+        out[f * bins + (60 - BasicPitchGeometry.lowestMidi)] = perFrame[f];
+      }
+      return out;
+    }
+
+    test('a note dipping across a window boundary stays one note', () {
+      final tracker = LiveNoteTracker();
+      final zeros = Float64List(4 * BasicPitchGeometry.noteBins);
+      // Window one ends with the note sounding strongly.
+      tracker.track(heads([0.9, 0.9, 0.9, 0.9]), zeros, frames: 4);
+      // Window two is entirely in the dip — above sustain, below start.
+      final notes =
+          tracker.track(heads([0.3, 0.3, 0.3, 0.3]), zeros, frames: 4);
+      expect(notes.map((n) => n.midi), contains(60),
+          reason: 'the carry set is what makes this survive the boundary');
+    });
+
+    test('reset forgets a held note', () {
+      final tracker = LiveNoteTracker();
+      final zeros = Float64List(4 * BasicPitchGeometry.noteBins);
+      tracker.track(heads([0.9, 0.9, 0.9, 0.9]), zeros, frames: 4);
+      tracker.reset();
+      final notes =
+          tracker.track(heads([0.3, 0.3, 0.3, 0.3]), zeros, frames: 4);
+      expect(notes, isEmpty);
+    });
+
+    test('a note sounding in a minority of the tail is not reported', () {
+      // Hysteresis makes one frame decisive; the majority rule is what stops
+      // that turning into a flickering display.
+      final tracker = LiveNoteTracker();
+      final zeros = Float64List(4 * BasicPitchGeometry.noteBins);
+      final notes =
+          tracker.track(heads([0.0, 0.0, 0.0, 0.9]), zeros, frames: 4);
+      expect(notes, isEmpty);
     });
   });
 

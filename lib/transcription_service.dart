@@ -156,7 +156,10 @@ void _workerMain(_WorkerStart start) {
   start.reply.send(inbox.sendPort);
 
   OnnxModel? model;
-  const decoder = BasicPitchDecoder();
+  // Stateful, unlike the decoder it wraps: hysteresis has to remember which
+  // notes were sounding when the previous window ended, or a note whose
+  // activation dips across a window boundary is reported as two notes.
+  final tracker = LiveNoteTracker();
 
   inbox.listen((message) {
     if (message == null) {
@@ -191,7 +194,7 @@ void _workerMain(_WorkerStart start) {
 
       final note = outputs[kNoteHead]!.asFloatList();
       final onset = outputs[kOnsetHead]!.asFloatList();
-      final notes = decoder.decode(
+      final notes = tracker.track(
         Float64List.fromList(note),
         Float64List.fromList(onset),
       );

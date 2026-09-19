@@ -1524,6 +1524,78 @@ Three things, none of which move a number already published:
   0.78 GMAC/s is the number that reaches a user. `Float32x4` is available on
   every native target and is the same im2col+SGEMM shape.
 
+## 18. The decoder, not the runtime
+
+§17.4 left a claim outstanding: that CrispASR's eight extra points of recall
+came from its decoder rather than from its runtime, because it emits
+segmented note *events* that span the frames where an activation dips, while
+this repository thresholded every frame independently. If that is right, the
+recall is available in pure Dart at no packaging cost at all.
+
+It is right. The fix is a Schmitt trigger — a high bar to start a note, a
+lower one to keep it — which is one `if` in `BasicPitchDecoder.decodeFrames`.
+`bin/hysteresis.dart`, all 180 chordal files, the same 11.6 ms grid and
+`note_midi` truth as §12 and §17:
+
+| start | sustain | precision | recall | F1 |
+| --- | --- | --- | --- | --- |
+| 0.4 | 0.4 | 87.3% | 72.6% | 79.2% |
+| 0.4 | 0.3 | 85.2% | 78.5% | 81.7% |
+| 0.4 | 0.25 | 83.9% | 81.4% | 82.6% |
+| 0.4 | 0.2 | 81.9% | 84.5% | 83.2% |
+| 0.4 | 0.15 | 77.9% | 88.0% | 82.6% |
+| **0.5** | **0.25** | **87.8%** | **77.8%** | 82.5% |
+| 0.5 | 0.2 | 86.0% | 81.1% | **83.5%** |
+| 0.3 | 0.3 | 80.4% | 81.1% | 80.7% |
+
+The first row is what shipped: one threshold, every frame judged alone.
+
+**0.5 / 0.25 now ships, because it is strictly better than that on both
+axes** — higher precision *and* five points more recall. There is no trade to
+argue about; nothing that previously worked gets worse. 0.5/0.2 takes the
+best F1 and is a one-line change, but it is not the default: a display is not
+an F1 score, and a note shown that is not being played is a worse error than
+one missed, because the player can see what they are holding. When a
+dominating option exists, it beats a maximising one.
+
+For scale, CrispASR/ggml on the 8-file subset scored 84.4% / 75.6% / 79.7%
+(§17). The pure-Dart path now exceeds that on every axis, on every platform
+the app ships to, including the web — which is the honest epitaph for the
+FFI backend merged one section earlier.
+
+### 18.1 Measuring it is not shipping it
+
+The app's live display called `BasicPitchDecoder.decode`, which averages the
+tail of one window and judges each note against a single threshold. Raising
+that threshold to 0.5 on its own would have made the display *worse*: §12
+measured 0.5 alone at 90.3% precision for 61.3% recall. The table above is
+the *sequence* decoder, and hysteresis is stateful — so the benefit only
+reaches a user if the live path becomes stateful too.
+
+`LiveNoteTracker` is that state, and it is deliberately small: the set of
+notes still sounding when the last window ended. Without it a note whose
+activation dips exactly across a window boundary is reported as two notes,
+which is the same defect the sustain threshold fixes within a window.
+
+One safeguard came out of the change rather than out of the measurement.
+Hysteresis makes a single frame decisive in a way it was not before, and one
+frame is 11.6 ms, so a borderline note would flicker on and off between
+windows. The tracker therefore reports a note when it sounds in **most** of
+the last 8 frames rather than merely in the final one, and a test pins that.
+
+### 18.2 What this says about the previous section
+
+The CrispASR backend of §17 is now harder to justify than when it was
+merged, and that is the correct outcome rather than an awkward one. Its
+advantage was never its runtime (§17.3 — there is no ggml runtime in that
+path) and is now demonstrably not its decoder either. What remains is 2.1×
+on speed against a mode that already updates twice a second, bought with a
+23 MB native library on five platforms and no web build.
+
+The backend stays, unavailable by default, for the reason it was built:
+MT3 is 96 MB and 46.9M parameters, and there the factor decides whether the
+mode runs at all. Nothing about this section changes that case.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
