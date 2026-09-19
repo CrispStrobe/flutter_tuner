@@ -1,12 +1,20 @@
 /// SWIPE′ — the Sawtooth Waveform Inspired Pitch Estimator (Camacho 2007).
 ///
 /// Offered as a detector option, with its measurements attached so the choice
-/// is an informed one: on GuitarSet it loses to YIN on every axis a tuner
-/// cares about — roughly twice the median cent error, eight times the gross
-/// error rate, and *more* octave errors despite octave robustness being its
-/// selling point (bench/REPORT.md §4.5). It is here because it is a genuinely
-/// different approach — spectral rather than lag-domain — and because on some
-/// signals a different failure mode is what you want.
+/// is an informed one. Over the full 180-file corpus (bench/REPORT.md §4.5)
+/// it answers on **100%** of frames where YIN answers on 75%, and collects a
+/// slightly higher raw pitch accuracy for it — 74.5% against 71.9%. It pays
+/// with a false-alarm rate of 100%: it never rejects anything, so the needle
+/// moves in a silent room. And on what a tuner is actually for it loses
+/// badly — twice YIN's median cent error (7.15 against 3.00) and eight times
+/// the gross-error rate.
+///
+/// Cost is not the objection it was once thought to be: 1.20 ms a frame
+/// against YIN's 1.02, measured in the same process on the same frames.
+///
+/// It is here because it fails differently — spectral rather than lag-domain
+/// — and because on an awkward signal a different failure mode is
+/// occasionally what you want.
 ///
 /// YIN and MPM both work in the lag domain: they ask how well the waveform
 /// resembles itself a period later. SWIPE′ works in the spectral domain and

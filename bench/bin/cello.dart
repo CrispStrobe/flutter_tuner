@@ -79,12 +79,18 @@ void main(List<String> argv) {
         rep.add(0);
         continue;
       }
-      named.add(o.namedCorrectly / o.reported);
-      octave.add(o.octaveAway / o.reported);
+      // A `tune` take contributes to stillness but not to naming: its
+      // filename does not say what it contains (see CelloTake).
+      if (o.nominalFrames > 0) {
+        named.add(o.namedCorrectly / o.nominalFrames);
+        octave.add(o.octaveAway / o.nominalFrames);
+      }
       rep.add(o.reported / o.frames);
       if (!o.spreadP90.isNaN) spread.add(o.spreadP90);
       if (!o.jitterP90.isNaN) jitter.add(o.jitterP90);
-      if (!o.medianOffsetCents.isNaN) offset.add(o.medianOffsetCents);
+      if (o.nominalFrames > 0 && !o.medianOffsetCents.isNaN) {
+        offset.add(o.medianOffsetCents);
+      }
     }
     stdout.writeln([
       pipeline.name.padRight(24),
@@ -108,7 +114,7 @@ void main(List<String> argv) {
       final o = measureTake(take, pipeline, window: window, hop: hop);
       if (o.reported == 0) continue;
       if (!o.excursion.isNaN) excursion.add(o.excursion);
-      named.add(o.namedCorrectly / o.reported);
+      if (o.nominalFrames > 0) named.add(o.namedCorrectly / o.nominalFrames);
       rep.add(o.reported / o.frames);
     }
     stdout.writeln([
@@ -130,8 +136,8 @@ void main(List<String> argv) {
     final named = <double>[], spread = <double>[], offset = <double>[];
     for (final take in forNote) {
       final o = measureTake(take, pipelines[1], window: window, hop: hop);
-      if (o.reported == 0) continue;
-      named.add(o.namedCorrectly / o.reported);
+      if (o.reported == 0 || o.nominalFrames == 0) continue;
+      named.add(o.namedCorrectly / o.nominalFrames);
       if (!o.spreadP90.isNaN) spread.add(o.spreadP90);
       if (!o.medianOffsetCents.isNaN) offset.add(o.medianOffsetCents);
     }
