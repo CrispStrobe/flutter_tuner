@@ -1357,7 +1357,12 @@ nothing forces that trade.
   x86-64 Linux and Windows on CI. An actual iPhone, and CoreML, remain
   unmeasured.
 
-## 17. Two runtimes for one model: ggml against pure Dart
+## 17. Two runtimes for one model: CrispASR against pure Dart
+
+> **Correction (§17.3).** This section was first published as "ggml against
+> pure Dart" and attributed CrispASR's speed to ggml. That is wrong: the
+> basic-pitch backend runs its convolutions in hand-written C++ loops and uses
+> ggml only to read the GGUF. §17.3 has the measurement and what it changes.
 
 §10 measured Basic Pitch; this measures the *runtime*. The app runs the model
 through `onnx_runtime_dart` — pure Dart, no FFI, no native build on any of six
@@ -1438,6 +1443,86 @@ afternoon if unwritten.
   report a note count, and hand back a null pointer. The build used here has
   both compiled in, so it is invisible from this side; reported rather than
   patched, since it is a different repository.
+
+### 17.3 There is no ggml runtime in that path
+
+The 1.8× looked like a runtime difference. It is not, and the question that
+exposed it was a good one: *it is not plausible that ggml should be slower
+than ONNX Runtime.* It was not slower — but it also was not ggml.
+
+From `src/basic_pitch.cpp`'s own header:
+
+> The whole network is six small convolutions, so everything runs in plain
+> C++ loops rather than a ggml graph: at (172, 264, 8) the largest activation
+> is 363k floats and the biggest conv is 8x8x3x39, which a graph would only
+> add scheduling overhead to. ggml is still used for GGUF loading, which is
+> what every other backend here does.
+
+So §17 compared **optimised pure Dart against a scalar C++ reference
+implementation**, not against ggml. That also explains the thread result this
+report under-read: `nThreads` reaches a ggml backend that only loads tensors,
+which is why 4 threads bought nothing over 2.
+
+What the convolutions actually cost, counted from the call sites:
+
+| layer | shape | MMAC |
+| --- | --- | --- |
+| contour_conv | 8→8, 3×39, out 172×264 | **340.0** |
+| onset_conv | 8→32, 5×5 /3, out 172×88 | 96.9 |
+| note_conv | 1→32, 7×7 /3, out 172×88 | 23.7 |
+| note_out | 32→1, 7×3, out 172×88 | 10.2 |
+| contour_out | 8→1, 5×5, out 172×264 | 9.1 |
+| onset_out | 33→1, 3×3, out 172×88 | 4.5 |
+| | **per 43844-sample window** | **484.4** |
+
+Half a GMAC per two-second window is not "six small convolutions", and one
+layer is 70% of it. Against measured time — CrispASR computes **14
+overlapping** windows for the 22.32 s file where the ONNX arm computes 11
+non-overlapping ones, so per window of model work it is 292 ms against 624:
+
+| | ms/window | achieved |
+| --- | --- | --- |
+| CrispASR, scalar C++ | 292 | 1.66 GMAC/s |
+| onnx_runtime_dart | 624 | 0.78 GMAC/s |
+
+Both are far below what the hardware can do, and the disassembly says why.
+`bp_conv2d` compiles to **SSE only** — `mulps`/`addps` on 4-wide `%xmm`,
+**zero AVX, zero FMA, no `%ymm`** — because the build sets
+`CMAKE_CXX_FLAGS` empty and takes only `-O3 -DNDEBUG`, i.e. baseline
+x86-64. A tuned im2col + SGEMM with AVX2/FMA reaches 10–25 GMAC/s on one
+core of this class, so the arithmetic says **6–15× is sitting on the table**,
+before any threading.
+
+The irony is exact: the header declined a ggml graph because it "would only
+add scheduling overhead", and ggml's `conv_2d` is precisely im2col plus a
+threaded, FMA-vectorised `mul_mat`. The reasoning was right about scheduling
+and wrong about arithmetic.
+
+Two caveats on this sub-section, stated because they are the parts not
+directly measured. `perf` is unavailable on the measurement host
+(`perf_event_paranoid=4`) and `ptrace_scope=1` blocked a sampling profiler,
+so the 1.66 GMAC/s is *implied* by assuming the convolutions are essentially
+all of the runtime rather than observed. The header comment claims "the
+expensive part is the CQT front end, not the network" — but the CQT is 9
+octaves of 256-tap filtering over ~344 summed frames, about 6 MMAC against
+the network's 484, so that claim cannot be right for this build unless the
+front end is implemented far off its operation count.
+
+### 17.4 What this changes above
+
+Three things, none of which move a number already published:
+
+* **The runtime is not why ggml is faster, and it is not why it is slower
+  than it should be.** Both paths are leaving most of the machine unused.
+* **The window overlap is a second pipeline difference.** CrispASR runs 14
+  overlapping windows and drops 15 frames from each side before stitching,
+  so it scores its better-conditioned interior frames; the ONNX arm scored
+  every frame of 11 independent windows. That belongs on the same list as the
+  decoder — pipeline, not runtime.
+* **The optimisation worth doing for *this* app is the Dart one.** CrispTuner
+  ships `onnx_runtime_dart` and does not ship libcrispasr (§17.1), so its
+  0.78 GMAC/s is the number that reaches a user. `Float32x4` is available on
+  every native target and is the same im2col+SGEMM shape.
 
 ---
 
