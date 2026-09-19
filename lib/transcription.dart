@@ -165,7 +165,7 @@ class BasicPitchDecoder {
   /// Note-head activation a note must reach to be reported.
   ///
   /// Measured on GuitarSet's chordal recordings, 128,558 reference frames
-  /// (bench/REPORT.md §14):
+  /// (bench/REPORT.md §12):
   ///
   /// | threshold | precision | recall | F1 |
   /// | --- | --- | --- | --- |
