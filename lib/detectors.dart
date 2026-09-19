@@ -24,6 +24,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'fft_real.dart';
+import 'swipe.dart';
 
 /// One frame's answer from a detector.
 class PitchEstimate {
@@ -48,6 +49,12 @@ enum DetectorKind {
   /// YIN, as the app has always used it, but with the difference function
   /// computed by FFT. Identical answers, a fraction of the arithmetic.
   yin,
+
+  /// SWIPE′: a spectral estimator that matches the square-root spectrum
+  /// against cosine kernels at the *prime* harmonics of each candidate.
+  /// Measurably worse than YIN for a tuner (bench/REPORT.md §4.5) and
+  /// several times more expensive; offered because it fails differently.
+  swipe,
 
   /// McLeod's normalised square difference function. Answers on far more
   /// frames than YIN — and wrongly on more of them too. Offered because on
@@ -81,6 +88,8 @@ abstract class PitchEngine {
           YinEngine(sampleRate: sampleRate, windowSize: windowSize),
         DetectorKind.mpm =>
           MpmEngine(sampleRate: sampleRate, windowSize: windowSize),
+        DetectorKind.swipe =>
+          SwipeEngine(sampleRate: sampleRate, windowSize: windowSize),
       };
 }
 

@@ -247,5 +247,9 @@
   "detectorMpm": "MPM (more sensitive)",
   "@detectorMpm": {
     "description": "Name of the alternative pitch detector, which reports on more frames but is wrong more often"
+  },
+  "detectorSwipe": "SWIPE′ (experimental)",
+  "@detectorSwipe": {
+    "description": "Name of the third pitch detector option, a spectral estimator that is measurably less accurate than YIN"
   }
 }

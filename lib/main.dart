@@ -545,6 +545,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         return l10n.detectorYin;
       case DetectorKind.mpm:
         return l10n.detectorMpm;
+      case DetectorKind.swipe:
+        return l10n.detectorSwipe;
     }
   }
 

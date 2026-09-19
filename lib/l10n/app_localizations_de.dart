@@ -302,4 +302,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get detectorMpm => 'MPM (empfindlicher)';
+
+  @override
+  String get detectorSwipe => 'SWIPE′ (experimentell)';
 }
