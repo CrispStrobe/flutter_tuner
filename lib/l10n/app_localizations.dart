@@ -619,6 +619,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'MPM (more sensitive)'**
   String get detectorMpm;
+
+  /// Name of the third pitch detector option, a spectral estimator that is measurably less accurate than YIN
+  ///
+  /// In en, this message translates to:
+  /// **'SWIPE′ (experimental)'**
+  String get detectorSwipe;
 }
 
 class _AppLocalizationsDelegate

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pitch_detector_dart/pitch_detector.dart';
 
 import 'package:flutter_tuner/detectors.dart';
+import 'package:flutter_tuner/swipe.dart';
 import 'package:flutter_tuner/tuner_core.dart';
 
 /// The app used to call `pitch_detector_dart`; `lib/detectors.dart` now
@@ -125,6 +126,34 @@ void main() {
       expect(b.pitched, isTrue);
       expect(centsBetween(a.frequency, f0).abs(), lessThan(5));
       expect(centsBetween(b.frequency, f0).abs(), lessThan(5));
+    }
+  });
+
+  test('SWIPE finds the open strings it is offered as an option for', () {
+    final rng = math.Random(31);
+    final swipe = SwipeEngine(sampleRate: rate, windowSize: pitchWindowSize);
+    for (final f0 in [82.41, 110.0, 146.83, 196.0, 246.94, 329.63]) {
+      final block = pluck(f0, rng, noise: 0.002);
+      final r = swipe.analyse(block);
+      expect(r.pitched, isTrue, reason: '$f0 Hz was not detected');
+      // Deliberately loose: SWIPE's own precision on a clean synthetic pluck
+      // is about 3 cents against YIN's 0.05 (bench/REPORT.md §4.5), which is
+      // exactly why it is the option and not the default.
+      expect(centsBetween(r.frequency, f0).abs(), lessThan(15),
+          reason: '$f0 Hz read as ${r.frequency}');
+    }
+  });
+
+  test('every DetectorKind can be built and analyses a frame', () {
+    final rng = math.Random(5);
+    final block = pluck(196.0, rng);
+    for (final kind in DetectorKind.values) {
+      final engine = PitchEngine.of(kind,
+          sampleRate: rate, windowSize: pitchWindowSize);
+      final r = engine.analyse(block);
+      expect(r.pitched, isTrue, reason: '${kind.name} found nothing');
+      expect(centsBetween(r.frequency, 196.0).abs(), lessThan(20),
+          reason: '${kind.name} read ${r.frequency}');
     }
   });
 

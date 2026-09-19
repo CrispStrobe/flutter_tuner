@@ -10,7 +10,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 src="$here/.."
-files=(tuner_core.dart detectors.dart harmonics.dart temperament.dart tunings.dart)
+files=(tuner_core.dart detectors.dart fft_real.dart harmonics.dart swipe.dart temperament.dart tunings.dart)
 status=0
 for f in "${files[@]}"; do
   if [[ "${1:-}" == "--check" ]]; then

@@ -91,6 +91,11 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     windowSize: pitchWindowSize,
   );
   final _pitchWindow = RollingWindow(pitchWindowSize);
+
+  /// How much new audio to wait for between analyses. 1024 samples is 23 ms
+  /// at 44.1 kHz — 43 readings a second.
+  static const int analysisHopSamples = 1024;
+  int _samplesSinceAnalysis = 0;
   final _engine = TunerEngine();
 
   TunerStatus _status = TunerStatus.idle;
@@ -314,8 +319,27 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     // Accumulate rather than analysing the callback's own buffer: the chunk
     // size is the platform's choice, and anything smaller than the analysis
     // window used to be dropped on the floor entirely.
-    _pitchWindow.add(_engine.pcmToFloat(data));
+    final samples = _engine.pcmToFloat(data);
+    _pitchWindow.add(samples);
     if (!_pitchWindow.isFull) return;
+
+    // Analyse at a bounded rate rather than once per callback.
+    //
+    // The callback size is the platform's choice and on the web it is not a
+    // choice at all: an AudioWorklet is handed 128 samples per render quantum
+    // by the Web Audio spec, so this ran a full 4096-sample analysis ~345
+    // times a second. Consecutive analyses that far apart share 97% of their
+    // samples — they are very nearly the same number, recomputed. Measured in
+    // dart2js at the time, that was 1765% of a core for the detector alone,
+    // which a browser cannot do, so the readings queued and the needle lagged.
+    //
+    // Nothing is lost by declining: the reading's content is dominated by a
+    // 93 ms window, so its latency floor is the window, not the hop
+    // (bench/REPORT.md §9). A 1024-sample hop gives 43 readings a second,
+    // which is more than a needle can usefully show.
+    _samplesSinceAnalysis += samples.length;
+    if (_samplesSinceAnalysis < analysisHopSamples) return;
+    _samplesSinceAnalysis = 0;
 
     // Pitch detection. This used to be a fire-and-forget Future because the
     // package's API was asynchronous; the work was always synchronous, and
@@ -521,6 +545,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         return l10n.detectorYin;
       case DetectorKind.mpm:
         return l10n.detectorMpm;
+      case DetectorKind.swipe:
+        return l10n.detectorSwipe;
     }
   }
 

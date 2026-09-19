@@ -1,6 +1,12 @@
-/// SWIPE′ — the Sawtooth Waveform Inspired Pitch Estimator (Camacho 2007),
-/// as the comparison point the brief asked for and this report kept putting
-/// off.
+/// SWIPE′ — the Sawtooth Waveform Inspired Pitch Estimator (Camacho 2007).
+///
+/// Offered as a detector option, with its measurements attached so the choice
+/// is an informed one: on GuitarSet it loses to YIN on every axis a tuner
+/// cares about — roughly twice the median cent error, eight times the gross
+/// error rate, and *more* octave errors despite octave robustness being its
+/// selling point (bench/REPORT.md §4.5). It is here because it is a genuinely
+/// different approach — spectral rather than lag-domain — and because on some
+/// signals a different failure mode is what you want.
 ///
 /// YIN and MPM both work in the lag domain: they ask how well the waveform
 /// resembles itself a period later. SWIPE′ works in the spectral domain and
@@ -30,12 +36,12 @@ import 'dart:typed_data';
 
 import 'package:fftea/fftea.dart';
 
-import 'app/detectors.dart';
+import 'detectors.dart';
 
 /// The harmonic numbers the kernel is built from: 1 and the primes.
 const List<int> _primeHarmonics = [1, 2, 3, 5, 7, 11, 13, 17, 19, 23];
 
-class SwipeEstimator {
+class SwipeEngine extends PitchEngine {
   final double sampleRate;
 
   /// Candidate range and resolution. The paper uses 1/96 of an octave; 1/48
@@ -64,8 +70,18 @@ class SwipeEstimator {
   late final List<double> _candidates;
   final Map<int, FFT> _ffts = {};
 
-  SwipeEstimator({
+  @override
+  final int windowSize;
+
+  @override
+  DetectorKind get kind => DetectorKind.swipe;
+
+  @override
+  double get detectionFloor => minF0;
+
+  SwipeEngine({
     required this.sampleRate,
+    required this.windowSize,
     this.minF0 = 40.0,
     this.maxF0 = 1600.0,
     this.binsPerOctave = 48,
@@ -148,6 +164,7 @@ class SwipeEstimator {
   /// bracket its ideal (eight periods), and the two scores are blended by how
   /// close each size is — the paper's interpolation, which is what keeps the
   /// strength curve smooth across the size boundaries.
+  @override
   PitchEstimate analyse(List<double> buffer) {
     // Which window sizes are needed at all?
     final sizes = <int>{};
@@ -220,15 +237,5 @@ class SwipeEstimator {
     return PitchEstimate(frequency, bestStrength.clamp(0.0, 1.0), true);
   }
 
-  /// The strength of the best candidate, without the threshold — for sweeps.
-  double bestStrength(List<double> buffer) {
-    final result = SwipeEstimator(
-      sampleRate: sampleRate,
-      minF0: minF0,
-      maxF0: maxF0,
-      binsPerOctave: binsPerOctave,
-      strengthThreshold: -1,
-    ).analyse(buffer);
-    return result.pitched ? result.probability : 0;
-  }
+
 }

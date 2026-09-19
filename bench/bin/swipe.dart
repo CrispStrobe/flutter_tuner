@@ -16,7 +16,7 @@ import 'package:tuner_bench/app/detectors.dart';
 import 'package:tuner_bench/app/tuner_core.dart';
 import 'package:tuner_bench/jams.dart';
 import 'package:tuner_bench/metrics.dart';
-import 'package:tuner_bench/swipe.dart';
+import 'package:tuner_bench/app/swipe.dart';
 import 'package:tuner_bench/wav.dart';
 
 Map<String, dynamic> evaluate(String wavPath, String jamsPath, int hop,
@@ -29,9 +29,13 @@ Map<String, dynamic> evaluate(String wavPath, String jamsPath, int hop,
   // The estimator never rejects; the thresholds are applied afterwards, so
   // one pass measures the whole sweep — the same trick the YIN threshold
   // sweep uses in evaluate.dart.
-  final swipe = SwipeEstimator(sampleRate: rate, strengthThreshold: -1);
-  final swipeGlobal = SwipeEstimator(
-      sampleRate: rate, strengthThreshold: -1, localNormalisation: false);
+  final swipe = SwipeEngine(
+      sampleRate: rate, windowSize: pitchWindowSize, strengthThreshold: -1);
+  final swipeGlobal = SwipeEngine(
+      sampleRate: rate,
+      windowSize: pitchWindowSize,
+      strengthThreshold: -1,
+      localNormalisation: false);
   final globalSmoother = PitchSmoother();
   final yinSmoother = PitchSmoother();
   final swipeSmoothers = {

@@ -86,5 +86,6 @@
   "temperamentOffset": "{note} {cents} ¢ ggü. gleichstufig",
   "detectorLabel": "Tonhöhenerkennung",
   "detectorYin": "YIN (empfohlen)",
-  "detectorMpm": "MPM (empfindlicher)"
+  "detectorMpm": "MPM (empfindlicher)",
+  "detectorSwipe": "SWIPE′ (experimentell)"
 }
