@@ -1022,6 +1022,58 @@ lesson is that **a plausible explanation is not evidence**, and the check
 that mattered was the cheap one nobody had run: looking at the actual
 spectrum of one file.
 
+### 11.2 The neural models on a bowed instrument
+
+None of CREPE, PESTO or FCNF0++ has seen much cello: they are trained
+overwhelmingly on speech, singing and plucked instruments, so a bowed string
+with heavy vibrato is where a learned model has most room to disappoint.
+Measured over the same steady takes, by the same rules, median over takes:
+
+| estimator | reported | named | octave | spread p90 | offset |
+| --- | --- | --- | --- | --- | --- |
+| **app YIN** | 99.7% | 100% | 0.0% | 5.48 c | −3.6 c |
+| crepe-full @0.5 | 99.8% | 100% | 0.0% | **1.10 c** | +3.0 c |
+| fcnf0++ @0.5 | 90.3% | 100% | 0.0% | 6.53 c | −5.7 c |
+| crepe-tiny @0.5 | 99.7% | 100% | 0.0% | 16.79 c | +2.0 c |
+| pesto @0.5 | 83.3% | 100% | 0.0% | — | −0.0 c |
+
+They do not disappoint. Every one of them names the right note on
+essentially every frame, with no octave errors at all — the instrument that
+was supposed to be hardest for them turns out to be the easiest thing in this
+report for everybody.
+
+And one number here runs against the grain of §10. **crepe-full's reading is
+five times steadier than YIN's on a sustained bowed note** — 1.10 cents of
+spread at the 90th percentile against 5.48 — while sitting 3 cents from the
+nominal. That is not the same quantity as §10's cent *error*, which is
+measured against a reference; this is stillness, measured against the take's
+own median, and stillness is what a needle shows. On a bowed note, which
+does not decay, a model that reads the whole spectrum has more to work with
+than a lag-domain detector does.
+
+It does not change the recommendation, for a reason that has nothing to do
+with accuracy: crepe-full costs 8.2% of real time *on a GPU*, and roughly
+eight times real time on one CPU core. A tuner cannot spend that. But the
+accuracy objection to neural pitch detection, which §10 established on
+guitar, does not hold for bowed strings, and that is worth knowing before
+anyone decides what to build next.
+
+PESTO's spread is blank because the harness recorded none for it — not a
+zero, an absence — and it has not been chased.
+
+### 11.3 So: no, do not fine-tune on cello
+
+The question this section was run to answer was whether these models need
+fine-tuning for bowed strings. On this evidence there is nothing to fix:
+100% note naming, no octave errors, and in crepe-full's case a steadier
+reading than the shipped detector's.
+
+It is also worth saying what fine-tuning *could* have used. MUSERC is 132
+takes of seven notes between D3 and C♯4 from two players — a register and a
+half, one instrument, one room. Training on it would buy a model that is
+excellent at seven notes. The data to do it properly does not exist here, and
+the measurement says it is not needed.
+
 ## 12. Chords: the measurement the transcription mode rests on
 
 Every neural number above came from GuitarSet's `_solo` files. That is
@@ -1139,7 +1191,7 @@ notice.**
   around 2–3 cents should be read as an upper bound on the app's error, and
   the sub-cent claims in §4.3 rest on synthesis, not on the corpus.
 * ~~**Guitar only.**~~ Partly closed — §11 adds cello, where the tuner does
-  better than on guitar. Still nothing on bass, piano, voice or wind, and the
+  better than on guitar, and §11.2 puts the neural models there too. Still nothing on bass, piano, voice or wind, and the
   window-size and inharmonicity conclusions remain limited by that. The cello
   corpus is also narrow: two players, seven notes, all in one register.
 * ~~**Frame-level, not note-level.**~~ Done — §9 times the pluck, §9.1 times
