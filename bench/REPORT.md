@@ -1203,6 +1203,15 @@ rescue.
 | Basic Pitch @0.3 | 78.6% | 80.1% | **79.3%** |
 | any monophonic detector | — | **32.9% ceiling** | — |
 
+The runtime comparison of §17 scores the same model on a subset of the same
+material (8 files rather than 180), so its absolute numbers are not
+comparable to the rows above — the rows to compare are against each other:
+
+| runtime, 8 comp files, 1 thread | precision | recall | F1 | per 2 s window |
+| --- | --- | --- | --- | --- |
+| Basic Pitch @0.4, pure Dart (ships) | 88.2% | 67.2% | 76.2% | 624 ms |
+| Basic Pitch, CrispASR/ggml | 84.4% | 75.6% | **79.7%** | **345 ms** |
+
 ### The one-line summary
 
 The shipped pipeline is the best thing here for the job it does. Three
