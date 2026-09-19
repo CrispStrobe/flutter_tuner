@@ -1749,10 +1749,47 @@ float bits plus L2 norms on all three heads, and every note event unchanged
 — with a hermetic test asserting `memcmp == 0` on the six real shapes, which
 was checked to actually fail when forced onto a different kernel.
 
+### 20.0 Closed on CI, and the default flipped
+
+The VPS could not settle the threading half — a single-threaded process
+never exceeded 36–54% of one core there. A hermetic CI workflow did, one arm
+per process, cold discarded, median of three, within-run variance 0.05%:
+
+| | reference | SIMD, 1 thread | 4 threads |
+| --- | --- | --- | --- |
+| ubuntu-24.04, 4 cores | 104.8 ms | **1.66×** | **3.59×** |
+| macos-14 (M1), 3 cores | 94.8 ms | **1.01×** | **2.67×** |
+
+Byte-identical on both, at 1 and 4 threads, so the gate now defaults **on**
+with `=0` as the way back and `bp_conv2d_ref` kept verbatim.
+
+Three results here are worth more than the speedup:
+
+* **A contended box understates the faster kernel.** SIMD-only measures 1.45×
+  on the loaded VPS and 1.66× clean — contention costs the faster kernel
+  proportionally more, because it has less slack to hide a stall in.
+* **arm64 gains nothing from SIMD — 1.01×.** Its entire 2.67× is threading.
+  NEON is already baseline on aarch64, so the portable path was always
+  4-wide there and the new kernels add nothing. Anyone reading "AVX2 made it
+  1.66× faster" and planning for a phone would plan wrong.
+* **FMA buys 0–3%, inside run-to-run spread.** That is the §17.3 correction
+  arriving independently: a kernel this low in arithmetic reuse is not
+  FP-throughput bound, so the instruction that doubles FP throughput does
+  nothing.
+
+Shipped with one caveat, not smoothed over: `n_threads` defaults to 4, and
+at 4 threads the per-call `std::thread` spawn — six convolutions per window,
+~84 spawns for a 22-second file — costs about 75% more CPU than 2 threads
+for about 9% less wall time. Batch and server callers should pass 2 until it
+routes through the tree's existing worker pool.
+
 ### 20.1 What it corrects in this report
 
-* **The headroom estimate, by an order of magnitude.** 6–15× predicted,
-  1.45× delivered. See the correction in §17.3.
+* **The headroom estimate, by an order of magnitude.** I predicted "6–15×
+  … before any threading". SIMD alone delivers **1.66×** on x86-64 and
+  **1.01×** on arm64. The clean-box total of 3.59× partly closes the gap,
+  but it closes it with threading, which the prediction had explicitly
+  excluded — so the correction sharpens rather than softens. See §17.3.
 * **"Nothing gets AVX2" was half wrong.** `GGML_AVX2:BOOL=OFF` in the cache
   is superseded by `GGML_NATIVE:BOOL=ON`, and `libggml-cpu.so` carries 19,886
   `%ymm` references. It is CrispASR's own `src/` that compiles baseline —
@@ -1765,6 +1802,30 @@ was checked to actually fail when forced onto a different kernel.
   `M=45408, K=936, N=8`, where every element of that 170 MB is read
   essentially once. im2col amortises nothing at this shape. `onset_conv` is
   the exception worth measuring later: 12.1 MB, `OC=32`, 20% of the work.
+
+### 20.1a The `src/` ISA gap, which is the larger finding
+
+Promoted out of the perf write-up into `docs/improvements/SRC_ISA_GAP.md`.
+The evidence turned out to be sharper than "flags are empty". In
+`release.yml`: **15 legs** pass `-DGGML_AVX2=ON -DGGML_FMA=ON
+-DGGML_F16C=ON`, **2** ship `GGML_BACKEND_DL` with
+`GGML_CPU_ALL_VARIANTS` (runtime multi-variant dispatch), **3** pass
+`CRISPASR_PORTABLE_CPU=ON` (deliberate baseline) — and **zero** mention
+`CMAKE_CXX_FLAGS`.
+
+So there *is* a considered ISA policy, documented in `CMakeLists.txt`: ggml's
+CPU backend initialises before CUDA or Vulkan is selected, so an AVX2 CPU
+helper raises `SIGILL` at model load before the runtime ISA diagnostic can
+print. It is applied to ggml through three separate strategies. **CrispASR's
+own `src/` is in none of them** — and the tell that this is scope rather
+than intent is that the legs which *deliberately* hand ggml AVX2 do not hand
+it to `src/` either, which no policy would ask for, since on those artifacts
+AVX2 is already accepted.
+
+Not decided here, and not this repository's call. Recorded because it is a
+tree-wide multiplier available from a build-system change rather than from
+writing kernels one at a time — worth more than the optimisation that
+uncovered it.
 
 ### 20.2 One number that did not reconcile
 
@@ -1780,6 +1841,20 @@ Both numbers are therefore right for their own build, and the A/B is
 unaffected — byte-identity was established between reference and fast paths
 *within one build*, which is what the comparison requires. Recorded because
 §17's published baseline is 151 and should stay reproducible.
+
+### 20.2a A green tick that measured nothing
+
+Flipping the gate's default silently broke the A/B workflow that proved it,
+in the worst possible direction. The reference arm passed **no** environment
+variable — correct only while the gate defaulted off. One run therefore
+reported **1.00× for every arm, and passed**.
+
+The fix was to pin `=0` explicitly *and* to assert that the arm name the
+harness prints matches the one requested, so a harness measuring the wrong
+thing fails rather than reporting parity. The general lesson is worth more
+than the bug: **a gate's default is part of every harness that reads it**,
+and "no difference" is the one result a broken benchmark produces most
+convincingly.
 
 ### 20.3 Whether it generalises
 
