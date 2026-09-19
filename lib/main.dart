@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'about_screen.dart';
+import 'crispasr_backend.dart';
 import 'audio_service.dart';
 import 'audio_service_stub.dart' as audio;
 import 'l10n/app_localizations.dart';
 import 'theme.dart';
 import 'transcription.dart';
+import 'transcription_backend.dart';
 import 'transcription_service.dart';
 import 'tuner_engine.dart';
 
@@ -104,7 +106,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   // A separate path from the needle, and deliberately so: the model names
   // several notes at once but cannot measure cents (bench/REPORT.md §10),
   // so it answers "what am I playing", never "am I in tune".
-  final TranscriptionService _transcription = TranscriptionService();
+  // Held as the interface, not the implementation. There are two runtimes
+  // for the same model: pure Dart ONNX, which ships everywhere, and
+  // CrispASR's ggml over FFI, which is 1.8x faster and recalls 8 points more
+  // notes but needs a native library nobody's install has by default
+  // (bench/REPORT.md §17, lib/crispasr_backend.dart). Prefer ggml when the
+  // host has actually been configured for it; otherwise the shipped path.
+  final TranscriptionBackend _transcription =
+      CrispAsrBackend.fromEnvironment() ?? TranscriptionService();
   final Halfband _decimator = Halfband();
   final RollingWindow _transcriptionWindow =
       RollingWindow(BasicPitchGeometry.windowSamples);
@@ -916,7 +925,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   /// except on the web where the reason is worth saying — a browser is the
   /// one platform where a user might reasonably expect it and not get it.
   Widget _buildTranscription(AppLocalizations l10n, TunerPalette palette) {
-    if (!TranscriptionService.isSupported) {
+    if (!_transcription.isAvailable) {
       return Padding(
         padding: const EdgeInsets.only(top: 12),
         child: Text(

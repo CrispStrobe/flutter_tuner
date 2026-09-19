@@ -1348,6 +1348,88 @@ nothing forces that trade.
   x86-64 Linux and Windows on CI. An actual iPhone, and CoreML, remain
   unmeasured.
 
+## 17. Two runtimes for one model: ggml against pure Dart
+
+§10 measured Basic Pitch; this measures the *runtime*. The app runs the model
+through `onnx_runtime_dart` — pure Dart, no FFI, no native build on any of six
+platforms. The sibling project CrisperWeaver runs its transcription through
+CrispASR's ggml over FFI. The same 35.7k-parameter model exists as both a 225
+KB ONNX graph and a 142 KB GGUF, so the two can be put on the same audio and
+asked the same questions.
+
+`bin/runtime_compare.dart` does that. Eight GuitarSet chordal recordings,
+**one thread on each side** so this compares runtimes and not core counts,
+scored frame-by-frame against `note_midi` truth on the same 11.6 ms grid as
+§12:
+
+| runtime | precision | recall | F1 | per 2 s window |
+| --- | --- | --- | --- | --- |
+| pure Dart (ONNX) | 88.2% | 67.2% | 76.2% | 624 ms |
+| CrispASR (ggml) | 84.4% | 75.6% | **79.7%** | **345 ms** |
+
+Two findings, and the second matters more than the first.
+
+**They are the same model, faithfully.** Over those eight files the two name
+the same set of pitches: identical on five of them, and never below 83%
+agreement. Where they differ it is one or two pitches at the edges — a D♯3 one
+runtime keeps and the other drops, two implausibly high partials (D6, C♯7)
+that only ggml reports. Nothing here suggests either port is wrong.
+
+**The accuracy gap is the decoder, not the runtime.** ggml trades 3.8 points
+of precision for 8.4 of recall because it returns segmented note *events* with
+onsets, offsets and velocities, while the ONNX arm is scored on per-frame
+activations above 0.4. A note event bridges the frames where activation dips
+below threshold; a threshold does not. That is a decoding choice this
+repository could make on either runtime, and it points at a cheaper
+improvement than switching runtimes at all.
+
+**Speed is real but is not the constraint.** 1.8× is a genuine speedup, and
+threads buy a little more (345 → 329 ms at two threads, nothing beyond). But
+§14 already measured 324 ms per window on Apple Silicon in pure Dart, against
+a mode that updates twice a second. The pure-Dart path is not the thing
+standing between a user and this feature.
+
+### 17.1 What it would cost
+
+From the `crispasr` package's own README: it "is pure Dart FFI and does not
+bundle the native library." The build used here is 23 MB. Shipping this means
+a native library on five platforms, a per-platform build to maintain, and
+**no web build at all** — to speed up a mode that already runs fast enough,
+and to gain recall obtainable by changing a decoder.
+
+So the backend is built and is not the default. `lib/crispasr_backend.dart`
+implements `TranscriptionBackend` behind a conditional export, so the web
+compilation unit never sees `dart:ffi`; it reports itself unavailable unless
+a host is explicitly configured (`CRISPTUNER_BASIC_PITCH_GGUF`, optionally
+`CRISPTUNER_CRISPASR_LIB`), and `main.dart` holds the interface and prefers
+ggml only when that configuration is present. The case that would change this
+is MT3 — 96 MB and 46.9M parameters, where a 1.8× factor decides whether the
+mode runs at all rather than how comfortably.
+
+### 17.2 Two things found in the reading
+
+Neither affects a number above; both are the kind of thing that costs an
+afternoon if unwritten.
+
+* **Basic Pitch hangs off CrispASR's *piano* arm, not its pitch arm.**
+  `crispasr_session_pitch` is CREPE's monophonic F0 track;
+  `crispasr_session_piano` is the note-event API that basic-pitch, MT3 and
+  piano-transcription all serve. Asking `pitchSampleRate` for a basic-pitch
+  session returns **0** rather than throwing — it is deliberately a
+  capability probe — which resampled a whole run's audio to nothing and
+  produced zero notes before the cause was obvious. The C parameter is still
+  named `pcm_16k`; Basic Pitch wants 22050. Query `pianoSampleRate`, never
+  assume.
+* **A latent guard asymmetry upstream.** In `crispasr_c_api.cpp`,
+  `crispasr_session_piano_n_notes` is guarded by
+  `PIANO_TRANSCRIPTION || BASIC_PITCH || MT3`, but
+  `crispasr_session_piano_notes` — the accessor that returns the data — is
+  guarded by `#ifdef CA_HAVE_PIANO_TRANSCRIPTION` alone. A build with
+  basic-pitch but without piano-transcription would transcribe successfully,
+  report a note count, and hand back a null pointer. The build used here has
+  both compiled in, so it is invisible from this side; reported rather than
+  patched, since it is a different repository.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
