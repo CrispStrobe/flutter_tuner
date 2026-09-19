@@ -1596,6 +1596,80 @@ The backend stays, unavailable by default, for the reason it was built:
 MT3 is 96 MB and 46.9M parameters, and there the factor decides whether the
 mode runs at all. Nothing about this section changes that case.
 
+## 19. The Dart runtime: where its 0.78 GMAC/s goes
+
+§17.3 left the pure-Dart path at 0.78 GMAC/s against 484.4 MMAC per window
+and said most of the machine was unused. `bin/dart_parallel.dart` asks which
+part of "unused" is available.
+
+The package already ships an isolate pool — `parallelize(workers:,
+poolConv:)` partitions work across isolates and `runAsync` executes on them
+— and **the app does not use it**: `TranscriptionService` calls the
+synchronous `run()`. So the first question is not what to write but what is
+already there.
+
+Four arms, **each in its own process** (see §19.1), median of five
+inferences, on one shared VPS core of four:
+
+| arm | ms/window | GMAC/s |
+| --- | --- | --- |
+| `run()`, single isolate — what ships | 621 | 0.78 |
+| `parallelize(2)` | 596 | 0.81 |
+| `parallelize(2, poolConv)` | 476 | 1.02 |
+| `parallelize(4, poolConv)` | **441** | **1.10** |
+
+**`poolConv` is worth 1.41×, and the package's own documentation says it
+should not be.** From `parallelize`'s doc comment: "Off by default: conv
+messages carry the whole input activation to every worker, and for CNN
+workloads measured so far that copying costs more than the banded compute
+saves." That is a fair description of most CNNs and the wrong prediction for
+this one — Basic Pitch's activations are large enough (172 × 264 × 8) that
+the banded compute wins.
+
+**`parallelize` without `poolConv` does nothing, and that is not noise-free
+luck.** `tool/dump_ops.dart` on the shipped model: 248 nodes, **32 `Conv`
+and zero `MatMul`**. Without `poolConv` there is literally nothing for the
+pool to partition, so the 621 → 596 is the noise floor of a loaded box, not
+a small win. Worth stating because a 4% "improvement" with no mechanism is
+exactly the kind of number that gets quoted later.
+
+Also worth recording: the ONNX graph has 32 convolutions where the native
+port has six, because the export implements the CQT front end as
+convolutions too. That reconciles the two profiles — the front end is ~6% of
+the Dart cost and a rounding error in the native one, because they are not
+computing it the same way.
+
+### 19.1 The harness lied to me first
+
+The first version of `dart_parallel.dart` ran every arm in one process and
+reported **1.76×**. Per-process it is **1.41×**.
+
+Dart's JIT optimises hot code across the isolate, so the arm that runs first
+pays to warm kernels that every later arm then inherits — and the baseline
+ran first. The gap between 1.76 and 1.41 is entirely that.
+
+This is embarrassing in a useful way: hours earlier I had briefed a
+subagent, in writing, that a shared process manufactures wins and that each
+configuration must be a separate process. I then wrote a single-process
+harness. The rule is in CrispASR's development guide as "measure both arms
+under IDENTICAL load, back-to-back — a noisy box fabricates wins", and it
+cost nothing to follow once remembered. `--only <arm>` exists now so the
+harness cannot make that mistake again.
+
+### 19.2 Not shipped yet, and why
+
+1.41× is real and it is on the path that actually reaches users — every
+platform, web included. It is not wired into the app in this commit, for one
+reason: every number above comes from one shared VPS core under eleven
+concurrent agent sessions, and the decision it would drive is how many
+isolates to spawn *inside* the transcription isolate on a phone.
+
+§14 measured Apple Silicon at 324 ms per window single-threaded against this
+box's 621. A 4-worker pool that helps here may be the wrong default on a
+device with different core counts, different memory bandwidth, and a battery.
+`bench-platforms.yml` already measures Apple Silicon, x86-64 Linux and
+Windows on CI; the pooled arm belongs there before a default moves.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
