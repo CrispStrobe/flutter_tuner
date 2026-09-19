@@ -820,12 +820,13 @@ Each model at the threshold that puts its false-alarm rate closest to YIN's
 | estimator | RPA% | rep% | oct% | gross% | \|err\| p50 | >5c% | FA% |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **app YIN** | 71.9 | 74.7 | 0.59 | 3.20 | **2.45** | **22.2** | 17.1 |
-| crepe-tiny @0.75 | 74.3 | 76.0 | **0.28** | **2.01** | 5.45 | 53.4 | 15.0 |
-| crepe-full @0.75 | **80.7** | 83.0 | 0.24 | 2.54 | 5.49 | 53.7 | 22.1 |
-| crepe-full-viterbi @0.75 | 69.1 | 70.8 | **0.07** | 2.31 | 8.08 | 67.5 | 15.9 |
-| crepe-tiny-viterbi @0.5 | 55.0 | 57.3 | 0.21 | 3.89 | 8.28 | 68.3 | 17.2 |
+| crepe-tiny @0.75 | 74.3 | 76.0 | 0.27 | **1.98** | 5.16 | 51.2 | 15.0 |
+| crepe-full @0.75 | **80.7** | 83.0 | 0.24 | 2.55 | 5.23 | 51.8 | 22.1 |
+| crepe-full-viterbi @0.75 | 69.2 | 70.8 | **0.07** | 2.25 | 8.12 | 67.6 | 15.9 |
+| crepe-tiny-viterbi @0.5 | 55.0 | 57.3 | 0.21 | 3.86 | 8.33 | 68.2 | 17.2 |
 | pesto @0.25 | 53.9 | 57.7 | 0.47 | 6.19 | 8.70 | 69.9 | 13.5 |
-| fcnf0++ @0.1 | 46.8 | 61.2 | 4.90 | 18.6 | 7.60 | 66.2 | 23.8 |
+| fcnf0++ @0.25 | 40.1 | 49.1 | 4.67 | 13.6 | 7.23 | 64.8 | 16.3 |
+| spice @0.9 | 52.0 | 56.5 | 0.05 | 7.93 | 6.74 | 62.9 | 27.7 |
 
 **CREPE beats YIN at deciding which note, and loses at cents by a factor of
 two.** crepe-full finds the right note on 81% of reference frames against
@@ -849,8 +850,28 @@ cents median — worse than CREPE. So the coarse output grid is not what stops
 these models measuring cents; what they learned to represent is.
 
 **Precision improves with confidence, and never far enough.** crepe-tiny's
-median error falls from 6.06 cents at a 0.1 threshold to 3.76 at 0.9 — but at
+median error falls from 5.77 cents at a 0.1 threshold to 3.66 at 0.9 — but at
 0.9 it answers on 15% of frames. YIN gives 2.45 cents on 75% of them.
+
+Two models need a footnote. **SPICE** is the only one here predicting
+*relative* pitch: its output needs the published affine calibration to become
+hertz, so a systematic error in that calibration is indistinguishable from a
+tuning error. It never reaches YIN's false-alarm rate at all — 27.7% at its
+most conservative setting against YIN's 17.1% — so its row is the only one
+not matched on FA. **PESTO's second checkpoint** (`mir-1k`, against the
+default `mir-1k_g7`) could not be run: through the packaged `predict` path it
+raises `mat1 and mat2 shapes cannot be multiplied (2233x87 and 72x1)`, the
+checkpoint expecting a different CQT width. Reported as a failure rather than
+quietly omitted.
+
+**A caveat on the cent figures.** Three runs of crepe-tiny over the same
+corpus, same alignment, same threshold gave medians of 5.58, 6.06 and 5.77
+cents. Pinning cuDNN's algorithm choice narrowed the spread without removing
+it — most likely because Kaggle hands out different GPU hardware between
+sessions, which changes floating-point results regardless. PESTO was
+bit-identical across all three. So read CREPE's precision as "about 5.5 to 6
+cents", not to three digits; nothing in the conclusion turns on it, since
+YIN's 2.45 is a factor of two away.
 
 ### 10.3 MT3
 
