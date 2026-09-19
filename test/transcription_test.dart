@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tuner/crispasr_backend.dart';
 import 'package:flutter_tuner/transcription.dart';
 import 'package:flutter_tuner/transcription_service.dart';
 
@@ -138,5 +139,38 @@ void main() {
     expect(kNoteHead, 'StatefulPartitionedCall:1');
     expect(kOnsetHead, 'StatefulPartitionedCall:2');
     expect(kNoteHead, isNot(kOnsetHead));
+  });
+
+  // --- the second runtime ------------------------------------------------
+  //
+  // CrispASR's ggml arm is measured in bench/REPORT.md §17 and implemented
+  // behind a conditional export, so what a test can assert here is the
+  // contract rather than the inference: that an unconfigured backend is
+  // honestly unavailable, and that the two runtimes describe the same
+  // instant.
+  group('CrispAsrBackend', () {
+    test('reports itself unavailable when nothing is configured', () {
+      expect(CrispAsrBackend.fromEnvironment(), isNull,
+          reason: 'no CRISPTUNER_BASIC_PITCH_GGUF in a test run');
+      expect(CrispAsrBackend(modelPath: '/nonexistent/basic-pitch.gguf')
+          .isAvailable, isFalse);
+    });
+
+    test('agrees with the ONNX backend on geometry', () {
+      final ggml = CrispAsrBackend();
+      final onnx = TranscriptionService();
+      expect(ggml.inputSampleRate, onnx.inputSampleRate);
+      expect(ggml.windowSamples, onnx.windowSamples);
+      expect(ggml.id, isNot(onnx.id));
+    });
+
+    test('shares the tail length that defines "now"', () {
+      // The ggml backend keeps events sounding in the last
+      // defaultTailFrames worth of audio; the ONNX decoder averages the same
+      // frames. If these drift apart, one backend shows notes earlier than
+      // the other for no reason a user could understand.
+      expect(const BasicPitchDecoder().tailFrames,
+          BasicPitchDecoder.defaultTailFrames);
+    });
   });
 }
