@@ -802,7 +802,57 @@ profile and one node is 38% of a run, so banding it across isolates is the
 obvious 2–3× — but the pool copies the whole activation per message today,
 which has to be fixed first.
 
-### 10.2 MT3
+### 10.2 The rest of the neural field, measured
+
+Basic Pitch answers a different question (polyphonic transcription). The
+models below answer *this* one: they are monophonic frame-level f0
+estimators, the job `lib/detectors.dart` does. All were run on Kaggle, on the
+same 60 solo files, scored by the same rules, with the frame alignment swept
+as §1 sweeps it — and with each model's confidence threshold swept too,
+because a single fixed threshold is not a comparison. SWIPE′ already showed
+how badly that can mislead (§4.5, where one scale mismatch rejected every
+frame); PESTO showed it again here, scoring 40% RPA at a 0.5 threshold and
+85% at 0.1.
+
+Each model at the threshold that puts its false-alarm rate closest to YIN's
+17%, which is the only way to compare them on equal terms:
+
+| estimator | RPA% | rep% | oct% | gross% | \|err\| p50 | >5c% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **app YIN** | 71.9 | 74.7 | 0.59 | 3.20 | **2.45** | **22.2** | 17.1 |
+| crepe-tiny @0.75 | 74.3 | 76.0 | **0.28** | **2.01** | 5.45 | 53.4 | 15.0 |
+| crepe-full @0.75 | **80.7** | 83.0 | 0.24 | 2.54 | 5.49 | 53.7 | 22.1 |
+| crepe-full-viterbi @0.75 | 69.1 | 70.8 | **0.07** | 2.31 | 8.08 | 67.5 | 15.9 |
+| crepe-tiny-viterbi @0.5 | 55.0 | 57.3 | 0.21 | 3.89 | 8.28 | 68.3 | 17.2 |
+| pesto @0.25 | 53.9 | 57.7 | 0.47 | 6.19 | 8.70 | 69.9 | 13.5 |
+| fcnf0++ @0.1 | 46.8 | 61.2 | 4.90 | 18.6 | 7.60 | 66.2 | 23.8 |
+
+**CREPE beats YIN at deciding which note, and loses at cents by a factor of
+two.** crepe-full finds the right note on 81% of reference frames against
+YIN's 72%, with a third of the octave errors — and its median cent error is
+5.5 against 2.45, with more than half its frames beyond the ±5 cents a tuner
+exists to resolve. That is the same shape of result as Basic Pitch, from an
+entirely different architecture, which is what makes it worth believing.
+
+Three things worth drawing out.
+
+**Viterbi decoding does exactly what it claims, and it is not enough.**
+CREPE's temporal decoder cuts octave errors to 0.07% — the lowest figure
+anywhere in this report, a quarter of YIN's — and costs precision: p50 goes
+from 5.49 to 8.08 cents. It is the same trade pYIN offered in §4.1 and it
+fails for the same reason: the octave errors it removes are ones the app's
+gate has already removed.
+
+**Bin resolution is not the binding constraint.** FCNF0++ quantises to
+**5-cent bins**, four times finer than CREPE's 20, and still lands at 7.60
+cents median — worse than CREPE. So the coarse output grid is not what stops
+these models measuring cents; what they learned to represent is.
+
+**Precision improves with confidence, and never far enough.** crepe-tiny's
+median error falls from 6.06 cents at a 0.1 threshold to 3.76 at 0.9 — but at
+0.9 it answers on 15% of frames. YIN gives 2.45 cents on 75% of them.
+
+### 10.3 MT3
 
 96 MB, 46.9M parameters, a T5 encoder–decoder emitting event tokens
 autoregressively over multi-second context. Nothing about that is compatible
@@ -811,7 +861,7 @@ many times over. As an offline "record a phrase, get a MIDI file" feature it
 is plausible; as anything on the audio path it is not, and it was not
 measured here because the architecture answers the question by itself.
 
-### 10.3 So what would it be for?
+### 10.4 So what would it be for?
 
 Not the needle. YIN keeps that: 2.45 cents against 27, at a six-hundredth of
 the cost per unit of audio.
