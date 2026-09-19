@@ -9,6 +9,8 @@ import 'audio_service.dart';
 import 'audio_service_stub.dart' as audio;
 import 'l10n/app_localizations.dart';
 import 'theme.dart';
+import 'transcription.dart';
+import 'transcription_service.dart';
 import 'tuner_engine.dart';
 
 void main() {
@@ -96,6 +98,24 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   /// at 44.1 kHz — 43 readings a second.
   static const int analysisHopSamples = 1024;
   int _samplesSinceAnalysis = 0;
+
+  // --- transcription mode ---------------------------------------------
+  //
+  // A separate path from the needle, and deliberately so: the model names
+  // several notes at once but cannot measure cents (bench/REPORT.md §10),
+  // so it answers "what am I playing", never "am I in tune".
+  final TranscriptionService _transcription = TranscriptionService();
+  final Halfband _decimator = Halfband();
+  final RollingWindow _transcriptionWindow =
+      RollingWindow(BasicPitchGeometry.windowSamples);
+  bool _transcriptionEnabled = false;
+  TranscriptionResult _transcriptionResult = TranscriptionResult.empty;
+  int _decimatedSinceInference = 0;
+
+  /// Run inference at most this often, in 22.05 kHz samples. A window costs
+  /// around half a second on a native core, so asking more often than twice a
+  /// second would simply queue — and the service drops rather than queues.
+  static const int _transcriptionHop = BasicPitchGeometry.sampleRate ~/ 2;
   final _engine = TunerEngine();
 
   TunerStatus _status = TunerStatus.idle;
@@ -306,6 +326,59 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
+  /// Decimate to the model's 22.05 kHz and run a window when one is due.
+  void _feedTranscription(Float64List samples) {
+    final decimated = _decimator.process(samples);
+    if (decimated.isEmpty) return;
+    _transcriptionWindow.add(decimated);
+    _decimatedSinceInference += decimated.length;
+
+    if (!_transcriptionWindow.isFull ||
+        _decimatedSinceInference < _transcriptionHop) {
+      return;
+    }
+    _decimatedSinceInference = 0;
+
+    // Null means an inference is already in flight; this window is dropped
+    // rather than queued, so a slow device shows a stale reading instead of
+    // falling further and further behind.
+    final pending = _transcription.transcribe(
+        _transcriptionWindow.lastN(BasicPitchGeometry.windowSamples));
+    pending?.then((result) {
+      if (mounted && _transcriptionEnabled) {
+        setState(() => _transcriptionResult = result);
+      }
+    }).catchError((Object error) {
+      if (mounted) {
+        setState(() {
+          _transcriptionEnabled = false;
+          _transcriptionResult = TranscriptionResult.empty;
+        });
+      }
+    });
+  }
+
+  Future<void> _setTranscriptionEnabled(bool enabled) async {
+    if (enabled == _transcriptionEnabled) return;
+    if (enabled) {
+      try {
+        await _transcription.start();
+      } catch (_) {
+        return; // unsupported platform; the toggle is hidden there anyway
+      }
+      _decimator.reset();
+      _transcriptionWindow.clear();
+      _decimatedSinceInference = 0;
+    } else {
+      await _transcription.stop();
+    }
+    if (!mounted) return;
+    setState(() {
+      _transcriptionEnabled = enabled;
+      _transcriptionResult = TranscriptionResult.empty;
+    });
+  }
+
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
     _silenceTimer = Timer(const Duration(seconds: 2), () {
@@ -337,6 +410,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     // 93 ms window, so its latency floor is the window, not the hop
     // (bench/REPORT.md §9). A 1024-sample hop gives 43 readings a second,
     // which is more than a needle can usefully show.
+    if (_transcriptionEnabled) _feedTranscription(samples);
+
     _samplesSinceAnalysis += samples.length;
     if (_samplesSinceAnalysis < analysisHopSamples) return;
     _samplesSinceAnalysis = 0;
@@ -667,6 +742,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         _buildStringIndicators(l10n, palette, note),
         const SizedBox(height: 12),
         _buildVisualizationRow(l10n, palette),
+        _buildTranscription(l10n, palette),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -831,6 +907,103 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           ),
         ),
       ],
+    );
+  }
+
+  /// The transcription panel: every note the model thinks is sounding.
+  ///
+  /// Hidden entirely where the mode cannot run rather than shown disabled,
+  /// except on the web where the reason is worth saying — a browser is the
+  /// one platform where a user might reasonably expect it and not get it.
+  Widget _buildTranscription(AppLocalizations l10n, TunerPalette palette) {
+    if (!TranscriptionService.isSupported) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Text(
+          '${l10n.transcriptionTitle}: ${l10n.transcriptionUnsupported}',
+          style: TextStyle(fontSize: 12, color: palette.textFaint),
+        ),
+      );
+    }
+
+    final notes = _transcriptionResult.notes;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l10n.transcriptionTitle,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: palette.textSecondary),
+                ),
+              ),
+              Semantics(
+                label: l10n.transcriptionEnable,
+                child: Switch(
+                  value: _transcriptionEnabled,
+                  onChanged: (value) => _setTranscriptionEnabled(value),
+                ),
+              ),
+            ],
+          ),
+          if (_transcriptionEnabled) ...[
+            // Said plainly and next to the notes, not buried in a help page:
+            // the model's pitch resolution is 33 cents (bench/REPORT.md §10),
+            // so these names are not something to tune against.
+            Text(
+              l10n.transcriptionNotForTuning,
+              style: TextStyle(fontSize: 11, color: palette.textFaint),
+            ),
+            const SizedBox(height: 8),
+            if (notes.isEmpty)
+              Text(
+                l10n.transcriptionListening,
+                style: TextStyle(fontSize: 12, color: palette.textFaint),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final note in notes)
+                    _buildTranscribedNote(note, palette),
+                ],
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTranscribedNote(TranscribedNote note, TunerPalette palette) {
+    // Opacity carries the model's confidence rather than a number: the
+    // useful distinction on a glance is "sure" against "maybe", and a
+    // percentage invites a precision the model does not have.
+    final confidence = note.strength.clamp(0.4, 1.0);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: palette.surfaceStrong,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: note.onset >= 0.5 ? palette.accent : palette.outline,
+          width: note.onset >= 0.5 ? 1.5 : 1,
+        ),
+      ),
+      child: Text(
+        note.name,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: palette.textPrimary.withValues(alpha: confidence),
+        ),
+      ),
     );
   }
 

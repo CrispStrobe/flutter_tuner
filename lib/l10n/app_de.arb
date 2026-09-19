@@ -87,5 +87,10 @@
   "detectorLabel": "Tonhöhenerkennung",
   "detectorYin": "YIN (empfohlen)",
   "detectorMpm": "MPM (empfindlicher)",
-  "detectorSwipe": "SWIPE′ (experimentell)"
+  "detectorSwipe": "SWIPE′ (experimentell)",
+  "transcriptionTitle": "Akkorderkennung",
+  "transcriptionEnable": "Akkorde erkennen",
+  "transcriptionListening": "Warte auf Töne …",
+  "transcriptionUnsupported": "Im Browser nicht verfügbar",
+  "transcriptionNotForTuning": "Nur Tonnamen — zum Stimmen die Anzeige oben verwenden"
 }
