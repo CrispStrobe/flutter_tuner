@@ -26,7 +26,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:fftea/fftea.dart';
+import 'fft_real.dart';
 
 /// One measured partial.
 class Partial {
@@ -158,13 +158,23 @@ HarmonicProfile analyseHarmonics(
     window[i] = 0.5 - 0.5 * math.cos(2 * math.pi * i / subSize);
   }
 
-  final fft = FFT(subSize);
-  Float64x2List spectrumAt(int start) {
+  // `fft_real.dart`, not `package:fftea`, and that is the whole reason this
+  // module sat unused for so long: fftea returns a `Float64x2List`, which
+  // dart2js cannot give SIMD lanes — 15.56 ms per 8192-point transform
+  // against 0.38 ms native, the measurement that `fft_real.dart` was written
+  // to answer. Analysing harmonics through fftea would have re-created in
+  // the browser exactly the stall that work removed.
+  final fft = RealSpectrum(subSize);
+  Float64List spectrumAt(int start) {
     final frame = Float64List(subSize);
     for (int i = 0; i < subSize; i++) {
       frame[i] = buffer[start + i] * window[i];
     }
-    return fft.realFft(frame);
+    fft.transform(frame);
+    // Copied, not aliased: `complex` is a reusable buffer, so the second
+    // call would otherwise overwrite the first frame's phases — and the two
+    // frames are the entire point.
+    return Float64List.fromList(fft.complex);
   }
 
   final s1 = spectrumAt(start1);
@@ -172,8 +182,8 @@ HarmonicProfile analyseHarmonics(
   final bins = subSize ~/ 2;
   final binWidth = sampleRate / subSize;
 
-  double magnitudeAt(Float64x2List s, int k) =>
-      math.sqrt(s[k].x * s[k].x + s[k].y * s[k].y);
+  double magnitudeAt(Float64List s, int k) =>
+      math.sqrt(s[k * 2] * s[k * 2] + s[k * 2 + 1] * s[k * 2 + 1]);
 
   /// The peak nearest [target], with its phase-derived frequency, or null.
   ({double frequency, double magnitude})? peakNear(double target) {
@@ -199,8 +209,8 @@ HarmonicProfile analyseHarmonics(
       return null;
     }
 
-    final phase1 = math.atan2(s1[peak].y, s1[peak].x);
-    final phase2 = math.atan2(s2[peak].y, s2[peak].x);
+    final phase1 = math.atan2(s1[peak * 2 + 1], s1[peak * 2]);
+    final phase2 = math.atan2(s2[peak * 2 + 1], s2[peak * 2]);
     final omega = 2 * math.pi * peak / subSize;
     double residual = (phase2 - phase1) - omega * hop;
     residual -= 2 * math.pi * (residual / (2 * math.pi)).round();
