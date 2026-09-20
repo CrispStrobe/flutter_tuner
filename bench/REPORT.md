@@ -1715,12 +1715,10 @@ worth stating because each was a decision rather than an obvious step:
   reachable from a web entry point fails the build. The web answer is 1,
   which is also true — the mode does not run there.
 
-One loose end, recorded rather than smoothed over: `parallelize` *without*
-`poolConv` measured 6–17% faster than `run()` on all four machines, and it
-should have measured nothing at all, because the graph has zero `MatMul` for
-it to partition. It may be that `runAsync` differs from `run` in some way
-beyond pooling. The effect is small, consistent, and **unexplained**, so
-nothing here depends on it.
+One loose end was recorded here rather than smoothed over: `parallelize`
+*without* `poolConv` measured 6–17% faster than `run()` on all four
+machines, and should have measured nothing, because the graph has zero
+`MatMul` for it to partition. **§23 closes it — there was no effect.**
 
 ## 20. Optimising the native path
 
@@ -2028,6 +2026,82 @@ The backoff is bounded on purpose, and a test pins the bound: the only way
 to discover that something changed is to look, so two seconds is the longest
 a newly played note can wait. Unbounded backoff would trade a real
 responsiveness failure for a saving nobody asked for.
+
+## 23. Closing the loose end, and a default it changed
+
+§19 published a number it could not explain, and flagged it as unexplained
+so nothing would quietly depend on it. This is what it was.
+
+### 23.1 There was no effect
+
+The hypothesis was that `runAsync` differs from `run` in more than pooling.
+A second CI run added the arm that separates them — the same async node loop
+with **no workers spawned at all**:
+
+| median of 3 | `run()` | `runAsync`, no pool | `parallelize(2)` |
+| --- | --- | --- | --- |
+| x86-64 Linux | 229 ms | 225 | 226 |
+| x86-64 Windows | 212 ms | 218 | 208 |
+| Apple Silicon | 266 ms | 218 | 224 |
+
+On Linux all three are within 2% of each other. On Windows the supposedly
+faster path is **slower** than the baseline. A real mechanism does not change
+sign between platforms.
+
+What it actually was: **arm ordering across processes.** `base` ran first in
+every loop, so it alone paid the cold costs of the first process in a
+sequence — page cache for the 225 KB model and the Dart snapshot, and runner
+warm-up. The tell was visible in the spread and went unread: on Apple
+Silicon the `base` arm ranges 239–283 ms while every later arm sits inside a
+few percent. Running each arm in its own process removed the JIT artefact of
+§19.1 and introduced a different one in the same place.
+
+The harness now runs a throwaway process first and loops **reps outer, arms
+inner**, so every arm takes every ordinal position. Both defences exist
+because the first fix taught the wrong lesson: isolation was necessary and
+was not sufficient.
+
+**What survives unchanged is the finding that mattered.** `poolConv` is
+163 ms against 229 on Linux — 1.40× — which is twenty times the ordering
+noise and reproduces across two runs, three platforms and both worker
+counts.
+
+### 23.2 The worker count was never supported, and is now two
+
+Chasing the artefact turned up something the first run had hidden. Across
+both runs:
+
+| | 2 workers | 4 workers |
+| --- | --- | --- |
+| Apple Silicon | 174 / **164** | **159** / 175 |
+| x86-64 Linux | 148 / **163** | **143** / 179 |
+| x86-64 Windows | 164 / **167** | **153** / **150** |
+
+Four was faster on all three machines in the first run and slower on two of
+three in the second: **six comparisons, three each way.** The worker count is
+inside the noise; only the pool is outside it.
+
+§19 shipped `poolWorkersFor` capping at four on the strength of the first run
+alone — "four wins or ties on all four machines, so the cap is four" — which
+was true of the data then in hand and is not true of the data now. It caps at
+**two**, which reaches the same place with half the isolates and half the
+weight replication.
+
+One genuine use for the core count survives, and it is not about speed: on a
+single-core machine a worker cannot run in parallel with the isolate waiting
+for it, so it pays the per-conv message copy for nothing. `poolWorkersFor(1)`
+returns **0** — do not pool — and a test pins it.
+
+### 23.3 What this cost and what it bought
+
+An unexplained 6–17% would have been quoted as a property of `runAsync` by
+the next person to read §19. It was worth one CI run to find that it was a
+property of the loop that measured it.
+
+The habit that produced both artefacts is the same one: changing a harness
+to fix a known bias, and not asking what bias the change introduced. The
+answer both times was in data already collected — the spread column said
+`base` was cold long before anyone looked at it.
 
 ---
 

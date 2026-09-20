@@ -253,21 +253,24 @@ void main() {
       // A single worker pays the per-conv message copy and gains no
       // parallelism, so it is strictly worse than not pooling at all.
       for (int cores = 1; cores <= 64; cores++) {
-        expect(poolWorkersFor(cores), greaterThanOrEqualTo(2),
-            reason: 'cores=$cores');
+        expect(poolWorkersFor(cores), isNot(1), reason: 'cores=$cores');
       }
     });
 
-    test('caps at four, where the CI measurements stopped improving', () {
-      expect(poolWorkersFor(4), 4);
-      expect(poolWorkersFor(8), 4);
-      expect(poolWorkersFor(64), 4);
+    test('two, because six CI comparisons split three-three on four', () {
+      // §23: four was faster on all three machines in the first run and
+      // slower on two of three in the second. Two reaches the same place
+      // with half the isolates and half the weight replication.
+      expect(poolWorkersFor(2), 2);
+      expect(poolWorkersFor(4), 2);
+      expect(poolWorkersFor(64), 2);
     });
 
-    test('a small machine still pools', () {
-      expect(poolWorkersFor(1), 2);
-      expect(poolWorkersFor(2), 2);
-      expect(poolWorkersFor(3), 3);
+    test('a single core does not pool at all', () {
+      // The one case where core count genuinely changes the answer: a
+      // worker cannot run in parallel with the isolate waiting for it.
+      expect(poolWorkersFor(1), 0);
+      expect(poolWorkersFor(0), 0);
     });
   });
 
