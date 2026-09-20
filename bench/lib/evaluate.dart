@@ -75,6 +75,11 @@ class Variant {
   /// Non-YIN detectors.
   final bool isMpm;
   final bool isPyin;
+
+  /// Decoding lag in frames for a pYIN variant: frame t is decided once
+  /// frame t+lag has been seen, which is what a streaming decoder could do.
+  /// Null means the offline decode that §4.1 measured.
+  final int? pyinLag;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -102,6 +107,7 @@ class Variant {
     this.refine = Refinement2.none,
     this.isMpm = false,
     this.isPyin = false,
+    this.pyinLag,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -168,6 +174,15 @@ const List<Variant> defaultVariants = [
   Variant('app+median-jumpreset',
       probabilityGate: true, medianPolicy: MedianPolicy.resetOnGapOrJump),
   Variant('pyin', isPyin: true),
+  // §4.1 rejected pYIN partly because "Viterbi cannot decide frame t until
+  // it has seen the end of the file". True offline; these ask what a bounded
+  // lookahead costs. At a 1024-sample hop a frame is 23.2 ms.
+  Variant('pyin-lag0', isPyin: true, pyinLag: 0),
+  Variant('pyin-lag1', isPyin: true, pyinLag: 1),
+  Variant('pyin-lag2', isPyin: true, pyinLag: 2),
+  Variant('pyin-lag4', isPyin: true, pyinLag: 4),
+  Variant('pyin-lag8', isPyin: true, pyinLag: 8),
+  Variant('pyin-lag16', isPyin: true, pyinLag: 16),
 
   // --- precision refinements on top ---
   Variant('app+if',
@@ -337,7 +352,8 @@ FileResult evaluateFile({
   // pYIN decodes the whole file at once.
   for (final v in variants) {
     if (!v.isPyin) continue;
-    final path = pyin.snapToCandidates(pyinFrames, pyin.decode(pyinFrames));
+    final path = pyin.snapToCandidates(
+        pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     final out = detected[v.name]!;
     for (int i = 0; i < out.length && i < path.length; i++) {
       out[i] = path[i];
