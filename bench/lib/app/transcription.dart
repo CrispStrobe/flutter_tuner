@@ -413,3 +413,64 @@ class LiveNoteTracker {
     return found;
   }
 }
+
+/// When to run the model, as opposed to how.
+///
+/// §19 made a window cost 159 ms on Apple Silicon, which at two inferences a
+/// second still holds a core busy a third of the time on a device that is
+/// not plugged in. Nothing above makes that cheaper; this decides how often
+/// it is worth paying at all.
+///
+/// Kept here, out of the widget, because it is a rule with edge cases worth
+/// testing and none of it needs Flutter.
+class TranscriptionPacing {
+  /// Samples between inferences while the answer is changing.
+  final int activeHop;
+
+  /// Samples between inferences once it has stopped changing.
+  ///
+  /// Bounded rather than open-ended: the only way to learn that something
+  /// changed is to look, so this is the longest a newly played note should
+  /// ever wait before appearing.
+  final int idleHop;
+
+  /// Repeats of the same answer before backing off.
+  final int repeatsBeforeIdle;
+
+  /// RMS below which a window is silence and not worth transcribing.
+  ///
+  /// Deliberately well under a quietly played string: this is for a
+  /// microphone in a still room, not for a soft note.
+  final double silenceRms;
+
+  const TranscriptionPacing({
+    this.activeHop = BasicPitchGeometry.sampleRate ~/ 2,
+    this.idleHop = BasicPitchGeometry.sampleRate * 2,
+    this.repeatsBeforeIdle = 3,
+    this.silenceRms = 0.002,
+  });
+
+  int hopFor(int unchangedCount) =>
+      unchangedCount >= repeatsBeforeIdle ? idleHop : activeHop;
+
+  bool isSilent(List<double> window) {
+    if (window.isEmpty) return true;
+    double sum = 0;
+    for (int i = 0; i < window.length; i++) {
+      sum += window[i] * window[i];
+    }
+    return math.sqrt(sum / window.length) < silenceRms;
+  }
+
+  /// Whether two readings name the same notes.
+  ///
+  /// Strengths move every frame and are deliberately excluded: the question
+  /// is whether the *answer* changed, not whether the activations did.
+  static bool sameNotes(List<TranscribedNote> a, List<TranscribedNote> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].midi != b[i].midi) return false;
+    }
+    return true;
+  }
+}

@@ -1955,6 +1955,80 @@ Not nothing, and worth separating from the negative result:
   no guard, because a user cannot tell which kind of answer they are looking
   at.
 
+## 22. The two rules that did not port, and the one that did
+
+§18 predicted the remaining headroom was in decoding rather than kernels, and
+named two rules `note_creation.py` has that this repository never ported.
+Both are now implemented and measured. Neither ships.
+
+### 22.1 Minimum note length and onset gating: no
+
+`minimum_note_length_ms = 127.7` (about 11 frames) and `infer_onsets`. The
+first had to change shape to port at all: Spotify's is a post-filter over a
+segmented signal, and a live display cannot see a note end before deciding
+whether to show its beginning. `minNoteFrames` is the causal equivalent — a
+debounce on the start, costing exactly that much latency.
+
+All 180 chordal files, at the shipped 0.5/0.25 thresholds:
+
+| min length | onset gate | precision | recall | F1 |
+| --- | --- | --- | --- | --- |
+| **0 frames** | **none** | **87.8%** | **77.8%** | **82.5%** |
+| 2 frames | none | 88.7% | 76.7% | 82.2% |
+| 4 frames | none | 89.5% | 73.0% | 80.4% |
+| 6 frames | none | 90.1% | 68.7% | 78.0% |
+| 11 frames | none | 91.0% | 58.0% | 70.9% |
+| 0 frames | ≥ 0.5 | 89.7% | 70.4% | 78.9% |
+| 0 frames | ≥ 0.3 | 88.9% | 74.9% | 81.3% |
+| 0 frames | ≥ 0.2 | 88.3% | 76.7% | 82.1% |
+| 2 frames | ≥ 0.3 | 89.6% | 73.9% | 81.0% |
+| 4 frames | ≥ 0.3 | 90.2% | 70.9% | 79.4% |
+
+Every row is precision-up, recall-down, F1-down. **Nothing dominates**, which
+is the difference from §18 and the reason nothing ships: there the chosen
+setting was better on both axes, so adopting it cost nothing that had been
+working. Here each option is a trade, and §18's tie-break — a false note is
+worse than a missed one — was a rule for choosing between a dominating and a
+maximising option, not a licence to spend recall freely.
+
+The 2-frame row is the closest call: 0.9 points of precision for 1.1 of
+recall and 23 ms of added latency. Available, not taken.
+
+The shape has a structural explanation rather than being a tuning accident.
+Spotify's rules run offline over a segmented signal, so they can delete a
+short note *after* watching it end. A causal debounce cannot do that; it
+delays every note's appearance equally, and pays for each blip it suppresses
+with frames lost at the start of a genuine note — where the ground truth
+already says the note is sounding. An offline post-filter and a live
+debounce are not the same rule wearing different clothes.
+
+Both default to off — `minNoteFrames: 0`, `requireOnset: false` — which is
+§18's behaviour exactly. The 8-file pilot predicted this shape and the
+180-file run reproduced §18's baseline row to the decimal, which is the
+cross-check that the harness is measuring what it claims.
+
+### 22.2 Pacing: yes
+
+The rule that does ship attacks a different quantity. §19 made a window cost
+159 ms on Apple Silicon, but at two inferences a second the mode still holds
+a third of a core continuously on a device running off a battery. Nothing in
+§19 or §20 makes that cheaper — `TranscriptionPacing` decides how often it is
+worth paying at all:
+
+* **Silence is skipped entirely.** An RMS check over the window, costing
+  microseconds, against half a second of inference that has nothing to find.
+  The threshold sits well below a quietly played string, and a test asserts
+  a −46 dBFS note is *not* treated as silence — a silence gate that swallows
+  soft notes is a worse bug than the cost it saves.
+* **A repeated answer backs off**, from twice a second to once every two
+  seconds, resetting the instant the notes change. A player holding a chord
+  does not need the model re-run four times to be told the same thing.
+
+The backoff is bounded on purpose, and a test pins the bound: the only way
+to discover that something changed is to look, so two seconds is the longest
+a newly played note can wait. Unbounded backoff would trade a real
+responsiveness failure for a saving nobody asked for.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:

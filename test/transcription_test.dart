@@ -271,6 +271,50 @@ void main() {
     });
   });
 
+  group('TranscriptionPacing', () {
+    const pacing = TranscriptionPacing();
+
+    test('backs off only after the answer repeats', () {
+      expect(pacing.hopFor(0), pacing.activeHop);
+      expect(pacing.hopFor(2), pacing.activeHop);
+      expect(pacing.hopFor(3), pacing.idleHop);
+      expect(pacing.hopFor(99), pacing.idleHop);
+    });
+
+    test('the backoff is bounded, because looking is the only way to know', () {
+      // A newly played note waits at most idleHop before anything looks for
+      // it. Two seconds is a deliberate ceiling, not an accident of tuning.
+      expect(pacing.idleHop,
+          lessThanOrEqualTo(BasicPitchGeometry.sampleRate * 2));
+      expect(pacing.idleHop, greaterThan(pacing.activeHop));
+    });
+
+    test('silence is skipped and a quiet note is not', () {
+      final silence = List<double>.filled(4096, 0.0);
+      expect(pacing.isSilent(silence), isTrue);
+
+      // -46 dBFS: quiet, but a real string.
+      final quiet = List<double>.generate(
+          4096, (i) => 0.005 * math.sin(2 * math.pi * 196 * i / 22050));
+      expect(pacing.isSilent(quiet), isFalse,
+          reason: 'the silence gate must not swallow softly played notes');
+    });
+
+    test('an empty window counts as silence rather than throwing', () {
+      expect(pacing.isSilent(const <double>[]), isTrue);
+    });
+
+    test('sameNotes compares the answer, not the activations', () {
+      const a = [TranscribedNote(60, 0.9, 0.1), TranscribedNote(64, 0.8, 0.0)];
+      const b = [TranscribedNote(60, 0.5, 0.9), TranscribedNote(64, 0.4, 0.2)];
+      const c = [TranscribedNote(60, 0.9, 0.1), TranscribedNote(67, 0.8, 0.0)];
+      expect(TranscriptionPacing.sameNotes(a, b), isTrue,
+          reason: 'strengths move every frame; the notes did not change');
+      expect(TranscriptionPacing.sameNotes(a, c), isFalse);
+      expect(TranscriptionPacing.sameNotes(a, const []), isFalse);
+    });
+  });
+
   // --- the second runtime ------------------------------------------------
   //
   // CrispASR's ggml arm is measured in bench/REPORT.md §17 and implemented
