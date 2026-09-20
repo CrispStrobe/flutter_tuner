@@ -206,6 +206,29 @@ class BasicPitchDecoder {
   /// Onset activation above which a note is called newly struck.
   final double onsetThreshold;
 
+  /// Consecutive frames a note must hold before it is reported at all.
+  ///
+  /// Spotify's own decoder drops notes shorter than
+  /// `minimum_note_length_ms = 127.7` — about 11 frames — but it does so
+  /// *after* segmenting the whole signal, which a live display cannot do.
+  /// This is the causal equivalent: a debounce on the start rather than a
+  /// filter on the finished note, trading that many frames of latency
+  /// (11 frames is 128 ms) for not showing blips.
+  ///
+  /// 0 disables it, which is how this shipped through §18.
+  final int minNoteFrames;
+
+  /// Require the onset head to fire before a note may *start*.
+  ///
+  /// The model emits an onset posteriogram, and this app computed it on
+  /// every window while using it only to mark notes as newly struck in the
+  /// display. Spotify's decoder gates note creation on it.
+  ///
+  /// The risk is specific and worth stating: a note already ringing when a
+  /// window opens has no onset inside that window, so this can only be safe
+  /// while a stream's carry set keeps such notes alive across the boundary.
+  final bool requireOnset;
+
   /// How many frames at the end of the window to read. The model is
   /// effectively causal (§10.1), so the newest frames are as good as any —
   /// averaging a handful of them steadies the display without adding lag
@@ -223,6 +246,8 @@ class BasicPitchDecoder {
     double? sustainThreshold = 0.25,
     this.onsetThreshold = 0.5,
     this.tailFrames = defaultTailFrames,
+    this.minNoteFrames = 0,
+    this.requireOnset = false,
   }) : sustainThreshold = sustainThreshold ?? noteThreshold;
 
   /// The thresholds with no hysteresis, as this decoder shipped before
@@ -242,17 +267,44 @@ class BasicPitchDecoder {
   /// streamed sequence of windows decodes as one signal rather than as
   /// independent fragments. Pass null at the start.
   List<Set<int>> decodeFrames(Float64List note,
-      {int frames = BasicPitchGeometry.frames, Set<int>? carry}) {
+      {int frames = BasicPitchGeometry.frames,
+      Set<int>? carry,
+      Float64List? onset}) {
     const bins = BasicPitchGeometry.noteBins;
     final out = <Set<int>>[];
     final sounding = <int>{...?carry};
+    // For each bin not yet sounding: how many consecutive frames it has been
+    // above [noteThreshold], and whether its onset head fired during that
+    // run. Both reset the moment the run breaks.
+    final held = List<int>.filled(bins, 0);
+    final sawOnset = List<bool>.filled(bins, false);
+
     for (int f = 0; f < frames; f++) {
       for (int b = 0; b < bins; b++) {
         final midi = BasicPitchGeometry.lowestMidi + b;
         final a = note[f * bins + b];
         if (sounding.contains(midi)) {
-          if (a < sustainThreshold) sounding.remove(midi);
-        } else if (a >= noteThreshold) {
+          if (a < sustainThreshold) {
+            sounding.remove(midi);
+            held[b] = 0;
+            sawOnset[b] = false;
+          }
+          continue;
+        }
+        if (a < noteThreshold) {
+          held[b] = 0;
+          sawOnset[b] = false;
+          continue;
+        }
+        held[b]++;
+        if (onset != null && onset[f * bins + b] >= onsetThreshold) {
+          sawOnset[b] = true;
+        }
+        // A rule that cannot be evaluated must not become a rule that always
+        // fails: with no onset head supplied, the gate is satisfied rather
+        // than silently suppressing every note.
+        final onsetOk = !requireOnset || onset == null || sawOnset[b];
+        if (held[b] >= minNoteFrames && onsetOk) {
           sounding.add(midi);
         }
       }
@@ -324,7 +376,10 @@ class LiveNoteTracker {
   /// would flicker on and off between windows.
   List<TranscribedNote> track(Float64List note, Float64List onset,
       {int frames = BasicPitchGeometry.frames}) {
-    final seq = decoder.decodeFrames(note, frames: frames, carry: _carry);
+    // The onset head goes in as well as being read for display: with
+    // `requireOnset` it decides whether a note may start at all.
+    final seq = decoder.decodeFrames(note,
+        frames: frames, carry: _carry, onset: onset);
     if (seq.isEmpty) return const [];
     _carry = seq.last;
 
