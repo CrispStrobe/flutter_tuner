@@ -117,9 +117,29 @@ class PyinTracker {
     return PyinFrame(freqs, probs);
   }
 
+  /// Viterbi with a bounded decoding lag, in frames.
+  ///
+  /// REPORT.md §4.1 rejected pYIN for a tuner partly on the grounds that
+  /// "Viterbi cannot decide frame t until it has seen the end of the file.
+  /// An online version needs a fixed decoding lag, which is more latency on
+  /// top of the ~90 ms the window already costs." That was an assertion with
+  /// no number behind it, and this is the number: frame `t` is emitted once
+  /// frame `t + lag` has been observed, which is exactly what a streaming
+  /// implementation could do.
+  ///
+  /// `lag = 0` is greedy — take the best state at each frame, no lookahead
+  /// at all. A lag at or beyond the frame count is the offline [decode].
+  ///
+  /// Shares the forward pass with [decode]; only the backtrace changes, so
+  /// the cost of a bounded lag is the same arithmetic and less memory.
+  List<double> decodeWithLag(List<PyinFrame> frames, int lag) =>
+      decode(frames, lag: lag);
+
   /// Viterbi over the whole file. Returns one frequency per frame, or 0 where
   /// the best path is unvoiced.
-  List<double> decode(List<PyinFrame> frames) {
+  ///
+  /// [lag] bounds the lookahead: see [decodeWithLag]. Null decodes offline.
+  List<double> decode(List<PyinFrame> frames, {int? lag}) {
     if (frames.isEmpty) return const [];
     final nStates = bins * 2; // [0, bins) voiced, [bins, 2*bins) unvoiced
     final neighbourhood = (3 * transitionCents / binCents).ceil();
@@ -135,6 +155,11 @@ class PyinTracker {
 
     var previous = List<double>.filled(nStates, double.negativeInfinity);
     final backpointers = <List<int>>[];
+    // Argmax of the forward scores at each frame. Only a bounded-lag decode
+    // reads it, and it is the whole reason a streaming decoder can answer at
+    // all: it is the best state given everything seen *so far*.
+    final bestAt = List<int>.filled(frames.length, 0);
+    bool seededBest = false;
 
     List<double> emission(PyinFrame f) {
       final e = List<double>.filled(nStates, 0.0);
@@ -160,6 +185,16 @@ class PyinTracker {
       previous[i] = first[i] - math.log(nStates);
     }
 
+    // Frame 0 has no predecessor, so its best state is the argmax of the
+    // initial row rather than of a transition.
+    if (!seededBest) {
+      int b0 = 0;
+      for (int i = 1; i < nStates; i++) {
+        if (previous[i] > previous[b0]) b0 = i;
+      }
+      bestAt[0] = b0;
+      seededBest = true;
+    }
     for (int t = 1; t < frames.length; t++) {
       final e = emission(frames[t]);
       final current = List<double>.filled(nStates, double.negativeInfinity);
@@ -211,6 +246,11 @@ class PyinTracker {
       }
       backpointers.add(back);
       previous = current;
+      int b0 = 0;
+      for (int i = 1; i < nStates; i++) {
+        if (current[i] > current[b0]) b0 = i;
+      }
+      bestAt[t] = b0;
     }
 
     int best = 0;
@@ -219,8 +259,25 @@ class PyinTracker {
     }
     final path = List<int>.filled(frames.length, 0);
     path[frames.length - 1] = best;
-    for (int t = frames.length - 1; t > 0; t--) {
-      path[t - 1] = backpointers[t - 1][path[t]];
+    if (lag == null) {
+      for (int t = frames.length - 1; t > 0; t--) {
+        path[t - 1] = backpointers[t - 1][path[t]];
+      }
+    } else {
+      // Bounded lag: frame t is decided by backtracing from the best state
+      // at frame t+lag, which is all a streaming decoder could have seen.
+      // `bestAt` is the argmax of the forward scores already stored per
+      // frame, so this costs one extra backtrace per frame and no extra
+      // forward work.
+      for (int t = 0; t < frames.length; t++) {
+        final anchor =
+            math.min(frames.length - 1, t + (lag < 0 ? 0 : lag));
+        var state = bestAt[anchor];
+        for (int u = anchor; u > t; u--) {
+          state = backpointers[u - 1][state];
+        }
+        path[t] = state;
+      }
     }
 
     return [

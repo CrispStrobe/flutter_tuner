@@ -75,6 +75,11 @@ class Variant {
   /// Non-YIN detectors.
   final bool isMpm;
   final bool isPyin;
+
+  /// Decoding lag in frames for a pYIN variant: frame t is decided once
+  /// frame t+lag has been seen, which is what a streaming decoder could do.
+  /// Null means the offline decode that §4.1 measured.
+  final int? pyinLag;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -102,6 +107,7 @@ class Variant {
     this.refine = Refinement2.none,
     this.isMpm = false,
     this.isPyin = false,
+    this.pyinLag,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -168,6 +174,22 @@ const List<Variant> defaultVariants = [
   Variant('app+median-jumpreset',
       probabilityGate: true, medianPolicy: MedianPolicy.resetOnGapOrJump),
   Variant('pyin', isPyin: true),
+  // §4.1 rejected pYIN partly because "Viterbi cannot decide frame t until
+  // it has seen the end of the file". True offline; these ask what a bounded
+  // lookahead costs. At a 1024-sample hop a frame is 23.2 ms.
+  Variant('pyin-lag0', isPyin: true, pyinLag: 0),
+  Variant('pyin-lag1', isPyin: true, pyinLag: 1),
+  Variant('pyin-lag2', isPyin: true, pyinLag: 2),
+  Variant('pyin-lag4', isPyin: true, pyinLag: 4),
+  Variant('pyin-lag8', isPyin: true, pyinLag: 8),
+  Variant('pyin-lag16', isPyin: true, pyinLag: 16),
+  // §24's open question: pYIN's weakness against the shipped pipeline is
+  // that it answers far more often and is wrong more often when it does.
+  // The app's own gate-and-median is what fixes exactly that. These put the
+  // two together — the smoother is causal (a 5-frame median), so applying it
+  // to a bounded-lag path is faithful rather than a cheat.
+  Variant('pyin-lag0+smoother', isPyin: true, pyinLag: 0, coreSmoother: true),
+  Variant('pyin-lag2+smoother', isPyin: true, pyinLag: 2, coreSmoother: true),
 
   // --- precision refinements on top ---
   Variant('app+if',
@@ -337,10 +359,26 @@ FileResult evaluateFile({
   // pYIN decodes the whole file at once.
   for (final v in variants) {
     if (!v.isPyin) continue;
-    final path = pyin.snapToCandidates(pyinFrames, pyin.decode(pyinFrames));
+    final path = pyin.snapToCandidates(
+        pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     final out = detected[v.name]!;
+    final smoother = smoothers[v.name];
     for (int i = 0; i < out.length && i < path.length; i++) {
-      out[i] = path[i];
+      if (smoother == null) {
+        out[i] = path[i];
+        continue;
+      }
+      // pYIN reports a frequency or nothing; the smoother wants the
+      // detector's own triple. A decoded frame IS the tracker's considered
+      // answer, so it is handed over as pitched with full confidence — the
+      // gate then contributes only its median and its voiced/unvoiced
+      // discipline, which is the part being tested.
+      out[i] = smoother.accept(
+            pitched: path[i] > 0,
+            probability: path[i] > 0 ? 1.0 : 0.0,
+            pitch: path[i],
+          ) ??
+          0;
     }
   }
 

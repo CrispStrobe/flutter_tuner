@@ -44,25 +44,27 @@ const String kContourHead = 'StatefulPartitionedCall:0';
 ///
 /// `onnx_runtime_dart` ships a pool — `parallelize(poolConv:)` fans each
 /// convolution out across isolates by output-row band — and this app did not
-/// use it. Measured on CI, one arm per process, median of three
-/// (`bench/REPORT.md` §19):
+/// use it. Two CI runs, one arm per process, median of three
+/// (`bench/REPORT.md` §19, §23):
 ///
-/// | | single isolate | 2 workers | 4 workers |
+/// | | single | 2 workers | 4 workers |
 /// | --- | --- | --- | --- |
-/// | Apple Silicon | 353 ms | 174 | **159** |
-/// | x86-64 Linux | 208 ms | 148 | **143** |
-/// | x86-64 Windows | 222 ms | 164 | **153** |
+/// | Apple Silicon | 353 / 266 ms | **174 / 164** | 159 / 175 |
+/// | x86-64 Linux | 208 / 229 | **148 / 163** | 143 / 179 |
+/// | x86-64 Windows | 222 / 212 | **164 / 167** | 153 / 150 |
 ///
-/// Four wins or ties everywhere, so the cap is four; two captures most of it
-/// on a smaller machine. The floor is two because one worker is strictly
-/// worse than not pooling — it pays the message copy and gains nothing.
+/// **The pool is the win; the worker count is not.** Four was faster on all
+/// three machines in the first run and slower on two of three in the second
+/// — six comparisons, three each way. So two is chosen for costing less to
+/// reach the same place: half the isolates and half the weight replication.
+/// The first run alone would have argued for four, which is why this says
+/// two.
 ///
-/// The package's own doc comment predicts this will *lose* for CNNs, because
-/// each conv message carries the whole input activation to every worker.
-/// That is right about most CNNs and wrong about this one: at 172 × 264 × 8
-/// the banded compute outweighs the copy. Weight replication costs nothing
-/// worth counting either — the model is 35.7k parameters, about 143 KB.
-int poolWorkersFor(int cores) => cores < 3 ? 2 : (cores > 4 ? 4 : cores);
+/// Zero means do not pool at all. On a single-core machine a worker cannot
+/// run in parallel with the isolate that is waiting for it, so it pays the
+/// per-conv message copy for nothing — strictly worse than not pooling, and
+/// the one case where the core count genuinely changes the answer.
+int poolWorkersFor(int cores) => cores <= 1 ? 0 : 2;
 
 class TranscriptionService implements TranscriptionBackend {
   @override
@@ -204,8 +206,10 @@ void _workerMain(_WorkerStart start) {
         // — the single-isolate path is the same answer, only slower.
         pooled = true;
         try {
-          await m.parallelize(
-              workers: poolWorkersFor(cpuCount), poolConv: true);
+          final workers = poolWorkersFor(cpuCount);
+          if (workers > 0) {
+            await m.parallelize(workers: workers, poolConv: true);
+          }
         } catch (_) {
           // Keep going unpooled rather than failing the mode.
         }

@@ -75,13 +75,19 @@ jobs:
       - name: Isolate pool A/B
         working-directory: bench
         run: |
-          # "runAsync no pool" isolates §19's unexplained 6-17%: same async
-          # node loop, zero workers spawned. If it matches base, the pool
-          # spawn is responsible; if it matches parallelize(2), the async
-          # loop is, and the pool never mattered.
-          for arm in "base" "runAsync no pool" "parallelize(2)" \
-                     "parallelize(2, poolConv)" "parallelize(4, poolConv)"; do
-            for rep in 1 2 3; do
+          # One arm per process: a shared process lets Dart's JIT warm later
+          # arms and overstates the win (REPORT.md §19.1).
+          #
+          # Two further defences against the artefact §23 traced. A throwaway
+          # run first, because the FIRST process of a sequence pays cold page
+          # cache for the model and the Dart snapshot, and whichever arm
+          # holds that slot looks slow — which is exactly how an unexplained
+          # "6-17%" got published. And reps OUTER, arms INNER, so every arm
+          # takes every ordinal position rather than one arm always leading.
+          dart run bin/dart_parallel.dart --only "base" --reps 2 > /dev/null
+          for rep in 1 2 3; do
+            for arm in "base" "runAsync no pool" "parallelize(2)" \
+                       "parallelize(2, poolConv)" "parallelize(4, poolConv)"; do
               dart run bin/dart_parallel.dart --only "$arm" --reps 5
             done
           done | tee pool.txt
