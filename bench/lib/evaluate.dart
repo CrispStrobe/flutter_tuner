@@ -183,6 +183,13 @@ const List<Variant> defaultVariants = [
   Variant('pyin-lag4', isPyin: true, pyinLag: 4),
   Variant('pyin-lag8', isPyin: true, pyinLag: 8),
   Variant('pyin-lag16', isPyin: true, pyinLag: 16),
+  // §24's open question: pYIN's weakness against the shipped pipeline is
+  // that it answers far more often and is wrong more often when it does.
+  // The app's own gate-and-median is what fixes exactly that. These put the
+  // two together — the smoother is causal (a 5-frame median), so applying it
+  // to a bounded-lag path is faithful rather than a cheat.
+  Variant('pyin-lag0+smoother', isPyin: true, pyinLag: 0, coreSmoother: true),
+  Variant('pyin-lag2+smoother', isPyin: true, pyinLag: 2, coreSmoother: true),
 
   // --- precision refinements on top ---
   Variant('app+if',
@@ -355,8 +362,23 @@ FileResult evaluateFile({
     final path = pyin.snapToCandidates(
         pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     final out = detected[v.name]!;
+    final smoother = smoothers[v.name];
     for (int i = 0; i < out.length && i < path.length; i++) {
-      out[i] = path[i];
+      if (smoother == null) {
+        out[i] = path[i];
+        continue;
+      }
+      // pYIN reports a frequency or nothing; the smoother wants the
+      // detector's own triple. A decoded frame IS the tracker's considered
+      // answer, so it is handed over as pitched with full confidence — the
+      // gate then contributes only its median and its voiced/unvoiced
+      // discipline, which is the part being tested.
+      out[i] = smoother.accept(
+            pitched: path[i] > 0,
+            probability: path[i] > 0 ? 1.0 : 0.0,
+            pitch: path[i],
+          ) ??
+          0;
     }
   }
 

@@ -289,6 +289,12 @@ accuracy problem *is* latency.
 **Verdict: not worth adopting for a tuner.** It would be the right answer for
 offline transcription.
 
+> **Correction (§24).** The second reason above — that an online pYIN needs
+> a decoding lag costing prohibitive latency — was asserted, not measured,
+> and it is **wrong**. Two frames of lookahead, 46 ms, reaches the offline
+> accuracy. The first reason survives and is the one the verdict now rests
+> on.
+
 ### 4.2 MPM / McLeod (NSDF)
 
 | variant | RPA% | rep% | oct% | gross% | held RPA% | FA% |
@@ -2102,6 +2108,83 @@ The habit that produced both artefacts is the same one: changing a harness
 to fix a known bias, and not asking what bias the change introduced. The
 answer both times was in data already collected — the spread column said
 `base` was cold long before anyone looked at it.
+
+## 24. How much lookahead pYIN actually needs: two frames
+
+§4.1 rejected pYIN on two grounds. The first was measured. The second was
+not:
+
+> Viterbi cannot decide frame *t* until it has seen the end of the file. An
+> online version needs a fixed decoding lag, which is more latency on top of
+> the ~90 ms the window already costs, in an app whose remaining accuracy
+> problem *is* latency.
+
+True about Viterbi, and an argument only if the required lag is large.
+`decode` now takes a bounded lag — frame *t* decided from the best state at
+frame *t+lag*, exactly what a streaming decoder could do — sharing the
+forward pass, so only the backtrace changes. All 180 solo files, hop 1024,
+one frame = 23.2 ms:
+
+| lag | RPA% | oct% | held RPA% | \|err\| p50 | FA% |
+| --- | --- | --- | --- | --- | --- |
+| 0 (greedy) | 80.30 | 1.37 | **89.81** | 2.05 | **24.79** |
+| 1 (23 ms) | 82.25 | 1.23 | 89.36 | 2.05 | 33.37 |
+| **2 (46 ms)** | **83.18** | 1.14 | 89.47 | 2.05 | 40.76 |
+| 4 (93 ms) | 83.33 | 0.99 | 89.30 | 2.05 | 39.73 |
+| 16 (371 ms) | 83.37 | 0.96 | 89.29 | 2.05 | 39.51 |
+| offline | 83.38 | 0.96 | 89.30 | 2.05 | 39.52 |
+
+**Two frames reaches 99.8% of the offline accuracy.** The latency objection
+is refuted: 46 ms of lookahead, not the end of the file.
+
+### 24.1 The verdict survives, on one leg instead of two
+
+§4.1's first reason is untouched and is the stronger one. Against the
+shipped pipeline:
+
+| | RPA% | oct% | FA% |
+| --- | --- | --- | --- |
+| `app` (ships) | 62.79 | **0.43** | **17.07** |
+| pyin-lag2 | 83.18 | 1.14 | 40.76 |
+| pyin-lag0 | 80.30 | 1.37 | 24.79 |
+
+pYIN's octave rate is more than twice the app's and its false alarm more
+than twice as high. It answers far more often and is wrong more often when
+it does — the same trade this report declines everywhere.
+
+What is new is that **lag 0 is a different operating point rather than a
+worse one**: greedy decoding gives the *best held-note accuracy in the whole
+set* (89.81% against the app's 80.86%), the best cent error (2.05 against
+2.45), and a false alarm rate of 24.79% — far closer to the app's 17.07%
+than any other pYIN variant. On the measurement a tuner actually performs —
+a note held while the user turns a peg — greedy pYIN is nine points more
+accurate and half a cent tighter than what ships.
+
+### 24.2 An experiment that did not answer its question
+
+The obvious follow-up is to put the app's gate-and-median on top of pYIN,
+since rejecting low-confidence frames is exactly what the app does well and
+pYIN does not. Measured, on 12 files:
+
+| | RPA% | oct% | held RPA% | \|err\| p50 | FA% |
+| --- | --- | --- | --- | --- | --- |
+| pyin-lag0 | 80.17 | 0.87 | 87.52 | 2.45 | 36.49 |
+| pyin-lag0 + smoother | 78.94 | 0.90 | **88.83** | 2.95 | **36.49** |
+
+**This does not test what it was built to test, and the tell is in the
+table.** The false alarm rate is *identical* to the ungated variant, because
+the harness hands the smoother `probability: 1.0` for every decoded frame —
+so the `> 0.9` gate never rejects anything and only the median contributes.
+What the median does is what §2 already established: held accuracy up,
+precision down (2.45 → 2.95 cents).
+
+Recorded as a null result rather than deleted, because the reason it failed
+is itself the finding: **pYIN already has a voicing model.** Its Viterbi
+decides voiced against unvoiced with a proper transition prior, and the
+app's gate is a cruder version of the same decision. Stacking them is
+redundant by construction. Making pYIN more conservative is a matter of its
+own `switchProbability` and unvoiced floor, not of bolting the app's
+threshold on top — and that is the experiment worth running next.
 
 ---
 
