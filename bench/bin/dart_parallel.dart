@@ -119,6 +119,36 @@ Future<void> main(List<String> argv) async {
   // one with the baseline process; equality is checked in the all-arms run.
 
 
+  // ── runAsync with NO pool ────────────────────────────────────────────
+  //
+  // §19 recorded an unexplained 6–17%: `parallelize(N)` without `poolConv`
+  // measured faster than `run()` on four machines, while the graph has zero
+  // MatMul for it to partition. Either `runAsync` differs from `run` in more
+  // than pooling, or the number was an artefact. This arm separates the two
+  // — same async node loop, no workers spawned at all.
+  if (only == null || only == 'runAsync no pool') {
+    final m = loadOnnxModel(onnxPath);
+    await m.runAsync(inputs(), const [_noteHead, _onsetHead]); // warm
+    final ms = <double>[];
+    Float32List last = Float32List(0);
+    for (int r = 0; r < reps; r++) {
+      final sw = Stopwatch()..start();
+      final out = await m.runAsync(inputs(), const [_noteHead, _onsetHead]);
+      sw.stop();
+      ms.add(sw.elapsedMicroseconds / 1000);
+      last = Float32List.fromList(out[_noteHead]!.asFloatList());
+    }
+    _report('runAsync, no pool', ms);
+    final ref = reference;
+    if (ref != null && _mismatches(ref, last) != 0) {
+      stdout.writeln('    !! differs from run()');
+    }
+    if (only != null) {
+      stdout.writeln('\n  cores visible: ${Platform.numberOfProcessors}');
+      return;
+    }
+  }
+
   // ── the pool, with and without conv fan-out ──────────────────────────
   for (final workers in const [2, 4]) {
     for (final poolConv in const [false, true]) {

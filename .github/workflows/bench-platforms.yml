@@ -75,8 +75,12 @@ jobs:
       - name: Isolate pool A/B
         working-directory: bench
         run: |
-          for arm in "base" "parallelize(2)" "parallelize(2, poolConv)" \
-                     "parallelize(4, poolConv)"; do
+          # "runAsync no pool" isolates §19's unexplained 6-17%: same async
+          # node loop, zero workers spawned. If it matches base, the pool
+          # spawn is responsible; if it matches parallelize(2), the async
+          # loop is, and the pool never mattered.
+          for arm in "base" "runAsync no pool" "parallelize(2)" \
+                     "parallelize(2, poolConv)" "parallelize(4, poolConv)"; do
             for rep in 1 2 3; do
               dart run bin/dart_parallel.dart --only "$arm" --reps 5
             done
