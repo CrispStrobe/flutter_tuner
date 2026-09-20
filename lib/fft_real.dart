@@ -188,6 +188,28 @@ class RealSpectrum {
       : _fft = RealFft(size),
         _buffer = Float64List(size * 2);
 
+  /// The interleaved complex spectrum of the most recent [magnitudes] or
+  /// [transform] call: `[re0, im0, re1, im1, …]`, `size` bins long.
+  ///
+  /// Exposed because magnitude alone is not enough for everything that reads
+  /// a spectrum. `harmonics.dart` needs the phase of one bin in two frames a
+  /// hop apart to recover a partial's instantaneous frequency, which is the
+  /// cheap precision refinement the brief asked for — the FFT is already
+  /// computed, so the phase costs nothing to keep.
+  ///
+  /// Valid until the next call; do not retain.
+  Float64List get complex => _buffer;
+
+  /// Transform [windowed] without extracting magnitudes, leaving the result
+  /// in [complex].
+  void transform(Float64List windowed) {
+    for (int i = 0; i < size; i++) {
+      _buffer[i * 2] = windowed[i];
+      _buffer[i * 2 + 1] = 0;
+    }
+    _fft.transform(_buffer);
+  }
+
   /// Magnitudes of the first `size / 2` bins of [windowed], which the caller
   /// has already windowed. Writes into [out], which must hold at least
   /// [bins] entries.

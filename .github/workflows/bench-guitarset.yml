@@ -20,7 +20,7 @@ on:
         required: true
         default: 'swipe'
         type: choice
-        options: [swipe, bench, notes, tracking, harmonics, hysteresis]
+        options: [swipe, bench, notes, tracking, harmonics, hysteresis, decoder_rules]
       limit:
         description: 'Files to use (0 = all 180 of the subset)'
         required: false
@@ -71,10 +71,11 @@ jobs:
       - name: Run
         working-directory: bench
         run: |
-          # `swipe` and `hysteresis` take their own flags; the rest share
-          # --subset/--limit.
-          if [ "${{ inputs.tool }}" = "hysteresis" ]; then
-            dart run bin/hysteresis.dart \
+          # `swipe`, `hysteresis` and `decoder_rules` take their own flags; the
+          # rest share --subset/--limit.
+          if [ "${{ inputs.tool }}" = "hysteresis" ] \
+             || [ "${{ inputs.tool }}" = "decoder_rules" ]; then
+            dart run bin/${{ inputs.tool }}.dart \
               --data ../corpus/guitarset \
               --limit ${{ inputs.limit }} | tee results.txt
           elif [ "${{ inputs.tool }}" = "swipe" ]; then

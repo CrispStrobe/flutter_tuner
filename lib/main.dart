@@ -121,10 +121,10 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   TranscriptionResult _transcriptionResult = TranscriptionResult.empty;
   int _decimatedSinceInference = 0;
 
-  /// Run inference at most this often, in 22.05 kHz samples. A window costs
-  /// around half a second on a native core, so asking more often than twice a
-  /// second would simply queue — and the service drops rather than queues.
-  static const int _transcriptionHop = BasicPitchGeometry.sampleRate ~/ 2;
+
+  /// Consecutive inferences that returned the same notes.
+  int _transcriptionUnchanged = 0;
+  static const _pacing = TranscriptionPacing();
   final _engine = TunerEngine();
 
   TunerStatus _status = TunerStatus.idle;
@@ -342,19 +342,37 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _transcriptionWindow.add(decimated);
     _decimatedSinceInference += decimated.length;
 
-    if (!_transcriptionWindow.isFull ||
-        _decimatedSinceInference < _transcriptionHop) {
+    // Back off to the idle rate once the answer has repeated a few times,
+    // and return to the fast rate the moment it changes.
+    final hop = _pacing.hopFor(_transcriptionUnchanged);
+    if (!_transcriptionWindow.isFull || _decimatedSinceInference < hop) {
       return;
     }
     _decimatedSinceInference = 0;
 
+    final window =
+        _transcriptionWindow.lastN(BasicPitchGeometry.windowSamples);
+
+    // Silence costs nothing to detect and everything to transcribe.
+    if (_pacing.isSilent(window)) {
+      if (_transcriptionResult.notes.isNotEmpty && mounted) {
+        setState(() => _transcriptionResult = TranscriptionResult.empty);
+      }
+      _transcriptionUnchanged = 0;
+      return;
+    }
+
     // Null means an inference is already in flight; this window is dropped
     // rather than queued, so a slow device shows a stale reading instead of
     // falling further and further behind.
-    final pending = _transcription.transcribe(
-        _transcriptionWindow.lastN(BasicPitchGeometry.windowSamples));
+    final pending = _transcription.transcribe(window);
     pending?.then((result) {
       if (mounted && _transcriptionEnabled) {
+        _transcriptionUnchanged =
+            TranscriptionPacing.sameNotes(
+                    result.notes, _transcriptionResult.notes)
+                ? _transcriptionUnchanged + 1
+                : 0;
         setState(() => _transcriptionResult = result);
       }
     }).catchError((Object error) {
@@ -385,6 +403,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     setState(() {
       _transcriptionEnabled = enabled;
       _transcriptionResult = TranscriptionResult.empty;
+      _transcriptionUnchanged = 0;
     });
   }
 

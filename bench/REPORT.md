@@ -1865,6 +1865,170 @@ attention-bound**, which is precisely the "inverse-default regime" the
 development guide warns about. Before any of that, the `src/`-is-baseline
 finding above is the bigger and cheaper lever.
 
+## 21. Stretch tuning: the estimator works, the feature does not earn its place
+
+The brief named this the likeliest big win: *"Inharmonicity: real strings are
+stiff, f_n = n·f0·√(1+B·n²). Estimating B is the gateway to stretch tuning,
+and would pair with the app's existing historical temperaments. Potentially
+the most valuable feature here — but measure first, and note GuitarSet is
+guitar only."* That last clause turns out to carry the whole result.
+
+`harmonics.dart` has estimated B since it was written and **nothing has ever
+called it** — `analyseHarmonics` appears in no engine or UI code. The reason
+was mechanical, not editorial: the module imported `package:fftea`, whose
+`Float64x2List` is precisely the construct dart2js cannot give SIMD lanes
+(15.56 ms per 8192-point transform against 0.38 ms native). Wiring harmonic
+analysis into the live path would have re-created, in the browser, the exact
+stall `fft_real.dart` was written to remove.
+
+So the module is now ported onto `fft_real.dart`. That needed one addition —
+`RealSpectrum` exposes its complex buffer, because magnitude alone cannot
+give the phase of a bin across two frames, which is how a partial's
+instantaneous frequency is recovered.
+
+### 21.1 Does the estimate recover a B it was given?
+
+`bin/inharmonicity.dart`, synthesised stiff strings where B is an input:
+
+| f0 | B given | B found | error |
+| --- | --- | --- | --- |
+| 82.41 | 0 | 8.0e-6 | (noise floor) |
+| 82.41 | 2.0e-4 | 2.1e-4 | 6% |
+| 110.00 | 1.0e-4 | 1.1e-4 | 6% |
+| 146.83 | 5.0e-5 | 4.8e-5 | 4% |
+| 196.00 | 3.0e-5 | 3.0e-5 | 1% |
+| 246.94 | 1.5e-5 | 1.5e-5 | 1% |
+| 329.63 | 1.0e-5 | 1.0e-5 | 0% |
+
+Good across the range a guitar actually occupies, with a **noise floor near
+1e-5**: given a perfectly flexible string it reports 8e-6 rather than zero,
+so any B below about 1e-5 is indistinguishable from none. The bias is upward,
+as peak-picking noise should make it.
+
+This is a weaker test than the corpus and is labelled as such — the report's
+own standing caution is that a synthetic tone is a far easier signal than a
+plucked string. It establishes that the estimator is not broken. It cannot
+establish that it works in a room.
+
+### 21.2 What it is worth on real guitars: 0.27 cents
+
+On GuitarSet, 3742 pitched frames, stiffness fitted on 46.4% of the frames
+that had measurable partials:
+
+| | p10 | median | p90 |
+| --- | --- | --- | --- |
+| inharmonicity B | 2.98e-5 | **1.06e-4** | 2.78e-4 |
+
+which is squarely where the synthetic check says the estimator is accurate
+to a few percent. At the median B, the octave stretch is **0.27 cents**.
+
+**That is the answer, and it is no.** The app's own median cent error is
+**2.45 cents** (§13). A correction of 0.27 cents is roughly an order of
+magnitude below the precision of the instrument applying it — it would move
+the needle by a fraction of the width of its own noise. Even at p90 the
+stretch is about 0.6 cents, still a quarter of the median error.
+
+The physics is the reason, and it is not a defect in the estimate: guitar
+strings are long and thin, so B sits around 1e-4. Piano bass strings are
+short, thick and under far more tension, reaching 1e-3 and beyond, and a
+piano accumulates stretch across seven octaves rather than one. **Stretch
+tuning is a piano technique for piano reasons.** This app is chromatic and
+supports many instruments, so the feature might well earn its place there —
+but GuitarSet cannot show that, no piano corpus is at hand, and the brief's
+own caution said exactly this would happen.
+
+### 21.3 What the port did buy
+
+Not nothing, and worth separating from the negative result:
+
+* **The module is now usable at all.** Whatever is eventually built on the
+  partials — a diagnostic readout, an octave guard, timbre display — no
+  longer has to choose between having it and having a web build.
+* **The partial-lock measurement is real and interesting**: the detector
+  locks onto partial 1 in **97.3%** of frames, partial 0.5 (a period double)
+  in 2.4%, partial 2 in 0.2%. That is a direct measurement of *how* the
+  detector fails when it fails.
+* **The octave guard built on it is not shippable**, and this is the second
+  negative result here: it catches 4 of 32 octave-wrong frames (12.5%
+  recall) while wrongly flagging 22 of 2606 correct ones — a flag precision
+  of **15.4%**. A guard that is wrong six times out of seven is worse than
+  no guard, because a user cannot tell which kind of answer they are looking
+  at.
+
+## 22. The two rules that did not port, and the one that did
+
+§18 predicted the remaining headroom was in decoding rather than kernels, and
+named two rules `note_creation.py` has that this repository never ported.
+Both are now implemented and measured. Neither ships.
+
+### 22.1 Minimum note length and onset gating: no
+
+`minimum_note_length_ms = 127.7` (about 11 frames) and `infer_onsets`. The
+first had to change shape to port at all: Spotify's is a post-filter over a
+segmented signal, and a live display cannot see a note end before deciding
+whether to show its beginning. `minNoteFrames` is the causal equivalent — a
+debounce on the start, costing exactly that much latency.
+
+All 180 chordal files, at the shipped 0.5/0.25 thresholds:
+
+| min length | onset gate | precision | recall | F1 |
+| --- | --- | --- | --- | --- |
+| **0 frames** | **none** | **87.8%** | **77.8%** | **82.5%** |
+| 2 frames | none | 88.7% | 76.7% | 82.2% |
+| 4 frames | none | 89.5% | 73.0% | 80.4% |
+| 6 frames | none | 90.1% | 68.7% | 78.0% |
+| 11 frames | none | 91.0% | 58.0% | 70.9% |
+| 0 frames | ≥ 0.5 | 89.7% | 70.4% | 78.9% |
+| 0 frames | ≥ 0.3 | 88.9% | 74.9% | 81.3% |
+| 0 frames | ≥ 0.2 | 88.3% | 76.7% | 82.1% |
+| 2 frames | ≥ 0.3 | 89.6% | 73.9% | 81.0% |
+| 4 frames | ≥ 0.3 | 90.2% | 70.9% | 79.4% |
+
+Every row is precision-up, recall-down, F1-down. **Nothing dominates**, which
+is the difference from §18 and the reason nothing ships: there the chosen
+setting was better on both axes, so adopting it cost nothing that had been
+working. Here each option is a trade, and §18's tie-break — a false note is
+worse than a missed one — was a rule for choosing between a dominating and a
+maximising option, not a licence to spend recall freely.
+
+The 2-frame row is the closest call: 0.9 points of precision for 1.1 of
+recall and 23 ms of added latency. Available, not taken.
+
+The shape has a structural explanation rather than being a tuning accident.
+Spotify's rules run offline over a segmented signal, so they can delete a
+short note *after* watching it end. A causal debounce cannot do that; it
+delays every note's appearance equally, and pays for each blip it suppresses
+with frames lost at the start of a genuine note — where the ground truth
+already says the note is sounding. An offline post-filter and a live
+debounce are not the same rule wearing different clothes.
+
+Both default to off — `minNoteFrames: 0`, `requireOnset: false` — which is
+§18's behaviour exactly. The 8-file pilot predicted this shape and the
+180-file run reproduced §18's baseline row to the decimal, which is the
+cross-check that the harness is measuring what it claims.
+
+### 22.2 Pacing: yes
+
+The rule that does ship attacks a different quantity. §19 made a window cost
+159 ms on Apple Silicon, but at two inferences a second the mode still holds
+a third of a core continuously on a device running off a battery. Nothing in
+§19 or §20 makes that cheaper — `TranscriptionPacing` decides how often it is
+worth paying at all:
+
+* **Silence is skipped entirely.** An RMS check over the window, costing
+  microseconds, against half a second of inference that has nothing to find.
+  The threshold sits well below a quietly played string, and a test asserts
+  a −46 dBFS note is *not* treated as silence — a silence gate that swallows
+  soft notes is a worse bug than the cost it saves.
+* **A repeated answer backs off**, from twice a second to once every two
+  seconds, resetting the instant the notes change. A player holding a chord
+  does not need the model re-run four times to be told the same thing.
+
+The backoff is bounded on purpose, and a test pins the bound: the only way
+to discover that something changed is to look, so two seconds is the longest
+a newly played note can wait. Unbounded backoff would trade a real
+responsiveness failure for a saving nobody asked for.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
