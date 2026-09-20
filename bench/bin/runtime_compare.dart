@@ -150,7 +150,13 @@ void main(List<String> argv) {
   final model = loadOnnxModel(onnxPath);
   final forOnnx = resampleLinear(
       wav.samples, rate, BasicPitchGeometry.sampleRate.toDouble());
-  const decoder = BasicPitchDecoder();
+  // `stateless`, not the shipped default. §18 changed BasicPitchDecoder's
+  // defaults to 0.5/0.25 with hysteresis, and this harness scores the ONNX
+  // arm frame-by-frame with no hysteresis at all — so the live default's
+  // start threshold alone would score 0.5 flat, which is neither what ships
+  // nor what §17 published. Pinning the old pair keeps §17's table
+  // reproducible; §18's table is the one that describes the app.
+  const decoder = BasicPitchDecoder.stateless;
 
   final onnxNotes = <int>{};
   final onnxFrames = <int, Set<int>>{};

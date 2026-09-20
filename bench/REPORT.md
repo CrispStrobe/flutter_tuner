@@ -1357,7 +1357,12 @@ nothing forces that trade.
   x86-64 Linux and Windows on CI. An actual iPhone, and CoreML, remain
   unmeasured.
 
-## 17. Two runtimes for one model: ggml against pure Dart
+## 17. Two runtimes for one model: CrispASR against pure Dart
+
+> **Correction (§17.3).** This section was first published as "ggml against
+> pure Dart" and attributed CrispASR's speed to ggml. That is wrong: the
+> basic-pitch backend runs its convolutions in hand-written C++ loops and uses
+> ggml only to read the GGUF. §17.3 has the measurement and what it changes.
 
 §10 measured Basic Pitch; this measures the *runtime*. The app runs the model
 through `onnx_runtime_dart` — pure Dart, no FFI, no native build on any of six
@@ -1438,6 +1443,427 @@ afternoon if unwritten.
   report a note count, and hand back a null pointer. The build used here has
   both compiled in, so it is invisible from this side; reported rather than
   patched, since it is a different repository.
+
+### 17.3 There is no ggml runtime in that path
+
+The 1.8× looked like a runtime difference. It is not, and the question that
+exposed it was a good one: *it is not plausible that ggml should be slower
+than ONNX Runtime.* It was not slower — but it also was not ggml.
+
+From `src/basic_pitch.cpp`'s own header:
+
+> The whole network is six small convolutions, so everything runs in plain
+> C++ loops rather than a ggml graph: at (172, 264, 8) the largest activation
+> is 363k floats and the biggest conv is 8x8x3x39, which a graph would only
+> add scheduling overhead to. ggml is still used for GGUF loading, which is
+> what every other backend here does.
+
+So §17 compared **optimised pure Dart against a scalar C++ reference
+implementation**, not against ggml. That also explains the thread result this
+report under-read: `nThreads` reaches a ggml backend that only loads tensors,
+which is why 4 threads bought nothing over 2.
+
+What the convolutions actually cost, counted from the call sites:
+
+| layer | shape | MMAC |
+| --- | --- | --- |
+| contour_conv | 8→8, 3×39, out 172×264 | **340.0** |
+| onset_conv | 8→32, 5×5 /3, out 172×88 | 96.9 |
+| note_conv | 1→32, 7×7 /3, out 172×88 | 23.7 |
+| note_out | 32→1, 7×3, out 172×88 | 10.2 |
+| contour_out | 8→1, 5×5, out 172×264 | 9.1 |
+| onset_out | 33→1, 3×3, out 172×88 | 4.5 |
+| | **per 43844-sample window** | **484.4** |
+
+Half a GMAC per two-second window is not "six small convolutions", and one
+layer is 70% of it. Against measured time — CrispASR computes **14
+overlapping** windows for the 22.32 s file where the ONNX arm computes 11
+non-overlapping ones, so per window of model work it is 292 ms against 624:
+
+| | ms/window | achieved |
+| --- | --- | --- |
+| CrispASR, scalar C++ | 292 | 1.66 GMAC/s |
+| onnx_runtime_dart | 624 | 0.78 GMAC/s |
+
+Both are far below what the hardware can do, and the disassembly says why.
+`bp_conv2d` compiles to **SSE only** — `mulps`/`addps` on 4-wide `%xmm`,
+**zero AVX, zero FMA, no `%ymm`** — because the build sets
+`CMAKE_CXX_FLAGS` empty and takes only `-O3 -DNDEBUG`, i.e. baseline
+x86-64.
+
+> **Correction.** This paragraph first went on to estimate that "a tuned
+> im2col + SGEMM with AVX2/FMA reaches 10–25 GMAC/s on one core of this
+> class, so **6–15× is sitting on the table**". §20 measured it: **1.45×**.
+> The estimate assumed dense-GEMM efficiency that this layer's shape cannot
+> reach — `contour_conv` has only **8 output channels**, so each input
+> element is read about eight times against 936 multiply-adds of reuse in a
+> real GEMM. The kernel is bound by loads and dependencies, not by
+> floating-point throughput, which §20 confirms from the other end: FMA buys
+> nothing at all over plain AVX2, and AVX-512 is no better than AVX2. A MAC
+> count tells you the work; it does not tell you the achievable rate.
+
+The irony is *partial*, not exact: the header declined a ggml graph because
+it "would only add scheduling overhead", and ggml's `conv_2d` is im2col plus
+a threaded, FMA-vectorised `mul_mat`. The reasoning was wrong about the
+network being cheap and **right to avoid the graph** — see §20, where the
+im2col matrix for `contour_conv` is 170 MB per window against a 1.45 MB
+largest activation, and with `OC=8` amortises nothing.
+
+Two caveats on this sub-section, stated because they are the parts not
+directly measured. `perf` is unavailable on the measurement host
+(`perf_event_paranoid=4`) and `ptrace_scope=1` blocked a sampling profiler,
+so the 1.66 GMAC/s is *implied* by assuming the convolutions are essentially
+all of the runtime rather than observed. The header comment claims "the
+expensive part is the CQT front end, not the network" — but the CQT is 9
+octaves of 256-tap filtering over ~344 summed frames, about 6 MMAC against
+the network's 484, so that claim cannot be right for this build unless the
+front end is implemented far off its operation count.
+
+### 17.4 What this changes above
+
+Three things, none of which move a number already published:
+
+* **The runtime is not why ggml is faster, and it is not why it is slower
+  than it should be.** Both paths are leaving most of the machine unused.
+* **The window overlap is a second pipeline difference.** CrispASR runs 14
+  overlapping windows and drops 15 frames from each side before stitching,
+  so it scores its better-conditioned interior frames; the ONNX arm scored
+  every frame of 11 independent windows. That belongs on the same list as the
+  decoder — pipeline, not runtime.
+* **The optimisation worth doing for *this* app is the Dart one.** CrispTuner
+  ships `onnx_runtime_dart` and does not ship libcrispasr (§17.1), so its
+  0.78 GMAC/s is the number that reaches a user. `Float32x4` is available on
+  every native target and is the same im2col+SGEMM shape.
+
+## 18. The decoder, not the runtime
+
+§17.4 left a claim outstanding: that CrispASR's eight extra points of recall
+came from its decoder rather than from its runtime, because it emits
+segmented note *events* that span the frames where an activation dips, while
+this repository thresholded every frame independently. If that is right, the
+recall is available in pure Dart at no packaging cost at all.
+
+It is right. The fix is a Schmitt trigger — a high bar to start a note, a
+lower one to keep it — which is one `if` in `BasicPitchDecoder.decodeFrames`.
+`bin/hysteresis.dart`, all 180 chordal files, the same 11.6 ms grid and
+`note_midi` truth as §12 and §17:
+
+| start | sustain | precision | recall | F1 |
+| --- | --- | --- | --- | --- |
+| 0.4 | 0.4 | 87.3% | 72.6% | 79.2% |
+| 0.4 | 0.3 | 85.2% | 78.5% | 81.7% |
+| 0.4 | 0.25 | 83.9% | 81.4% | 82.6% |
+| 0.4 | 0.2 | 81.9% | 84.5% | 83.2% |
+| 0.4 | 0.15 | 77.9% | 88.0% | 82.6% |
+| **0.5** | **0.25** | **87.8%** | **77.8%** | 82.5% |
+| 0.5 | 0.2 | 86.0% | 81.1% | **83.5%** |
+| 0.3 | 0.3 | 80.4% | 81.1% | 80.7% |
+
+The first row is what shipped: one threshold, every frame judged alone.
+
+**0.5 / 0.25 now ships, because it is strictly better than that on both
+axes** — higher precision *and* five points more recall. There is no trade to
+argue about; nothing that previously worked gets worse. 0.5/0.2 takes the
+best F1 and is a one-line change, but it is not the default: a display is not
+an F1 score, and a note shown that is not being played is a worse error than
+one missed, because the player can see what they are holding. When a
+dominating option exists, it beats a maximising one.
+
+For scale, CrispASR/ggml on the 8-file subset scored 84.4% / 75.6% / 79.7%
+(§17). The pure-Dart path now exceeds that on every axis, on every platform
+the app ships to, including the web — which is the honest epitaph for the
+FFI backend merged one section earlier.
+
+### 18.1 Measuring it is not shipping it
+
+The app's live display called `BasicPitchDecoder.decode`, which averages the
+tail of one window and judges each note against a single threshold. Raising
+that threshold to 0.5 on its own would have made the display *worse*: §12
+measured 0.5 alone at 90.3% precision for 61.3% recall. The table above is
+the *sequence* decoder, and hysteresis is stateful — so the benefit only
+reaches a user if the live path becomes stateful too.
+
+`LiveNoteTracker` is that state, and it is deliberately small: the set of
+notes still sounding when the last window ended. Without it a note whose
+activation dips exactly across a window boundary is reported as two notes,
+which is the same defect the sustain threshold fixes within a window.
+
+One safeguard came out of the change rather than out of the measurement.
+Hysteresis makes a single frame decisive in a way it was not before, and one
+frame is 11.6 ms, so a borderline note would flicker on and off between
+windows. The tracker therefore reports a note when it sounds in **most** of
+the last 8 frames rather than merely in the final one, and a test pins that.
+
+### 18.2 What this says about the previous section
+
+The CrispASR backend of §17 is now harder to justify than when it was
+merged, and that is the correct outcome rather than an awkward one. Its
+advantage was never its runtime (§17.3 — there is no ggml runtime in that
+path) and is now demonstrably not its decoder either. What remains is 2.1×
+on speed against a mode that already updates twice a second, bought with a
+23 MB native library on five platforms and no web build.
+
+The backend stays, unavailable by default, for the reason it was built:
+MT3 is 96 MB and 46.9M parameters, and there the factor decides whether the
+mode runs at all. Nothing about this section changes that case.
+
+## 19. The Dart runtime: where its 0.78 GMAC/s goes
+
+§17.3 left the pure-Dart path at 0.78 GMAC/s against 484.4 MMAC per window
+and said most of the machine was unused. `bin/dart_parallel.dart` asks which
+part of "unused" is available.
+
+The package already ships an isolate pool — `parallelize(workers:,
+poolConv:)` partitions work across isolates and `runAsync` executes on them
+— and **the app does not use it**: `TranscriptionService` calls the
+synchronous `run()`. So the first question is not what to write but what is
+already there.
+
+Four arms, **each in its own process** (see §19.1), median of five
+inferences, on one shared VPS core of four:
+
+| arm | ms/window | GMAC/s |
+| --- | --- | --- |
+| `run()`, single isolate — what ships | 621 | 0.78 |
+| `parallelize(2)` | 596 | 0.81 |
+| `parallelize(2, poolConv)` | 476 | 1.02 |
+| `parallelize(4, poolConv)` | **441** | **1.10** |
+
+**`poolConv` is worth 1.41×, and the package's own documentation says it
+should not be.** From `parallelize`'s doc comment: "Off by default: conv
+messages carry the whole input activation to every worker, and for CNN
+workloads measured so far that copying costs more than the banded compute
+saves." That is a fair description of most CNNs and the wrong prediction for
+this one — Basic Pitch's activations are large enough (172 × 264 × 8) that
+the banded compute wins.
+
+**`parallelize` without `poolConv` does nothing, and that is not noise-free
+luck.** `tool/dump_ops.dart` on the shipped model: 248 nodes, **32 `Conv`
+and zero `MatMul`**. Without `poolConv` there is literally nothing for the
+pool to partition, so the 621 → 596 is the noise floor of a loaded box, not
+a small win. Worth stating because a 4% "improvement" with no mechanism is
+exactly the kind of number that gets quoted later.
+
+Also worth recording: the ONNX graph has 32 convolutions where the native
+port has six, because the export implements the CQT front end as
+convolutions too. That reconciles the two profiles — the front end is ~6% of
+the Dart cost and a rounding error in the native one, because they are not
+computing it the same way.
+
+### 19.1 The harness lied to me first
+
+The first version of `dart_parallel.dart` ran every arm in one process and
+reported **1.76×**. Per-process it is **1.41×**.
+
+Dart's JIT optimises hot code across the isolate, so the arm that runs first
+pays to warm kernels that every later arm then inherits — and the baseline
+ran first. The gap between 1.76 and 1.41 is entirely that.
+
+This is embarrassing in a useful way: hours earlier I had briefed a
+subagent, in writing, that a shared process manufactures wins and that each
+configuration must be a separate process. I then wrote a single-process
+harness. The rule is in CrispASR's development guide as "measure both arms
+under IDENTICAL load, back-to-back — a noisy box fabricates wins", and it
+cost nothing to follow once remembered. `--only <arm>` exists now so the
+harness cannot make that mistake again.
+
+### 19.2 On hardware nobody here owns
+
+The VPS numbers were never going to decide this. `bench-platforms.yml` runs
+the same four arms, one process each, median of three, on CI:
+
+| | single isolate | `p(2, poolConv)` | `p(4, poolConv)` | gain |
+| --- | --- | --- | --- | --- |
+| Apple Silicon (3 cores) | 353 ms | 174 | **159** | **2.22×** |
+| x86-64 Linux (4) | 208 ms | 148 | **143** | 1.45× |
+| x86-64 Windows (4) | 222 ms | 164 | **153** | 1.45× |
+| this VPS (4, shared) | 621 ms | 476 | 441 | 1.41× |
+
+**It wins everywhere, and most where it matters most.** Apple Silicon is the
+closest proxy available for the phones this app actually ships to, and it
+gains the most: a two-second window drops from 353 ms to 159, which against
+the mode's 500 ms update interval is a duty cycle of 32% rather than 71%.
+That is the real result — nobody was waiting on the latency, but a mode that
+holds a core busy two-thirds of the time is a battery and thermal problem on
+a device that is not plugged in.
+
+Four workers wins or ties on all four machines, so the cap is four; two
+captures most of it on a smaller machine. The floor is two, because one
+worker is strictly worse than not pooling — it pays the per-conv message
+copy and gains no parallelism, and `poolWorkersFor` is tested to never
+return it.
+
+The memory objection also failed to survive contact: weight replication
+across workers sounded expensive until counted. Basic Pitch is 35.7k
+parameters — about 143 KB — so four copies is not a number worth writing
+down.
+
+### 19.3 Shipped
+
+`TranscriptionService` now calls `parallelize(workers: poolWorkersFor(cpuCount),
+poolConv: true)` on its first window and `runAsync` thereafter. Three details
+worth stating because each was a decision rather than an obvious step:
+
+* **The pool is built lazily, on the first window, not at `start()`.**
+  Spawning isolates and replicating weights is work that should not happen
+  because a user toggled a switch and toggled it back.
+* **A pool failure is not a mode failure.** If `parallelize` throws, the
+  worker keeps going unpooled; `runAsync` computes the same answer on the
+  calling isolate. The mode gets slower, never broken.
+* **Core count goes through a conditional export** (`cpu_count.dart`), for
+  the same reason `crispasr_backend.dart` does: `dart:io` in anything
+  reachable from a web entry point fails the build. The web answer is 1,
+  which is also true — the mode does not run there.
+
+One loose end, recorded rather than smoothed over: `parallelize` *without*
+`poolConv` measured 6–17% faster than `run()` on all four machines, and it
+should have measured nothing at all, because the graph has zero `MatMul` for
+it to partition. It may be that `runAsync` differs from `run` in some way
+beyond pooling. The effect is small, consistent, and **unexplained**, so
+nothing here depends on it.
+
+## 20. Optimising the native path
+
+Commissioned after §17.3, on `/mnt/volume1/CrispASR` branch
+`perf/basic-pitch-conv`. The work followed CrispASR's own development guide:
+both paths kept, gated on `CRISPASR_BASIC_PITCH_FASTCONV` (default **off**),
+old path still the default until a clean box proves the threading half.
+
+Runtime-dispatched AVX2 / AVX-512 / AVX2+FMA kernels, reusing the tree's
+existing `Isa` dispatch rather than a new one, no `-march=native`, plus
+`core_parallel::for_each_chunk` over the disjoint `(oc, h)` output rows — so
+`n_threads`, which previously reached only the GGUF loader (§17.3), now
+reaches all six call sites. CPU time is primary because the box sat at load
+15–26 throughout; separate processes per arm, cold run discarded.
+
+| arm | CPU ms/window (conv only) | GMAC/s | vs ref |
+| --- | --- | --- | --- |
+| reference (SSE) | 237 | 2.04 | 1.00× |
+| **AVX2** | **163** | **2.96** | **1.45×** |
+| AVX-512F | 167 | 2.90 | 1.42× |
+| AVX2 + FMA | 163 | 2.98 | 1.46× |
+
+Whole file 4.36 s → 3.31 s CPU (1.32×); essentially all of the win is
+`contour_conv`, 148 → 90 ms. Output is **byte-identical** — FNV over raw
+float bits plus L2 norms on all three heads, and every note event unchanged
+— with a hermetic test asserting `memcmp == 0` on the six real shapes, which
+was checked to actually fail when forced onto a different kernel.
+
+### 20.0 Closed on CI, and the default flipped
+
+The VPS could not settle the threading half — a single-threaded process
+never exceeded 36–54% of one core there. A hermetic CI workflow did, one arm
+per process, cold discarded, median of three, within-run variance 0.05%:
+
+| | reference | SIMD, 1 thread | 4 threads |
+| --- | --- | --- | --- |
+| ubuntu-24.04, 4 cores | 104.8 ms | **1.66×** | **3.59×** |
+| macos-14 (M1), 3 cores | 94.8 ms | **1.01×** | **2.67×** |
+
+Byte-identical on both, at 1 and 4 threads, so the gate now defaults **on**
+with `=0` as the way back and `bp_conv2d_ref` kept verbatim.
+
+Three results here are worth more than the speedup:
+
+* **A contended box understates the faster kernel.** SIMD-only measures 1.45×
+  on the loaded VPS and 1.66× clean — contention costs the faster kernel
+  proportionally more, because it has less slack to hide a stall in.
+* **arm64 gains nothing from SIMD — 1.01×.** Its entire 2.67× is threading.
+  NEON is already baseline on aarch64, so the portable path was always
+  4-wide there and the new kernels add nothing. Anyone reading "AVX2 made it
+  1.66× faster" and planning for a phone would plan wrong.
+* **FMA buys 0–3%, inside run-to-run spread.** That is the §17.3 correction
+  arriving independently: a kernel this low in arithmetic reuse is not
+  FP-throughput bound, so the instruction that doubles FP throughput does
+  nothing.
+
+Shipped with one caveat, not smoothed over: `n_threads` defaults to 4, and
+at 4 threads the per-call `std::thread` spawn — six convolutions per window,
+~84 spawns for a 22-second file — costs about 75% more CPU than 2 threads
+for about 9% less wall time. Batch and server callers should pass 2 until it
+routes through the tree's existing worker pool.
+
+### 20.1 What it corrects in this report
+
+* **The headroom estimate, by an order of magnitude.** I predicted "6–15×
+  … before any threading". SIMD alone delivers **1.66×** on x86-64 and
+  **1.01×** on arm64. The clean-box total of 3.59× partly closes the gap,
+  but it closes it with threading, which the prediction had explicitly
+  excluded — so the correction sharpens rather than softens. See §17.3.
+* **"Nothing gets AVX2" was half wrong.** `GGML_AVX2:BOOL=OFF` in the cache
+  is superseded by `GGML_NATIVE:BOOL=ON`, and `libggml-cpu.so` carries 19,886
+  `%ymm` references. It is CrispASR's own `src/` that compiles baseline —
+  `basic_pitch.cpp.o` has 1,460 `%xmm` and zero `%ymm`. An asymmetry between
+  the vendored library and the project's own sources, not a blanket. That
+  asymmetry is a larger and cheaper lever than any kernel.
+* **`ggml_conv_2d` is the wrong answer here, and memory is only half the
+  reason.** 170 MB per window against a 1.45 MB largest activation, yes —
+  but the decisive point is that `contour_conv` has `OC=8`, making the GEMM
+  `M=45408, K=936, N=8`, where every element of that 170 MB is read
+  essentially once. im2col amortises nothing at this shape. `onset_conv` is
+  the exception worth measuring later: 12.1 MB, `OC=32`, 20% of the work.
+
+### 20.1a The `src/` ISA gap, which is the larger finding
+
+Promoted out of the perf write-up into `docs/improvements/SRC_ISA_GAP.md`.
+The evidence turned out to be sharper than "flags are empty". In
+`release.yml`: **15 legs** pass `-DGGML_AVX2=ON -DGGML_FMA=ON
+-DGGML_F16C=ON`, **2** ship `GGML_BACKEND_DL` with
+`GGML_CPU_ALL_VARIANTS` (runtime multi-variant dispatch), **3** pass
+`CRISPASR_PORTABLE_CPU=ON` (deliberate baseline) — and **zero** mention
+`CMAKE_CXX_FLAGS`.
+
+So there *is* a considered ISA policy, documented in `CMakeLists.txt`: ggml's
+CPU backend initialises before CUDA or Vulkan is selected, so an AVX2 CPU
+helper raises `SIGILL` at model load before the runtime ISA diagnostic can
+print. It is applied to ggml through three separate strategies. **CrispASR's
+own `src/` is in none of them** — and the tell that this is scope rather
+than intent is that the legs which *deliberately* hand ggml AVX2 do not hand
+it to `src/` either, which no policy would ask for, since on those artifacts
+AVX2 is already accepted.
+
+Not decided here, and not this repository's call. Recorded because it is a
+tree-wide multiplier available from a build-system change rather than from
+writing kernels one at a time — worth more than the optimisation that
+uncovered it.
+
+### 20.2 One number that did not reconcile
+
+The agent's reference build reports **153** note events on
+`00_BN1-129-Eb_comp_mic.wav` where this report's harness reports **151**,
+and attributed the difference to the harness. It is not the harness: re-run
+against `libcrispasr.so.0.8.33` it still gives 151, deterministically, with
+the same pitch set and the same earliest event (midi 51 at 35 ms, velocity
+74). The `.so` was built on 17 September and the agent compiled current
+`src/`, which has moved since.
+
+Both numbers are therefore right for their own build, and the A/B is
+unaffected — byte-identity was established between reference and fast paths
+*within one build*, which is what the comparison requires. Recorded because
+§17's published baseline is 151 and should stay reproducible.
+
+### 20.2a A green tick that measured nothing
+
+Flipping the gate's default silently broke the A/B workflow that proved it,
+in the worst possible direction. The reference arm passed **no** environment
+variable — correct only while the gate defaulted off. One run therefore
+reported **1.00× for every arm, and passed**.
+
+The fix was to pin `=0` explicitly *and* to assert that the arm name the
+harness prints matches the one requested, so a harness measuring the wrong
+thing fails rather than reporting parity. The general lesson is worth more
+than the bug: **a gate's default is part of every harness that reads it**,
+and "no difference" is the one result a broken benchmark produces most
+convincingly.
+
+### 20.3 Whether it generalises
+
+Recommendation, not work done: screen each backend with one multiplication —
+im2col bytes `(H·W_out)·(IC·KH·KW)·4` against `OC`. CREPE and
+piano-transcription likely sit on the favourable side; **mt3 is a T5 and
+attention-bound**, which is precisely the "inverse-default regime" the
+development guide warns about. Before any of that, the `src/`-is-baseline
+finding above is the bigger and cheaper lever.
 
 ---
 

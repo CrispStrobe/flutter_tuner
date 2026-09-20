@@ -162,24 +162,46 @@ class Halfband {
 /// decoding rules are where the judgement is, and they are the part most
 /// likely to be wrong.
 class BasicPitchDecoder {
-  /// Note-head activation a note must reach to be reported.
+  /// Note-head activation a note must reach to *start* being reported.
   ///
-  /// Measured on GuitarSet's chordal recordings, 128,558 reference frames
-  /// (bench/REPORT.md §12):
+  /// Paired with [sustainThreshold]: this is the high bar, that is the low
+  /// one. Measured over all 180 of GuitarSet's chordal recordings
+  /// (bench/REPORT.md §18, `bench/bin/hysteresis.dart`):
   ///
-  /// | threshold | precision | recall | F1 |
-  /// | --- | --- | --- | --- |
-  /// | 0.3 | 81.3% | 80.1% | **80.7%** |
-  /// | 0.4 | 86.7% | 72.0% | 78.7% |
-  /// | 0.5 | 90.3% | 61.3% | 73.0% |
-  /// | 0.7 | 95.0% | 27.7% | 42.9% |
+  /// | start | sustain | precision | recall | F1 |
+  /// | --- | --- | --- | --- | --- |
+  /// | 0.4 | 0.4 | 87.3% | 72.6% | 79.2% |
+  /// | **0.5** | **0.25** | **87.8%** | **77.8%** | 82.5% |
+  /// | 0.5 | 0.2 | 86.0% | 81.1% | **83.5%** |
+  /// | 0.4 | 0.2 | 81.9% | 84.5% | 83.2% |
+  /// | 0.4 | 0.15 | 77.9% | 88.0% | 82.6% |
   ///
-  /// 0.3 maximises F1, but a display is not an F1 score: a note shown that
-  /// is not being played is a worse error than one missed, because the
-  /// player can see what they are holding. 0.4 keeps 87% precision for a
-  /// tenth of the recall — that is the trade taken here, and it is a
-  /// one-line change if you disagree.
+  /// The first row is what shipped before: one threshold, every frame judged
+  /// alone. 0.5/0.25 is chosen because it is **strictly better than that on
+  /// both axes** — higher precision *and* five points more recall — so
+  /// adopting it costs nothing that was previously working.
+  ///
+  /// 0.5/0.2 takes the best F1, and is a one-line change if you disagree.
+  /// It is not the default because a display is not an F1 score: a note
+  /// shown that is not being played is a worse error than one missed, since
+  /// the player can see what they are holding. That principle is why the
+  /// dominating row wins over the maximising one.
   final double noteThreshold;
+
+  /// Activation a note already sounding must stay above to *keep* sounding.
+  ///
+  /// A single threshold treats every frame independently, so a note whose
+  /// activation dips for two frames is reported as having stopped and
+  /// started. Real notes do not do that; the activation does. This is the
+  /// standard Schmitt-trigger answer — a high bar to start, a lower one to
+  /// continue — and it is why §17 found CrispASR recalling eight points more
+  /// notes for the same model: it emits segmented note *events*, and an
+  /// event spans the dip.
+  ///
+  /// Defaults to [noteThreshold], which is exactly the old behaviour.
+  /// `null` is not accepted: the equality is the point, so that turning
+  /// hysteresis off is a value rather than a code path.
+  final double sustainThreshold;
 
   /// Onset activation above which a note is called newly struck.
   final double onsetThreshold;
@@ -197,10 +219,47 @@ class BasicPitchDecoder {
   static const int defaultTailFrames = 8;
 
   const BasicPitchDecoder({
-    this.noteThreshold = 0.4,
+    this.noteThreshold = 0.5,
+    double? sustainThreshold = 0.25,
     this.onsetThreshold = 0.5,
     this.tailFrames = defaultTailFrames,
-  });
+  }) : sustainThreshold = sustainThreshold ?? noteThreshold;
+
+  /// The thresholds with no hysteresis, as this decoder shipped before
+  /// [decodeFrames] existed. Kept so the old behaviour stays reachable and
+  /// so tests can state the difference rather than assume it.
+  static const BasicPitchDecoder stateless =
+      BasicPitchDecoder(noteThreshold: 0.4, sustainThreshold: 0.4);
+
+  /// Decode a whole window frame by frame, with hysteresis across frames.
+  ///
+  /// Returns one set of MIDI numbers per frame. This is the *sequence*
+  /// decode — it sees a note's history, which [decode] cannot, because
+  /// [decode] answers "what is sounding now" from a tail average and has no
+  /// past to consult.
+  ///
+  /// [carry] is the set sounding at the end of the previous window, so a
+  /// streamed sequence of windows decodes as one signal rather than as
+  /// independent fragments. Pass null at the start.
+  List<Set<int>> decodeFrames(Float64List note,
+      {int frames = BasicPitchGeometry.frames, Set<int>? carry}) {
+    const bins = BasicPitchGeometry.noteBins;
+    final out = <Set<int>>[];
+    final sounding = <int>{...?carry};
+    for (int f = 0; f < frames; f++) {
+      for (int b = 0; b < bins; b++) {
+        final midi = BasicPitchGeometry.lowestMidi + b;
+        final a = note[f * bins + b];
+        if (sounding.contains(midi)) {
+          if (a < sustainThreshold) sounding.remove(midi);
+        } else if (a >= noteThreshold) {
+          sounding.add(midi);
+        }
+      }
+      out.add(Set<int>.of(sounding));
+    }
+    return out;
+  }
 
   /// [note] and [onset] are `frames × 88`, row-major.
   List<TranscribedNote> decode(Float64List note, Float64List onset,
@@ -225,6 +284,76 @@ class BasicPitchDecoder {
             BasicPitchGeometry.lowestMidi + b, strength, peakOnset));
       }
     }
+    found.sort((a, b) => b.strength.compareTo(a.strength));
+    return found;
+  }
+}
+
+/// Keeps the hysteresis state that [BasicPitchDecoder.decodeFrames] needs
+/// across a stream of windows, and turns each window into "what is sounding
+/// now".
+///
+/// The decoder is deliberately `const` and stateless; a live display is not.
+/// This is the small amount of memory between them: the set of notes still
+/// sounding at the end of the last window, which is what lets a note survive
+/// a dip in activation that happens to straddle a window boundary.
+///
+/// Why this exists rather than [BasicPitchDecoder.decode]: that method
+/// averages the tail of one window and judges each note against a single
+/// threshold, so it cannot tell a note that stopped from a note whose
+/// activation dipped. Over all 180 chordal recordings the difference is 87.3%
+/// / 72.6% against 87.8% / 77.8% — better on both axes (§18).
+class LiveNoteTracker {
+  final BasicPitchDecoder decoder;
+
+  /// Notes still sounding at the end of the last window.
+  Set<int> _carry = <int>{};
+
+  LiveNoteTracker({this.decoder = const BasicPitchDecoder()});
+
+  /// Forget everything. Call when the stream restarts, so a note held when
+  /// the user stopped listening does not reappear when they start again.
+  void reset() => _carry = <int>{};
+
+  /// One window's three heads in, the notes sounding at its end out.
+  ///
+  /// A note is reported when it is sounding in **most** of the last
+  /// [BasicPitchDecoder.tailFrames] frames rather than merely in the final
+  /// one. Hysteresis makes a single frame decisive in a way it was not
+  /// before, and one frame is 11.6 ms — short enough that a borderline note
+  /// would flicker on and off between windows.
+  List<TranscribedNote> track(Float64List note, Float64List onset,
+      {int frames = BasicPitchGeometry.frames}) {
+    final seq = decoder.decodeFrames(note, frames: frames, carry: _carry);
+    if (seq.isEmpty) return const [];
+    _carry = seq.last;
+
+    const bins = BasicPitchGeometry.noteBins;
+    final from = math.max(0, frames - decoder.tailFrames);
+    final tail = frames - from;
+    final needed = (tail / 2).ceil();
+
+    final counts = <int, int>{};
+    for (int f = from; f < frames; f++) {
+      for (final midi in seq[f]) {
+        counts[midi] = (counts[midi] ?? 0) + 1;
+      }
+    }
+
+    final found = <TranscribedNote>[];
+    counts.forEach((midi, count) {
+      if (count < needed) return;
+      final b = midi - BasicPitchGeometry.lowestMidi;
+      if (b < 0 || b >= bins) return;
+      double sum = 0;
+      double peakOnset = 0;
+      for (int f = from; f < frames; f++) {
+        sum += note[f * bins + b];
+        final o = onset[f * bins + b];
+        if (o > peakOnset) peakOnset = o;
+      }
+      found.add(TranscribedNote(midi, sum / tail, peakOnset));
+    });
     found.sort((a, b) => b.strength.compareTo(a.strength));
     return found;
   }

@@ -66,6 +66,23 @@ jobs:
         run: dart run bin/platform_timing.dart ../assets/models/basic_pitch.onnx | tee timing.txt
         shell: bash
 
+      # The isolate-pool arms (REPORT.md §19). Measured here rather than on
+      # the VPS because the decision they drive — how many worker isolates to
+      # spawn inside the transcription isolate — depends on core count and
+      # memory bandwidth, and the VPS has four shared cores and eleven
+      # tenants. Each arm runs as its OWN PROCESS: a shared process lets
+      # Dart's JIT warm later arms and overstates the win (§19.1).
+      - name: Isolate pool A/B
+        working-directory: bench
+        run: |
+          for arm in "base" "parallelize(2)" "parallelize(2, poolConv)" \
+                     "parallelize(4, poolConv)"; do
+            for rep in 1 2 3; do
+              dart run bin/dart_parallel.dart --only "$arm" --reps 5
+            done
+          done | tee pool.txt
+        shell: bash
+
       - name: Summary
         working-directory: bench
         run: |
@@ -75,11 +92,19 @@ jobs:
             echo '```'
             cat timing.txt
             echo '```'
+            echo ''
+            echo '### Isolate pool (§19)'
+            echo ''
+            echo '```'
+            cat pool.txt
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
         shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
           name: timing-${{ matrix.os }}
-          path: bench/timing.txt
+          path: |
+            bench/timing.txt
+            bench/pool.txt
           retention-days: 30
