@@ -30,7 +30,42 @@ import 'package:tuner_bench/jams.dart';
 import 'package:tuner_bench/metrics.dart';
 import 'package:tuner_bench/wav.dart';
 
-typedef Engine = ({String name, PitchTrack Function(Float64List, int) run});
+/// The engines, and how one file's audio becomes one track per engine.
+///
+/// Deliberately NOT a list of independent `(mono, sr) -> track` closures,
+/// which is how this was first written: the three pYIN arms differ only in
+/// what happens *after* the estimator, so independent closures ran `pyinF0`
+/// three times per file. On a 20-second guitar recording that is 54 seconds
+/// of work to produce 18 seconds' worth of answer, and it is why the first
+/// full run timed out after three files.
+const engineNames = <String>[
+  'cb-dio',
+  'cb-dio-norefine',
+  'cb-pyin',
+  'cb-pyin+hmm',
+  'cb-pyin+hmm-mask',
+];
+
+Map<String, PitchTrack> runAllEngines(Float64List mono, int sr,
+    Map<String, double> millis) {
+  final out = <String, PitchTrack>{};
+  void timed(String name, PitchTrack Function() f) {
+    final sw = Stopwatch()..start();
+    out[name] = f();
+    sw.stop();
+    millis[name] = (millis[name] ?? 0) + sw.elapsedMicroseconds / 1000;
+  }
+
+  timed('cb-dio', () => dioF0(mono, sr));
+  timed('cb-dio-norefine', () => dioF0(mono, sr, refine: false));
+  timed('cb-pyin', () => pyinF0(mono, sampleRate: sr));
+  // The two HMM arms reuse the track above; their cost is the HMM, which is
+  // what the timing column should say.
+  final raw = out['cb-pyin']!;
+  timed('cb-pyin+hmm', () => _applyHmm(raw, keepOriginalHz: false));
+  timed('cb-pyin+hmm-mask', () => _applyHmm(raw, keepOriginalHz: true));
+  return out;
+}
 
 /// CometBeat's shipped monophonic pipeline is not the estimator alone:
 /// `route.dart` runs `segmentNotes` — an HMM over the pitch lattice — after
@@ -73,30 +108,7 @@ PitchTrack _applyHmm(PitchTrack track, {required bool keepOriginalHz}) {
   return out;
 }
 
-final _engines = <Engine>[
-  (
-    name: 'cb-dio',
-    run: (mono, sr) => dioF0(mono, sr),
-  ),
-  (
-    name: 'cb-dio-norefine',
-    run: (mono, sr) => dioF0(mono, sr, refine: false),
-  ),
-  (
-    name: 'cb-pyin',
-    run: (mono, sr) => pyinF0(mono, sampleRate: sr),
-  ),
-  (
-    name: 'cb-pyin+hmm',
-    run: (mono, sr) =>
-        _applyHmm(pyinF0(mono, sampleRate: sr), keepOriginalHz: false),
-  ),
-  (
-    name: 'cb-pyin+hmm-mask',
-    run: (mono, sr) =>
-        _applyHmm(pyinF0(mono, sampleRate: sr), keepOriginalHz: true),
-  ),
-];
+
 
 /// Nearest frame of a track to [t] seconds, or null when the track has
 /// nothing within half a hop — the engines pick their own frame rates, so
@@ -144,8 +156,9 @@ void main(List<String> argv) {
     }
   }
 
-  final stats = {for (final e in _engines) e.name: MethodStats(e.name)};
-  final timings = {for (final e in _engines) e.name: <double>[]};
+  final stats = {for (final e in engineNames) e: MethodStats(e)};
+  final millis = <String, double>{};
+  var scored = 0;
 
   if (corpus == 'guitar') {
     final files = Directory('$data/audio')
@@ -163,11 +176,10 @@ void main(List<String> argv) {
       final truth = readJams(jamsPath);
       final wav = readWav(path);
       final rate = wav.sampleRate;
-      for (final e in _engines) {
-        final sw = Stopwatch()..start();
-        final track = e.run(wav.samples, rate);
-        sw.stop();
-        timings[e.name]!.add(sw.elapsedMicroseconds / 1000);
+      final tracks = runAllEngines(wav.samples, rate, millis);
+      scored++;
+      for (final name in engineNames) {
+        final track = tracks[name]!;
         // Walk the reference grid, not the engine's: every table in this
         // report scores the same reference frames.
         for (double t = 0; t < truth.duration; t += truth.hop) {
@@ -176,7 +188,7 @@ void main(List<String> argv) {
           // Voicing over EVERY frame, mono accuracy over the monophonic
           // ones — the same split lib/evaluate.dart uses, so VR and FA mean
           // here what they mean in §13 rather than coming out as zero.
-          final st = stats[e.name]!;
+          final st = stats[name]!;
           if (active.isEmpty) {
             st.refUnvoiced++;
             if (got > 0) st.refUnvoicedReported++;
@@ -206,14 +218,13 @@ void main(List<String> argv) {
     for (final take in chosen) {
       final wav = readWav(take.path);
       final rate = wav.sampleRate;
-      for (final e in _engines) {
-        final sw = Stopwatch()..start();
-        final track = e.run(wav.samples, rate);
-        sw.stop();
-        timings[e.name]!.add(sw.elapsedMicroseconds / 1000);
+      final tracks = runAllEngines(wav.samples, rate, millis);
+      scored++;
+      for (final name in engineNames) {
         // MUSERC is one sustained note per take, so the nominal is the
         // reference for every frame the engine produces.
-        final st = stats[e.name]!;
+        final track = tracks[name]!;
+        final st = stats[name]!;
         for (final f in track) {
           final got = f.voicedProb >= 0.5 ? f.f0Hz : 0.0;
           // A MUSERC take is one sustained note throughout, so every frame
@@ -234,15 +245,14 @@ void main(List<String> argv) {
 
   stdout.writeln('| engine | RPA% | rep% | oct% | gross% | |err| p50 | VR% | FA% |');
   stdout.writeln('| --- | --- | --- | --- | --- | --- | --- | --- |');
-  for (final e in _engines) {
-    _row(e.name, stats[e.name]!);
+  for (final name in engineNames) {
+    _row(name, stats[name]!);
   }
   stdout.writeln('');
-  for (final e in _engines) {
-    final t = timings[e.name]!;
-    if (t.isEmpty) continue;
-    final s = List<double>.of(t)..sort();
-    stdout.writeln('${e.name}: ${s[s.length ~/ 2].toStringAsFixed(0)} ms '
-        'per file (median of ${s.length})');
+  for (final name in engineNames) {
+    final total = millis[name];
+    if (total == null || scored == 0) continue;
+    stdout.writeln('$name: ${(total / scored).toStringAsFixed(0)} ms '
+        'per file (mean over $scored)');
   }
 }

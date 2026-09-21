@@ -2366,6 +2366,55 @@ built to feed a note-HMM that cleans voicing up afterwards. Judging them
 without it measures the estimator rather than CometBeat's pipeline, which is
 the comparison asked for but is not the same as how CometBeat behaves.
 
+### 26.1 Putting the HMM back, and a trap in doing so
+
+§26 scored raw `pyinF0`. That is a component, not CometBeat: `route.dart:179`
+runs `segmentNotes` — an HMM over the pitch lattice — after the estimator, so
+unvoiced frames its own pipeline discards were being counted against it. Two
+arms put it back. `+hmm` is the shipped pipeline; `+hmm-mask` uses the HMM
+only for the voiced/unvoiced decision and keeps the estimator's own frequency
+inside a note.
+
+MUSERC, 12 cello takes:
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 |
+| --- | --- | --- | --- | --- | --- |
+| cb-pyin | 96.50 | 98.44 | 0.56 | 1.00 | 3.35 |
+| cb-pyin+hmm | 96.14 | 99.50 | **0.37** | **0.12** | **0.05** |
+| cb-pyin+hmm-mask | 96.17 | 99.53 | 0.35 | 0.12 | 3.35 |
+
+The HMM is doing real work: gross errors fall from 1.00% to 0.12% and octave
+errors from 0.56% to 0.37%. §26's false-alarm complaint was the right
+complaint.
+
+**And that 0.05-cent column is a measurement artefact, not a result.** It is
+the most dangerous number produced anywhere in this report, because it looks
+like a seventy-fold improvement in exactly the quantity a tuner cares about.
+
+`segmentNotes` returns `int midi` — semitone-quantised output. MUSERC's
+reference is `take.nominal`, the *exact equal-tempered frequency of the
+labelled MIDI note*. So an estimator that snaps to the nearest semitone is
+being scored against a reference that is itself a nominal semitone, and it
+scores near-zero by construction while saying nothing whatever about whether
+the cellist was in tune. The ruler is being measured against itself.
+
+Two consequences, both of which outlive this table:
+
+* **MUSERC cannot evaluate quantised output.** Any pipeline that rounds to a
+  semitone will score perfectly on cents there. GuitarSet can, because its
+  reference is a measured pitch contour rather than a nominal — on guitar the
+  same quantisation should appear as a *penalty*.
+* **`+hmm` is disqualified for a tuner regardless**, and the artefact hides
+  it rather than revealing it. A tuner needs the deviation from the nominal;
+  an output that *is* the nominal has thrown that away. `+hmm-mask` keeps the
+  estimator's frequency (3.35 cents, unchanged) while taking the HMM's
+  voicing — which is the only one of the three shapes worth considering here.
+
+The voicing question that motivated all this is unanswerable on MUSERC: each
+take is one sustained note, so there is no unvoiced span and the false-alarm
+column is 0.00% for every arm. GuitarSet answers it; that run is on CI,
+because this box needs 70 s per file where CI needs 5.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
