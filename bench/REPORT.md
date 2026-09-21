@@ -2503,6 +2503,219 @@ held notes, better on cents, near-parity on the errors — rather than
 improving a side mode or a runtime. Every runtime result in §17–§23 made
 something faster that was already fast enough; this makes the needle better.
 
+### 27.3 A streaming voicing model that does not work, and why
+
+§27.2 named the blocker — the note-HMM is offline — and the obvious fix
+looked small. The mask throws away the HMM's note identity (§27.1), so a
+model that decides *only* voiced against unvoiced should serve: two states
+instead of one per MIDI note, bounded lag instead of the whole track.
+`lib/voicing_hmm.dart` is that, built on §24's structure.
+
+It does not reproduce §27. Ten solo files:
+
+| variant | RPA% | oct% | gross% | held RPA% | \|err\| p50 | FA% |
+| --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | 69.39 | 0.62 | 3.58 | 76.23 | 2.85 | 19.08 |
+| pyin-lag0 **+ note HMM** (offline) | 77.49 | 0.48 | 5.48 | **86.59** | 2.45 | 31.32 |
+| pyin-lag0 + voicing HMM, lag 2 | 67.46 | 0.64 | 3.64 | 75.41 | 2.20 | **15.02** |
+
+It is far more conservative — false alarm 15.02%, better than the shipped
+19.08% — and it gives up almost all of §27's gain: held-note accuracy 75.41%
+against the note-HMM's 86.59%.
+
+**The constants are not the reason.** A sweep of the two costs across an
+order of magnitude each moves nothing that matters:
+
+| switch / evidence | RPA% | held RPA% | FA% |
+| --- | --- | --- | --- |
+| 0.4 / 1.0 | 67.52 | 75.46 | 14.94 |
+| 0.4 / 2.0 | 67.69 | 75.48 | 15.02 |
+| 2.5 / 2.0 | 67.48 | 75.96 | 14.47 |
+| 5.0 / 1.0 | 65.09 | 75.80 | 18.12 |
+| 5.0 / 0.5 | 66.62 | 78.01 | 20.83 |
+
+Every setting lands in the same place. That is the signature of a model that
+lacks information rather than one that is mistuned.
+
+**The diagnosis corrects an assumption in §27.1.** That section established
+that the note HMM's *output* must be discarded, because `int midi` quantises
+away the deviation a tuner exists to show — and that is still right. What it
+led me to assume, wrongly, is that the note states were therefore not
+load-bearing.
+
+They are. The note HMM decides voicing **using pitch continuity**: a frame
+belongs to note N when its f0 sits near N, and staying on N is cheap, so a
+frame whose *confidence* dipped is still held if its *pitch* is consistent
+with the note already in progress. A two-state model sees only pYIN's
+probability mass — a scalar — and has no way to know that the wobbly frame
+it is about to cut is the middle of a perfectly steady note.
+
+So the note states are needed for the **decision** and must not be used for
+the **answer**. Those are compatible, and they point at the design this
+should have had: a note-state HMM with a bounded lag, not a smaller model
+with a bounded lag. That is §24's trick applied to the structure that
+actually earns the result, and it is the next piece of work rather than a
+tuning exercise.
+
+## 28. Note-level transcription: the first attempt measured my own bug
+
+The question this report could not answer until now: not "is this 11.6 ms
+slice's pitch right" but **can it turn a recording into notes**. MusicNet's
+standard test split, ten real classical recordings, 13,589 annotated notes,
+scored by `mir_eval.transcription`'s rules.
+
+The first run returned **8.0% F1**, and the right response to that was not to
+publish it. Basic Pitch's published note-level numbers are in the 70–80%
+range; 8% is not a model result, it is a harness result.
+
+**It was a clock.** The model emits 172 frames of 256 samples — 44,032
+samples — for a window that advances **43,844**. Timing each frame from a
+running index rather than from its window's start therefore gains 8.53 ms
+per window: **836 ms over a three-minute piece, against a 50 ms onset
+tolerance.** Every note after the first few seconds was scored against the
+wrong part of the reference.
+
+Computing each frame's time from its window start instead:
+
+| | F1 (2 pieces) |
+| --- | --- |
+| before | 8.0% |
+| after | **39.8%** |
+
+Five times the score from one line, and nothing about the model changed.
+
+### 28.1 What is still unresolved
+
+A second arm decodes **the same ONNX model** with CometBeat's faithful port
+of Spotify's `note_creation.py` — onset peak-picking by `argrelmax`, minimum
+note length, `inferOnsets`, overlapping windows with trimmed seams. It should
+be the better decoder. It scores **11.1%**.
+
+Its note *count* is closer to the truth than this repo's (1,630 against 1,723
+reference, where the hysteresis decoder emits 1,044), so it is segmenting
+plausibly and the notes are landing in the wrong places. A constant time
+offset would be the obvious culprit and **it is not one**: sweeping the
+estimate ±300 ms moves F1 between 6.8% and 15.7%, with no peak that would
+indicate a fixed shift.
+
+**This is recorded as unresolved rather than as a finding about CometBeat's
+decoder.** Mis-integration on my side is at least as likely as a defect on
+theirs — the port takes a runner callback and I may be feeding it a window
+geometry it does not expect — and §26 already cost one wrong conclusion about
+that project by measuring a component instead of a product. The honest
+statement is that two decoders over one model differ by 4x and I have not
+established why.
+
+### 28.2 What can be said
+
+* **The decoder dominates.** A timing bug worth five times the score, and two
+  decoders differing fourfold over identical model output, on a benchmark
+  meant to measure the model. §22 already found that this repository's
+  decoder answers a deliberately different question — what is sounding *now*,
+  for a live display — so scoring it on a transcription benchmark measures
+  the mismatch as much as the model.
+* **MusicNet is hard for this model, by design.** Basic Pitch is built for a
+  solo instrument or small ensemble; these are string trios, wind trios and
+  dense solo piano at nearly nine notes a second. A number here is not
+  comparable to one on GuitarSet or MAESTRO.
+* **Offsets are much harder than onsets**, as the literature says: adding the
+  offset condition takes 39.8% to 10.3%.
+
+The full ten-piece run is on CI. The ggml arms did not run at all — the
+libcrispasr build step failed there — so this measures the pure-Dart path
+only, and §17's comparison of the two runtimes remains the only place the two
+have been scored against each other.
+
+## 29. Where the transcription score actually goes
+
+47.8% note-level F1 is not a good number, and the useful question is which
+of three things is holding it: the model, the decoder, or the benchmark.
+Measured, on MusicNet's test split.
+
+### 29.1 The notes are found. The timing is the problem.
+
+Widening only the onset tolerance, everything else fixed:
+
+| onset tolerance | F1 |
+| --- | --- |
+| 25 ms | 20.5% |
+| **50 ms** (standard) | **39.0%** |
+| 100 ms | 60.2% |
+| 200 ms | 73.0% |
+| 400 ms | 75.1% |
+
+It plateaus at ~75%. **Three quarters of the notes are detected with the
+right pitch; a third of them are simply not placed within 50 ms.** And pitch
+is not implicated at all — widening the *pitch* tolerance from 50 to 250
+cents moves F1 by 1.6 points, from 39.0% to 40.6%.
+
+### 29.2 The lag is an instrument property, not noise
+
+Onset error of matched notes, per piece, measured at a wide tolerance:
+
+| piece | instruments | median onset error | F1 @50 ms | F1 after removing that piece's median |
+| --- | --- | --- | --- | --- |
+| 1759 | piano | **−12 ms** | 53.0% | 54.0% |
+| 1819 | horn/bassoon/clarinet | +39 ms | 40.7% | 49.0% |
+| 2106 | violin/viola/cello | +70 ms | 24.0% | 38.8% |
+| 2191 | violin | +58 ms | 36.3% | **67.5%** |
+| 2298 | cello | +42 ms | 45.7% | 60.8% |
+
+**Piano sits at −12 ms and every bowed or blown instrument lags 39–70 ms** —
+straddling the tolerance. That is not label noise, which would not sort
+itself by instrument family. A piano attack is percussive and unambiguous; a
+bowed onset is genuinely spread over tens of milliseconds, so the model fires
+when the pitch becomes *stable* while a MIDI note-on marks when the note was
+*intended*. The two definitions differ by about the length of a bow change.
+
+The per-piece correction in the last column is **a diagnostic and not a
+result** — fitting a shift to the reference would be scoring against the
+answer key. It is here only to show how much of the loss is one systematic
+offset: for the solo violin, 36.3% becomes 67.5%.
+
+### 29.3 The decoder is already at its best
+
+Basic Pitch's own decoder, swept over its thresholds and its melodia option
+(model output cached so each row costs only the decode):
+
+| onset | frame | min len | melodia | precision | recall | F1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **0.5** | **0.3** | **11** | off | 42.9% | 35.3% | **38.8%** |
+| 0.5 | 0.3 | 11 | on | 40.6% | 36.8% | 38.6% |
+| 0.3 | 0.3 | 11 | on | 27.5% | 35.2% | 30.9% |
+| 0.2 | 0.2 | 5 | on | 15.8% | 56.9% | 24.7% |
+| 0.1 | 0.15 | 5 | on | 9.8% | **67.8%** | 17.1% |
+
+The shipped defaults are the F1 optimum, and every loosening trades
+precision away faster than it buys recall. Recall reaching 67.8% is the same
+fact §29.1 found from the other direction: the model sees the notes.
+
+So of the three candidate ceilings — model, decoder, benchmark — **the
+decoder is not it**, and the model's *detection* is not it either. What is
+left is onset placement on non-percussive attacks.
+
+### 29.4 What would actually improve it
+
+1. **A model with a dedicated onset head for sustained instruments.**
+   Kong's piano-transcription and MT3 exist for this and are registry-
+   resolvable (77 MB and 96 MB). They have never run: the CI step that
+   builds libcrispasr cloned without `--recurse-submodules`, CrispASR's
+   CMake refused to configure without its vendored ggml, and
+   `continue-on-error` reported that step as **success** — so the run
+   silently measured one arm and presented it as the answer. The same shape
+   as §20.2a. Fixed, with an explicit check that the library exists and a
+   warning naming which arms a run can measure.
+2. **Report per instrument.** An aggregate that mixes piano at 53% with
+   string trios at 24% describes neither.
+3. **Do not chase the aggregate with thresholds.** §29.3 says that lever is
+   spent.
+
+What this does *not* justify is a conclusion about Basic Pitch as a
+transcriber. It is a 35.7k-parameter instrument-agnostic model being asked
+for dense polyphonic classical at nine notes a second, which is outside what
+it was built for — and §10 already showed it doing the job it *was* built
+for, naming notes better than YIN on GuitarSet.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
