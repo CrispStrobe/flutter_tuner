@@ -2310,6 +2310,62 @@ Not recommended: the third runtime. Native ONNX Runtime FFI earns its place
 in an app with chords, stems and tablature to accelerate. Here §19 and §23
 already got 2.22× from an isolate pool in pure Dart, with nothing to ship.
 
+## 26. CometBeat's detectors on both corpora
+
+§25 compared the two projects' CrispASR integration. This compares their
+*detectors*, which turned out to be possible: all 67 files of CometBeat's
+transcription tree are Flutter-free, so its engines run in this harness
+directly (`tool/sync_cometbeat.sh` copies them; CI fails if the copies
+drift). Only the model-free engines are included — WORLD DIO, which this app
+has no equivalent of, and CometBeat's own pYIN. The rest would measure a
+model rather than CometBeat.
+
+### Guitar — GuitarSet, 180 solo files
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-dio | 52.24 | 63.32 | 7.30 | 29.38 | 3.90 | 80.53 | 53.78 |
+| cb-dio (no refine) | 41.87 | 50.76 | 2.70 | 46.54 | 9.75 | 80.53 | 53.78 |
+| cb-pyin | 82.63 | 83.98 | 4.59 | 11.44 | 3.10 | 98.45 | 53.90 |
+| *this app, as it ships* | *71.88* | *74.71* | ***0.59*** | ***3.20*** | ***2.45*** | *71.7* | ***17.1*** |
+
+### Cello — MUSERC, 109 takes
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 |
+| --- | --- | --- | --- | --- | --- |
+| cb-dio | 86.92 | 90.90 | **0.67** | 8.44 | 12.30 |
+| cb-dio (no refine) | 86.47 | 90.43 | 0.86 | 8.71 | 14.15 |
+| cb-pyin | 88.32 | 91.55 | 1.05 | 7.41 | 11.95 |
+
+### What it says
+
+**CometBeat's pYIN is the better *detector*; this app is the better
+*tuner*.** cb-pyin answers 84% of the time against this app's 75% and is
+right more often in absolute terms — but it is wrong in the ways a tuner
+cannot afford: 4.59% octave errors against 0.59%, 11.44% gross against 3.20%,
+and a false alarm rate of 53.9% against 17.1%. That is the same trade §4.1
+found in this repo's own pYIN and declined, arrived at independently by
+another project with different priorities. A transcription app wants the
+answer; a tuner wants the silence.
+
+**WORLD DIO is not a music estimator and does not pretend to be.** It was
+built for speech, and on plucked guitar it manages 52% with 7.3% octave
+errors. On sustained cello it reaches 86.9% — bowed strings are much closer
+to the periodic, continuously-excited signal DIO assumes. Worth recording
+precisely because the gap between 52% and 87% *for the same algorithm* is a
+statement about the corpus, not the code.
+
+**Everything is worse on cello than the app's guitar numbers, including
+CometBeat's best.** 11.95 cents of median error against 2.45 on guitar. §11
+already found the cello hard; this is independent confirmation from
+algorithms that share no code with ours.
+
+One caveat on the false-alarm column: it is high for *every* CometBeat engine
+including on frames where the reference is silent, and these engines were
+built to feed a note-HMM that cleans voicing up afterwards. Judging them
+without it measures the estimator rather than CometBeat's pipeline, which is
+the comparison asked for but is not the same as how CometBeat behaves.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
