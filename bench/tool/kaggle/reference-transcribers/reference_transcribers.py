@@ -50,7 +50,7 @@ import sys
 import time
 import urllib.request
 
-SCRIPT_VERSION = "reference-transcribers v5"
+SCRIPT_VERSION = "reference-transcribers v6"
 
 WORK = "/kaggle/working"
 DATA = os.path.join(WORK, "musicnet")
@@ -203,9 +203,17 @@ def read_labels(path):
 
 
 def _wav_seconds(path):
-    import wave
-    with wave.open(path, "rb") as w:
-        return w.getnframes() / w.getframerate()
+    """MusicNet's test WAVs are IEEE float32 (format tag 3), which the
+    stdlib `wave` module refuses outright — so `soundfile` reads the header
+    and `wave` is only the fallback for the PCM case."""
+    try:
+        import soundfile as sf
+        info = sf.info(path)
+        return info.frames / info.samplerate
+    except Exception:  # noqa: BLE001
+        import wave
+        with wave.open(path, "rb") as w:
+            return w.getnframes() / w.getframerate()
 
 
 def load_pieces():

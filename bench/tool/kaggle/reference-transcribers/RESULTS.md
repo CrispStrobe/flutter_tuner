@@ -114,10 +114,12 @@ thing on this data.
 The kernel re-implements the Dart matcher in Python and runs it on the same
 reference/estimate arrays `mir_eval` gets.
 
-Nine of ten pieces: **identical**, onset-only and with offsets. Piece 1759
-differs by 4 matches out of 905 (0.4%) onset-only and 1 of 283 with
-offsets — and **every one of those disappears when `mir_eval`'s own
-rounding is applied**.
+Across both models' runs — twenty scored pieces — the two implementations
+agree on sixteen exactly, onset-only and with offsets. The four that differ
+do so by 1 to 4 matches out of hundreds (Basic Pitch 1759: 901 vs 905 of
+1723; Kong 2556: 1093 vs 1094; Kong 2416: 754 vs 756; Kong 2298: 169 vs
+170 — worst case 0.4%), and **every one of them disappears when
+`mir_eval`'s own rounding is applied**.
 
 The mechanism: `mir_eval.transcription` rounds onset and offset distances to
 four decimals before comparing, deliberately, so that a note exactly 50 ms
@@ -141,7 +143,7 @@ the two files.)
 
 ## 5. The other models
 
-**Kong / ByteDance high-resolution piano transcription** — see §6.
+**Kong / ByteDance high-resolution piano transcription** — see §6, and it is the most interesting result here.
 
 **Magenta Onsets & Frames — skipped, and the log says why.** `pip install
 magenta` fails at metadata generation: the package pins `tensorflow==2.9`
@@ -156,14 +158,48 @@ path that installs.
 weights and a matching spectrogram config. Not a `pip install`, and the
 brief was explicit about not sinking the run into it.
 
-## 6. Kong / ByteDance, piano-only
 
-See `run-v4.log`. Note that Kong is trained on MAESTRO and transcribes
-*piano*: on the six pieces with no piano in them its output is not a
-transcription of anything, and the only rows worth reading are 1759, 2303,
-2556 (solo piano) and 2628 (piano + violin).
+## 6. Kong / ByteDance, and the one thing that beats Basic Pitch here
 
-<!-- KONG RESULTS -->
+Kong is trained on MAESTRO and transcribes **piano**. On the six pieces with
+no piano in them its output is not a transcription of anything, so the
+aggregate over all ten (47.6% F1) is a number about the wrong question. The
+rows that mean something are the four with piano in them.
+
+| piece | instruments | ref | est | P | R | F1 | F1+off | onset p50 (wide) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2303 | piano | 718 | 732 | 87.2% | 88.9% | **88.0%** | 42.6% | −0.4 ms |
+| 2556 | piano | 1446 | 1464 | 74.7% | 75.7% | 75.2% | 36.6% | −11.2 ms |
+| 2628 | piano, violin | 1518 | 1482 | 70.4% | 68.8% | 69.6% | 33.9% | −6.5 ms |
+| 1759 | piano | 1723 | 1773 | 60.0% | 61.8% | 60.9% | 23.3% | −17.9 ms |
+| 1819 | horn, bassoon, clarinet | 1321 | 1615 | 39.3% | 48.1% | 43.3% | 12.7% | +25.4 ms |
+| 2416 | horn, bassoon, clarinet | 1386 | 2014 | 37.5% | 54.5% | 44.5% | 18.8% | −7.7 ms |
+| 2298 | cello | 966 | 312 | 54.5% | 17.6% | 26.6% | 18.6% | +40.9 ms |
+| 2106 | violin, viola, cello | 2004 | 395 | 34.4% | 6.8% | 11.3% | 2.9% | +54.9 ms |
+| 2382 | violin, viola, cello | 1956 | 199 | 37.7% | 3.8% | 7.0% | 4.8% | +77.3 ms |
+| 2191 | violin | 551 | **9** | 55.6% | 0.9% | 1.8% | 0.4% | +75.5 ms |
+
+| | solo piano (3) | everything else (7) |
+| --- | --- | --- |
+| Kong | **71.2%** | 35.9% |
+| Basic Pitch | 57.5% | 38.3% |
+
+**On the material it is for, Kong is 13.7 F1 points better than Basic
+Pitch** — and 88.0% on 2303 is a genuinely good transcription, the best
+number anywhere in this report. That is what a dedicated onset head buys,
+which is what §29.4 predicted and had never been able to test.
+
+Note also what happens on solo violin: Kong emits **nine notes** for 551.
+That is not a failure, it is a piano model correctly declining to transcribe
+something that is not a piano, and it is why the aggregate must not be read.
+
+Kong's onset error on piano is **−9.9 ms on average, slightly early**, where
+Basic Pitch is +3.8 ms, slightly late. Both are inside ±20 ms and neither
+threatens the 50 ms tolerance; the interesting half of §3 is the bowed and
+blown material, where Kong lags too (+37.1 ms) on notes it should not be
+transcribing at all.
+
+<!-- RUNTIME -->
 
 ## Operational notes
 
