@@ -50,7 +50,7 @@ import sys
 import time
 import urllib.request
 
-SCRIPT_VERSION = "reference-transcribers v3"
+SCRIPT_VERSION = "reference-transcribers v4"
 
 WORK = "/kaggle/working"
 DATA = os.path.join(WORK, "musicnet")
@@ -303,8 +303,13 @@ def run_kong(pieces, out_path):
 
     torch.load = _load
 
-    from piano_transcription_inference import (PianoTranscription, load_audio,
-                                               sample_rate)
+    # 3. Its own `load_audio` calls `librosa.core.audio.util.buf_to_float`,
+    #    a path librosa's lazy loader no longer exposes
+    #    (`AttributeError: No librosa.core attribute audio`). `librosa.load`
+    #    does the same job — mono, resampled to the model's 16 kHz — so call
+    #    that directly rather than pinning librosa backwards.
+    import librosa
+    from piano_transcription_inference import PianoTranscription, sample_rate
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -321,7 +326,7 @@ def run_kong(pieces, out_path):
     preds = {}
     for i, p in enumerate(pieces, 1):
         t0 = time.time()
-        audio, _ = load_audio(p["audio"], sr=sample_rate, mono=True)
+        audio, _ = librosa.load(p["audio"], sr=sample_rate, mono=True)
         out = tr.transcribe(audio, os.path.join(WORK, f"kong_{p['id']}.mid"))
         ev = out["est_note_events"]
         preds[p["id"]] = [[float(e["onset_time"]), float(e["offset_time"]),

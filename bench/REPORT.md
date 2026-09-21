@@ -2716,6 +2716,85 @@ for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
 
+## 31. The ONNX route: compatible, and far too slow
+
+§29.4 said the lever was a model with a dedicated onset head, and named the
+ONNX route as the way to reach the ones that publish only PyTorch weights.
+Three are now exported and verified, and the answer to "can the pure-Dart
+runtime run them" is **yes, and it does not matter**.
+
+| model | ONNX | params | max abs diff vs PyTorch |
+| --- | --- | --- | --- |
+| Kong / ByteDance high-res piano | 154 MB | 42.95 M | **7.7e-07** |
+| Onsets & Frames | 106 MB | 26.49 M | 7.0e-05 |
+| hFT-Transformer | **22 MB** | 5.52 M | 1.3e-05 |
+
+Each was re-run at an input length different from the one it was traced at —
+the only real test that `dynamic_axes` took — and Kong and Onsets & Frames
+were then loaded into `onnx_runtime_dart` itself and agreed with onnxruntime
+to ~1e-6. PyTorch → ONNX → pure Dart, measured rather than assumed.
+
+**Zero missing ops**, across all four graphs, diffed node by node against the
+runtime's dispatch table. Kong is 26 distinct ops, hFT does plain
+`MatMul`+`Softmax`+`LayerNormalization` attention with no fused op and no
+`com.microsoft` domain, and even the int8 variant's `ConvInteger` /
+`DynamicQuantizeLinear` / `MatMulInteger` are implemented.
+
+### 31.1 The question I asked was the wrong one
+
+§29.4 treated op compatibility as what decides the Dart route. It is not, and
+the measurement says so plainly: **Kong runs at ~96× real time in pure
+Dart** — 96 seconds of CPU per second of audio, so a three-minute piece is
+about five hours. Onsets & Frames is ~8×.
+
+That is not a surprise once it is written down. §19 measured the pure-Dart
+runtime at **0.78 GMAC/s**, and Kong has **1,203 times Basic Pitch's
+parameters**. Scaling §30's measured 0.12× real time by that factor predicts
+~144×; 96× is the same answer. The arithmetic was available before the
+export and I did not do it.
+
+So the conclusion inverts. Compatibility is solved and irrelevant;
+**throughput is the whole question**, and it puts these models out of reach
+of the pure-Dart path for anything but offline transcription of a short
+take.
+
+Which makes the **ggml route more important, not less** — it is where the
+speed would have to come from — and puts §20.1a's finding on the critical
+path rather than beside it: CrispASR's own `src/` compiles baseline x86-64
+with no AVX2, on every release leg, while the ggml it vendors gets AVX2 on
+fifteen of them.
+
+### 31.2 What is actually worth building
+
+* **hFT-Transformer**, if anything. 22 MB, 5.5 M parameters — 155× Basic
+  Pitch rather than 1,203× — SOTA on piano, a clean op set and a fixed
+  192-frame window that batches naturally. My own arithmetic puts it near
+  ~19× real time in pure Dart, which is still not live but is a different
+  order of problem. Its real work is a Dart log-mel front end, not the
+  runtime.
+* **Kong as an accuracy reference**, because its log-mel front end is *inside
+  the graph* (torchlibrosa's `Conv1d` STFT), so it takes raw 16 kHz audio
+  and removes an entire class of front-end mismatch bug. Too slow to ship in
+  Dart; ideal for establishing what the ceiling is.
+* **Onsets & Frames is a baseline, not a candidate.** 106 MB for the oldest
+  architecture here is nobody's trade.
+* **int8 quantisation is not a size play.** 154 → 119 MB is 23%, because
+  `quantize_dynamic` will not touch GRU weights and those are most of the
+  model, and it costs 0.12 absolute error on sigmoid outputs. Revisit only
+  as a speed play.
+
+### 31.3 Three corrections to this report's own pointers
+
+* **YourMT3's repository contains no code.** `github.com/mimbres/YourMT3` is
+  240 KB — a LICENCE and a README; the implementation lives in the HF Space.
+  §29.4 listed it as a candidate on the strength of the name.
+* **hFT's repository is `hft-transformer`*s*`-rewrite`**, plural. The
+  singular 404s, and a 404 clone surfaces as `could not read Username for
+  'https://github.com'` — which reads exactly like the no-internet failure
+  `kaggle-usage.md` warns about and is not one.
+* **That guide's gotcha #3 is too strong.** The CPU worker reached pypi,
+  Zenodo, HF and GitHub sub-second on both runs.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
