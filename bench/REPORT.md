@@ -2415,6 +2415,94 @@ take is one sustained note, so there is no unvoiced span and the false-alarm
 column is 0.00% for every arm. GuitarSet answers it; that run is on CI,
 because this box needs 70 s per file where CI needs 5.
 
+## 27. pYIN, reconsidered: the strongest candidate this benchmark has produced
+
+§4.1 rejected pYIN for a tuner on two grounds, and this report has now
+dismantled both.
+
+* **Latency.** §24 measured it: two frames of lookahead reach offline
+  accuracy, and the variant that wins below uses **zero** — greedy decoding,
+  no lookahead at all.
+* **Error rates.** §24.1 left this standing: pYIN answered far more often and
+  was wrong more often when it did, with 39.52% false alarm against the
+  shipped pipeline's 17.07%. §24.2 then showed this app's threshold gate
+  could not fix it, because pYIN already has a voicing model and the gate is
+  a cruder version of the same decision.
+
+What was missing was a *different mechanism*. CometBeat's `segmentNotes` is
+one: an HMM over the pitch lattice, temporal rather than per-frame. Used as a
+**voicing mask** — its note boundaries decide when to answer, pYIN's own
+frequency decides what to answer — all 180 solo files:
+
+| variant | RPA% | oct% | gross% | held RPA% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **app, as it ships** | 71.88 | **0.59** | **3.20** | 80.80 | 2.45 | 71.69 | **17.07** |
+| pyin-lag0, no HMM | 80.30 | 1.37 | 5.85 | 89.81 | 2.05 | 85.66 | 24.79 |
+| **pyin-lag0 + HMM mask** | 73.60 | 0.65 | 3.45 | **88.21** | **2.00** | **75.68** | 19.22 |
+| pyin-lag2 + HMM mask | 79.05 | 0.82 | 5.15 | 88.92 | 2.00 | 83.45 | 32.73 |
+
+**The voicing gap closed from 22 points to 2.** And on the axes a tuner is
+judged by, the masked variant wins:
+
+* **held-note accuracy 88.21% against 80.80%** — a note held while a peg
+  turns, which is the measurement the product exists to perform;
+* **2.00 cents against 2.45** on the number the needle shows;
+* voicing recall 75.68% against 71.69%, so it answers *more* often as well as
+  more accurately.
+
+What it concedes is now marginal rather than disqualifying: 0.65% octave
+errors against 0.59%, 3.45% gross against 3.20%, 19.22% false alarm against
+17.07%.
+
+### 27.1 Why the mask, and not the HMM's own output
+
+`segmentNotes` returns `int midi`. Taking that as the reading quantises to
+the semitone and **discards the deviation a tuner exists to show** — and
+§26.1 records how badly that can hide: on MUSERC, whose reference is a
+nominal semitone, quantised output scores **0.05 cents**, an apparent
+seventyfold improvement that is pure artefact.
+
+§26.1 predicted the same quantisation would appear as a *penalty* on
+GuitarSet, whose reference is a measured contour rather than a nominal. It
+does, and the sign flip is the cleanest demonstration in this report that the
+reference matters more than the metric — CometBeat's own engine, 180 files:
+
+| | \|err\| p50 on cello (nominal ref) | \|err\| p50 on guitar (measured ref) |
+| --- | --- | --- |
+| cb-pyin | 11.95 | 3.10 |
+| cb-pyin + hmm (quantised) | **0.05** | **7.35** |
+| cb-pyin + hmm mask | 11.85 | 3.00 |
+
+Same code, opposite conclusion, depending only on what it is scored against.
+
+The mask is also the better choice for **CometBeat**, whose shipped pipeline
+currently takes the quantised output: `+hmm-mask` dominates raw `cb-pyin` on
+every axis — false alarm 53.90% → 29.59%, octave 4.59% → 2.14%, gross 11.44%
+→ 6.92% — while *improving* cents from 3.10 to 3.00.
+
+### 27.2 What stands between this and shipping
+
+One structural thing, and it is the same problem this report has already
+solved once.
+
+**`segmentNotes` is a Viterbi over the whole track.** It is offline, exactly
+as pYIN's own decode was before §24 gave it a bounded lag. A live tuner needs
+a streaming version, and the numbers above do not account for one. The
+pattern is known — decide frame *t* from the best state at *t+lag*, sharing
+the forward pass — but it is real work, and until it exists this is a result
+rather than a feature.
+
+Two smaller ones. pYIN costs more per frame than YIN (§4 put its front end at
+7–8% of the frame budget, which is affordable but not free). And
+`segmentNotes` is CometBeat's code: shipping needs a port and a licence
+check, not a copy.
+
+**Recommendation: this is worth building.** It is the only change this
+benchmark has found that improves the tuner on its own terms — better on
+held notes, better on cents, near-parity on the errors — rather than
+improving a side mode or a runtime. Every runtime result in §17–§23 made
+something faster that was already fast enough; this makes the needle better.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
