@@ -50,7 +50,7 @@ import sys
 import time
 import urllib.request
 
-SCRIPT_VERSION = "reference-transcribers v2"
+SCRIPT_VERSION = "reference-transcribers v3"
 
 WORK = "/kaggle/working"
 DATA = os.path.join(WORK, "musicnet")
@@ -274,6 +274,35 @@ def run_basic_pitch(pieces, out_path):
 def run_kong(pieces, out_path):
     """ByteDance / Kong high-resolution piano transcription. Piano only."""
     import torch
+
+    # Two things the package does that a Kaggle worker will not tolerate.
+    #
+    # 1. It fetches its 165 MB checkpoint with `os.system("wget ...")` and
+    #    does not check the result, so a worker without wget gets a silent
+    #    zero-byte file and a confusing `torch.load` failure. Fetch it here
+    #    instead, visibly.
+    # 2. `torch.load` defaults to `weights_only=True` from torch 2.6, and
+    #    this checkpoint predates that by years. The file is the published
+    #    Zenodo artefact, so loading it fully is the intended behaviour, but
+    #    it has to be asked for.
+    ckpt_dir = os.path.expanduser("~/piano_transcription_inference_data")
+    ckpt = os.path.join(ckpt_dir, "note_F1=0.9677_pedal_F1=0.9186.pth")
+    if not os.path.exists(ckpt) or os.path.getsize(ckpt) < 1.6e8:
+        os.makedirs(ckpt_dir, exist_ok=True)
+        url = ("https://zenodo.org/record/4034264/files/"
+               "CRNN_note_F1%3D0.9677_pedal_F1%3D0.9186.pth?download=1")
+        log(f"fetching Kong checkpoint (~165 MB) from {url}")
+        urllib.request.urlretrieve(url, ckpt)
+        log(f"  {os.path.getsize(ckpt)/1e6:.1f} MB")
+
+    _torch_load = torch.load
+
+    def _load(*a, **kw):
+        kw.setdefault("weights_only", False)
+        return _torch_load(*a, **kw)
+
+    torch.load = _load
+
     from piano_transcription_inference import (PianoTranscription, load_audio,
                                                sample_rate)
 
@@ -288,7 +317,7 @@ def run_kong(pieces, out_path):
             log(f"  GPU is sm_{cap[0]}{cap[1]}, unsupported by this torch — CPU")
     log(f"kong device: {device}")
 
-    tr = PianoTranscription(device=device, checkpoint_path=None)
+    tr = PianoTranscription(device=device, checkpoint_path=ckpt)
     preds = {}
     for i, p in enumerate(pieces, 1):
         t0 = time.time()
