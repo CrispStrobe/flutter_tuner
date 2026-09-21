@@ -50,7 +50,7 @@ import sys
 import time
 import urllib.request
 
-SCRIPT_VERSION = "reference-transcribers v4"
+SCRIPT_VERSION = "reference-transcribers v5"
 
 WORK = "/kaggle/working"
 DATA = os.path.join(WORK, "musicnet")
@@ -202,6 +202,12 @@ def read_labels(path):
     return notes, sorted(instruments)
 
 
+def _wav_seconds(path):
+    import wave
+    with wave.open(path, "rb") as w:
+        return w.getnframes() / w.getframerate()
+
+
 def load_pieces():
     pieces = []
     for f in sorted(os.listdir(AUDIO_DIR)):
@@ -215,6 +221,7 @@ def load_pieces():
         pieces.append({
             "id": pid,
             "audio": os.path.join(AUDIO_DIR, f),
+            "audio_sec": _wav_seconds(os.path.join(AUDIO_DIR, f)),
             "notes": notes,
             "instruments": instruments,
             "instrument_names": [GM.get(i, f"program{i}") for i in instruments],
@@ -258,17 +265,21 @@ def run_basic_pitch(pieces, out_path):
     log(f"basic-pitch {getattr(basic_pitch, '__version__', '?')} "
         f"model: {MODEL}")
 
-    preds = {}
+    log(f"onnxruntime threads: default, os.cpu_count()={os.cpu_count()}")
+    preds, timing = {}, {}
     for i, p in enumerate(pieces, 1):
         t0 = time.time()
         _, _, events = predict(p["audio"], model_or_model_path=MODEL)
+        wall = time.time() - t0
         # (start_s, end_s, pitch_midi, amplitude, pitch_bends)
         preds[p["id"]] = [[float(e[0]), float(e[1]), float(e[2])]
                           for e in events]
+        timing[p["id"]] = {"audio_sec": p["audio_sec"], "infer_sec": wall}
         log(f"  [{i}/{len(pieces)}] {p['id']}: {len(events)} notes "
-            f"(ref {len(p['notes'])}) in {time.time()-t0:.0f}s")
+            f"(ref {len(p['notes'])})  {p['audio_sec']:.0f}s audio in "
+            f"{wall:.0f}s  =>  {wall/p['audio_sec']:.3f}x real time")
         json.dump(preds, open(out_path, "w"))
-    json.dump(preds, open(out_path, "w"))
+        json.dump(timing, open(out_path.replace("preds_", "timing_"), "w"))
 
 
 def run_kong(pieces, out_path):
@@ -322,22 +333,222 @@ def run_kong(pieces, out_path):
             log(f"  GPU is sm_{cap[0]}{cap[1]}, unsupported by this torch — CPU")
     log(f"kong device: {device}")
 
+    log(f"torch threads {torch.get_num_threads()}, "
+        f"os.cpu_count()={os.cpu_count()}")
     tr = PianoTranscription(device=device, checkpoint_path=ckpt)
-    preds = {}
+    preds, timing = {}, {}
     for i, p in enumerate(pieces, 1):
-        t0 = time.time()
         audio, _ = librosa.load(p["audio"], sr=sample_rate, mono=True)
-        out = tr.transcribe(audio, os.path.join(WORK, f"kong_{p['id']}.mid"))
+        t0 = time.time()
+        out = tr.transcribe(audio, None)
+        wall = time.time() - t0
         ev = out["est_note_events"]
         preds[p["id"]] = [[float(e["onset_time"]), float(e["offset_time"]),
                            float(e["midi_note"])] for e in ev]
+        timing[p["id"]] = {"audio_sec": p["audio_sec"], "infer_sec": wall}
         log(f"  [{i}/{len(pieces)}] {p['id']}: {len(ev)} notes "
-            f"(ref {len(p['notes'])}) in {time.time()-t0:.0f}s")
+            f"(ref {len(p['notes'])})  {p['audio_sec']:.0f}s audio in "
+            f"{wall:.0f}s  =>  {wall/p['audio_sec']:.2f}x real time")
         json.dump(preds, open(out_path, "w"))
-    json.dump(preds, open(out_path, "w"))
+        json.dump(timing, open(out_path.replace("preds_", "timing_"), "w"))
 
 
-MODELS = {"basic_pitch": run_basic_pitch, "kong": run_kong}
+# ---------------------------------------------------------------------------
+# the same weights under native ONNX Runtime
+# ---------------------------------------------------------------------------
+#
+# The Dart runtime measures ~96x real time for Kong — 96 seconds of CPU per
+# second of audio — so that path cannot ship these models whatever their
+# accuracy. Native ONNX Runtime is the runtime that could. Nobody has
+# measured what it costs, and that number, not op compatibility, decides
+# whether a native-ORT backend is worth building.
+#
+# Kong is the one of the three exports that can be scored rather than only
+# timed: its graph takes **raw 16 kHz audio**, with the log-mel front end
+# (torchlibrosa's Conv1d STFT) inside the graph, and its outputs are named
+# exactly as the PyTorch model's dict keys. So the official segmentation and
+# the official `RegressionPostProcessor` can be reused verbatim and only the
+# forward pass swapped. Anything that differs is then the runtime.
+#
+# Onsets & Frames and HFT Transformer take *features*, not audio — a 229-bin
+# log-mel at hop 512 and a 256-bin log-mel in fixed 192-frame windows. Their
+# front ends and note decoders would have to be reimplemented, and an
+# unverified reimplementation is exactly the failure mode this kernel exists
+# to rule out. They are therefore **timed and not scored**, which is the
+# half of the question that actually decides the backend.
+
+ONNX_MOUNTS = (
+    "/kaggle/input/crisptuner-transcriber-onnx",
+    "/kaggle/input/datasets/chr1s4/crisptuner-transcriber-onnx",
+)
+
+# Kong transcribes piano. On the six pieces with no piano in them its output
+# is not a transcription of anything, so the arms that exist to compare
+# runtimes run on the four pieces that contain piano.
+KONG_PIECES = ("1759", "2303", "2556", "2628")
+
+KONG_SEGMENT_SAMPLES = 16000 * 10
+
+
+def find_onnx(name):
+    for d in ONNX_MOUNTS:
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _enframe(x, segment_samples):
+    """Verbatim from `PianoTranscription.enframe` — 50% overlapping 10 s
+    segments. Copied rather than called so the ORT arm needs no torch."""
+    assert x.shape[1] % segment_samples == 0
+    batch, pointer = [], 0
+    while pointer + segment_samples <= x.shape[1]:
+        batch.append(x[:, pointer:pointer + segment_samples])
+        pointer += segment_samples // 2
+    import numpy as np
+    return np.concatenate(batch, axis=0)
+
+
+def _deframe(x):
+    """Verbatim from `PianoTranscription.deframe` — drops the extra frame
+    each segment gains from `center=True`, then keeps each segment's middle
+    half."""
+    import numpy as np
+    if x.shape[0] == 1:
+        return x[0]
+    x = x[:, 0:-1, :]
+    (n, seg, _) = x.shape
+    assert seg % 4 == 0
+    y = [x[0, 0:int(seg * 0.75)]]
+    for i in range(1, n - 1):
+        y.append(x[i, int(seg * 0.25):int(seg * 0.75)])
+    y.append(x[-1, int(seg * 0.25):])
+    return np.concatenate(y, axis=0)
+
+
+def _ort_session(path, threads):
+    import onnxruntime as ort
+    so = ort.SessionOptions()
+    if threads:
+        so.intra_op_num_threads = threads
+        so.inter_op_num_threads = 1
+    return ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+
+
+def _run_kong_onnx(pieces, out_path, model_file):
+    import librosa
+    import numpy as np
+    from piano_transcription_inference import config
+    from piano_transcription_inference.utilities import RegressionPostProcessor
+
+    path = find_onnx(model_file)
+    if path is None:
+        raise SystemExit(f"{model_file} not found in {ONNX_MOUNTS}")
+    threads = int(os.environ.get("ORT_THREADS", "0"))
+    sess = _ort_session(path, threads)
+    names = [o.name for o in sess.get_outputs()]
+    inp = sess.get_inputs()[0].name
+    log(f"{model_file}: {os.path.getsize(path)/1e6:.0f} MB, "
+        f"intra_op_num_threads={threads or 'default'}, "
+        f"os.cpu_count()={os.cpu_count()}, outputs={names}")
+
+    preds, timing = {}, {}
+    for i, p in enumerate(pieces, 1):
+        audio, _ = librosa.load(p["audio"], sr=16000, mono=True)
+        audio_sec = len(audio) / 16000
+        audio = audio[None, :]
+        n = audio.shape[1]
+        pad = int(np.ceil(n / KONG_SEGMENT_SAMPLES)) * KONG_SEGMENT_SAMPLES - n
+        audio = np.concatenate((audio, np.zeros((1, pad))), axis=1)
+        segments = _enframe(audio, KONG_SEGMENT_SAMPLES).astype(np.float32)
+
+        t0 = time.time()
+        acc = {k: [] for k in names}
+        for s in range(segments.shape[0]):
+            out = sess.run(names, {inp: segments[s:s + 1]})
+            for k, v in zip(names, out):
+                acc[k].append(v)
+        infer = time.time() - t0
+
+        od = {k: _deframe(np.concatenate(v, axis=0))[0:n]
+              for k, v in acc.items()}
+        post = RegressionPostProcessor(
+            config.frames_per_second, classes_num=config.classes_num,
+            onset_threshold=0.3, offset_threshold=0.3, frame_threshold=0.1,
+            pedal_offset_threshold=0.2)
+        ev, _pedal = post.output_dict_to_midi_events(od)
+        preds[p["id"]] = [[float(e["onset_time"]), float(e["offset_time"]),
+                           float(e["midi_note"])] for e in ev]
+        timing[p["id"]] = {"audio_sec": audio_sec, "infer_sec": infer,
+                           "segments": int(segments.shape[0])}
+        log(f"  [{i}/{len(pieces)}] {p['id']}: {len(ev)} notes "
+            f"(ref {len(p['notes'])})  {audio_sec:.0f}s audio in "
+            f"{infer:.0f}s  =>  {infer/audio_sec:.2f}x real time")
+        json.dump(preds, open(out_path, "w"))
+        json.dump(timing, open(out_path.replace("preds_", "timing_"), "w"))
+
+
+def run_kong_onnx(pieces, out_path):
+    _run_kong_onnx(pieces, out_path, "kong_piano_transcription.onnx")
+
+
+def run_kong_onnx_int8(pieces, out_path):
+    _run_kong_onnx(pieces, out_path, "kong_piano_transcription.int8.onnx")
+
+
+def bench_onnx_throughput(_pieces, out_path):
+    """Time the two exports whose front ends are not reimplemented here.
+
+    Accuracy for these would need their log-mel parameters and their note
+    decoders ported and verified; throughput does not, and throughput is the
+    number the backend decision turns on. Random input of the documented
+    shape costs the same arithmetic as real input.
+    """
+    import numpy as np
+
+    # (file, input name, shape, seconds of audio that shape represents)
+    #   O&F: 229-bin log-mel at hop 512 / 16 kHz -> 31.25 frames per second.
+    #   HFT: 192-frame window at hop 256 / 16 kHz, of which only the middle
+    #        128 frames are emitted, so a window advances 128*256/16000 s.
+    cases = [
+        ("onsets_and_frames.onnx", (1, 1000, 229), 1000 * 512 / 16000),
+        ("hft_transformer.onnx", (1, 256, 192), 128 * 256 / 16000),
+    ]
+    out = {}
+    for fname, shape, audio_sec in cases:
+        path = find_onnx(fname)
+        if path is None:
+            log(f"  {fname}: not mounted, skipped")
+            continue
+        for threads in (1, 0):
+            try:
+                sess = _ort_session(path, threads)
+                inp = sess.get_inputs()[0].name
+                names = [o.name for o in sess.get_outputs()]
+                x = np.random.randn(*shape).astype(np.float32)
+                sess.run(names, {inp: x})  # warm up
+                reps = 5
+                t0 = time.time()
+                for _ in range(reps):
+                    sess.run(names, {inp: x})
+                per = (time.time() - t0) / reps
+                label = f"{threads or os.cpu_count()} thread(s)"
+                log(f"  {fname:28} {label:14} {1000*per:8.1f} ms per "
+                    f"{audio_sec:.2f} s of audio  =>  "
+                    f"{per/audio_sec:6.3f}x real time")
+                out.setdefault(fname, {})[str(threads)] = {
+                    "sec_per_window": per, "audio_sec": audio_sec,
+                    "x_real_time": per / audio_sec,
+                    "threads": threads or os.cpu_count()}
+            except Exception as exc:  # noqa: BLE001
+                log(f"  {fname} at {threads} threads failed: {exc}")
+    json.dump(out, open(out_path, "w"), indent=1)
+
+
+MODELS = {"basic_pitch": run_basic_pitch, "kong": run_kong,
+          "kong_onnx": run_kong_onnx, "kong_onnx_int8": run_kong_onnx_int8,
+          "onnx_throughput": bench_onnx_throughput}
 
 
 # ---------------------------------------------------------------------------
@@ -660,10 +871,18 @@ def main():
         "kong": [
             f"{sys.executable} -m pip install -q piano_transcription_inference",
         ],
+        # The ORT arms reuse the package's official segmentation and
+        # post-processor but not its model, so the same install serves.
+        "kong_onnx": [
+            f"{sys.executable} -m pip install -q piano_transcription_inference"
+            f" onnxruntime",
+        ],
+        "kong_onnx_int8": [f"{sys.executable} -c 'pass'"],
+        "onnx_throughput": [f"{sys.executable} -c 'pass'"],
     }
 
     results = {}
-    for model in ("basic_pitch", "kong"):
+    for model in ("basic_pitch", "kong", "kong_onnx", "kong_onnx_int8"):
         log("")
         log(f"########## {model} ##########")
         installed = False
@@ -678,6 +897,10 @@ def main():
             log(f"SKIPPED {model}: every install attempt failed")
             continue
         out = os.path.join(WORK, f"preds_{model}.json")
+        # Kong transcribes piano; the six pieces without any are not a test
+        # of it, and the runtime arms exist to be compared with each other.
+        subset = [q for q in pieces if q["id"] in KONG_PIECES] \
+            if model.startswith("kong") else pieces
         # Child process: one model crashing must not end the run, and the
         # next model's pip install must not disturb one that already ran.
         rc = subprocess.run([sys.executable, __file__, "--child", model, out]).returncode
@@ -687,15 +910,71 @@ def main():
             log(f"SKIPPED {model}: no predictions written")
             continue
         preds = json.load(open(out))
-        rows = [score_piece(p, preds[p["id"]]) for p in pieces
+        rows = [score_piece(p, preds[p["id"]]) for p in subset
                 if p["id"] in preds]
-        if len(rows) < len(pieces):
-            log(f"NOTE: only {len(rows)}/{len(pieces)} pieces completed for "
+        if len(rows) < len(subset):
+            log(f"NOTE: only {len(rows)}/{len(subset)} pieces completed for "
                 f"{model}; the aggregate below covers those only.")
         report(model, rows)
         results[model] = rows
         json.dump(results, open(os.path.join(WORK, "reference_scores.json"), "w"),
                   indent=1)
+
+    # --- throughput of the two exports that are timed but not scored -----
+    log("")
+    log("########## onnxruntime throughput, unscored exports ##########")
+    log("Onsets & Frames and HFT Transformer take features, not audio. "
+        "Reimplementing their log-mel front ends and note decoders "
+        "unverified is the exact failure mode this kernel exists to rule "
+        "out, so these are timed only — which is the half of the question "
+        "that decides whether a native-ORT backend is worth building.")
+    tp = os.path.join(WORK, "onnx_throughput.json")
+    subprocess.run([sys.executable, __file__, "--child", "onnx_throughput",
+                    tp])
+
+    # --- runtime comparison ----------------------------------------------
+    log("")
+    log("########## cost per second of audio ##########")
+    log(f"{'arm':18} {'audio':>8} {'inference':>10} {'xRT':>8}  "
+        f"(xRT < 1 is faster than real time)")
+    timings = {}
+    for model in ("basic_pitch", "kong", "kong_onnx", "kong_onnx_int8"):
+        f = os.path.join(WORK, f"timing_{model}.json")
+        if not os.path.exists(f):
+            continue
+        t = json.load(open(f))
+        timings[model] = t
+        a = sum(v["audio_sec"] for v in t.values())
+        w = sum(v["infer_sec"] for v in t.values())
+        log(f"{model:18} {a:7.0f}s {w:9.0f}s {w/a:7.3f}x")
+    log("")
+    log("For scale, bench/ measures the pure-Dart runtime at ~96x real time "
+        "for Kong — 96 seconds of CPU per second of audio.")
+
+    # --- do ORT and PyTorch agree on the transcription, not just tensors? -
+    if "kong" in results and "kong_onnx" in results:
+        log("")
+        log("########## ORT vs PyTorch: same notes, or only same tensors? "
+            "##########")
+        a = json.load(open(os.path.join(WORK, "preds_kong.json")))
+        b = json.load(open(os.path.join(WORK, "preds_kong_onnx.json")))
+        tot_a = tot_b = same = 0
+        for pid in sorted(set(a) & set(b)):
+            sa = {(round(n[0], 3), int(n[2])) for n in a[pid]}
+            sb = {(round(n[0], 3), int(n[2])) for n in b[pid]}
+            tot_a += len(sa)
+            tot_b += len(sb)
+            same += len(sa & sb)
+            log(f"  {pid}: torch {len(sa):5d}  ort {len(sb):5d}  "
+                f"identical (onset to 1 ms, same pitch) {len(sa & sb):5d}  "
+                f"= {100*len(sa & sb)/max(1, len(sa)):5.1f}% of torch's")
+        log(f"  total: torch {tot_a}, ort {tot_b}, identical {same} "
+            f"({100*same/max(1, tot_a):.1f}%)")
+        pa = aggregate([r for r in results["kong"]
+                        if r["id"] in KONG_PIECES])
+        pb = aggregate(results["kong_onnx"])
+        log(f"  F1 on the same four pieces: torch {100*pa[2]:.1f}%  "
+            f"ort {100*pb[2]:.1f}%")
 
     try_magenta()
     note_mt3()
@@ -716,6 +995,9 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 3 and sys.argv[1] == "--child":
         _model, _out = sys.argv[2], sys.argv[3]
-        MODELS[_model](load_pieces(), _out)
+        _pieces = load_pieces()
+        if _model.startswith("kong"):
+            _pieces = [q for q in _pieces if q["id"] in KONG_PIECES]
+        MODELS[_model](_pieces, _out)
     else:
         main()
