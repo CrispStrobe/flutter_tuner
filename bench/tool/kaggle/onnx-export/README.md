@@ -260,10 +260,21 @@ onnxruntime) feeds the identical tensor as the reference.
 |---|---:|---:|---|
 | Onsets & Frames, 32 frames (~1 s) | 2.9 s | **7.8 s** | agrees to **~1e-6** |
 | Kong, 16 000 samples (1 s audio) | 5.6 s | **96.4 s** | agrees to **~1e-6** |
+| hFT-Transformer, one 192-frame window | 2.0 s | *not completed* | *not measured* |
 
-So the route is proven end to end — PyTorch to ONNX to pure Dart, with matching
-numbers — and not merely inferred from a dispatch table. No missing kernel, no
-unsupported attribute, no silent wrong answer.
+The hFT row is honest rather than omitted. The graph **parses** in 2.0 s, but
+the run was killed by hand after its RSS passed 1.4 GB on a VPS with 7.7 GB
+total and other agents on it — not because anything went wrong, but because
+letting it continue risked an OOM that was not mine to cause. The likely cause
+is its two very large outputs (`[1,128,88,128]` velocity logits and
+`[1,128,4,88,256]` encoder vector, ~13 M floats between them) plus attention
+intermediates over 88 frequency bins. Pruning the outputs nobody needs is the
+obvious first move, and this should be re-run on a machine with headroom
+before anyone concludes anything about hFT's cost.
+
+So for two of the three the route is proven end to end — PyTorch to ONNX to
+pure Dart, with matching numbers — and not merely inferred from a dispatch
+table. No missing kernel, no unsupported attribute, no silent wrong answer.
 
 **Throughput is the real obstacle, not compatibility.** Kong takes 96 s of CPU
 for 1 s of audio, roughly 96× real time; O&F is about 8×. §19 already measured
