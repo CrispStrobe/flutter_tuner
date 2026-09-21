@@ -29,6 +29,7 @@ import 'package:crispasr/crispasr.dart';
 import 'package:onnx_runtime_dart/onnx_runtime_dart.dart';
 import 'package:onnx_runtime_dart/onnx_runtime_dart_io.dart';
 import 'package:tuner_bench/app/transcription.dart';
+import 'package:tuner_bench/cometbeat/basic_pitch.dart' as cb;
 import 'package:tuner_bench/musicnet.dart';
 import 'package:tuner_bench/note_metrics.dart';
 import 'package:tuner_bench/wav.dart';
@@ -71,7 +72,7 @@ Float64List _resample(Float64List input, double from, double to) {
 /// that turns one into the other, and it is deliberately simple so the
 /// number below is attributable to the model rather than to a clever
 /// post-process.
-List<Note> _notesFromFrames(List<Set<int>> frames, double frameMs,
+List<Note> _notesFromFrames(List<Set<int>> frames, List<double> timesMs,
     {double minMs = 0}) {
   final open = <int, int>{}; // midi -> first frame index
   final out = <Note>[];
@@ -83,8 +84,8 @@ List<Note> _notesFromFrames(List<Set<int>> frames, double frameMs,
     for (final midi in open.keys.toList()) {
       if (now.contains(midi)) continue;
       final start = open.remove(midi)!;
-      final onMs = start * frameMs;
-      final offMs = f * frameMs;
+      final onMs = timesMs[start];
+      final offMs = timesMs[f];
       if (offMs - onMs >= minMs) {
         out.add((onsetMs: onMs, offsetMs: offMs, midi: midi.toDouble()));
       }
@@ -92,8 +93,8 @@ List<Note> _notesFromFrames(List<Set<int>> frames, double frameMs,
   }
   open.forEach((midi, start) {
     out.add((
-      onsetMs: start * frameMs,
-      offsetMs: frames.length * frameMs,
+      onsetMs: timesMs[start],
+      offsetMs: timesMs.last,
       midi: midi.toDouble()
     ));
   });
@@ -106,6 +107,12 @@ List<Note> _runOnnx(OnnxModel model, Float64List audio44k) {
       audio44k, 44100, BasicPitchGeometry.sampleRate.toDouble());
   const decoder = BasicPitchDecoder();
   final frames = <Set<int>>[];
+  // Absolute time of every frame, computed from its WINDOW START rather than
+  // from a running frame index. 172 frames of 256 samples span 44032
+  // samples while the window advances 43844, so an index-based clock gains
+  // 8.53 ms per window — 836 ms over a three-minute piece, against a 50 ms
+  // onset tolerance. That single line was most of an 8% F1.
+  final timesMs = <double>[];
   Set<int> carry = <int>{};
   for (int start = 0;
       start + BasicPitchGeometry.windowSamples <= audio.length;
@@ -121,12 +128,31 @@ List<Note> _runOnnx(OnnxModel model, Float64List audio44k) {
     final note = Float64List.fromList(out[_noteHead]!.asFloatList());
     final onset = Float64List.fromList(out[_onsetHead]!.asFloatList());
     frames.addAll(decoder.decodeFrames(note, carry: carry, onset: onset));
+    for (int f = 0; f < BasicPitchGeometry.frames; f++) {
+      timesMs.add(1000 *
+          (start + f * BasicPitchGeometry.frameHop) /
+          BasicPitchGeometry.sampleRate);
+    }
     carry = frames.last;
   }
-  const frameMs =
-      1000 * BasicPitchGeometry.frameHop / BasicPitchGeometry.sampleRate;
-  return _notesFromFrames(frames, frameMs);
+  return _notesFromFrames(frames, timesMs);
 }
+
+/// The SAME ONNX model, decoded by CometBeat's faithful port of Spotify's
+/// `note_creation.py` — onset peak-picking by `argrelmax`, a minimum note
+/// length, `inferOnsets`, overlapping windows with the seams trimmed.
+///
+/// This arm exists to separate two questions that the first version of this
+/// tool conflated. "How well does Basic Pitch transcribe" is about the
+/// model; "how well does a run of consecutive above-threshold frames
+/// approximate a note" is about the decoder — and §22 already established
+/// that this repository's decoder answers a different question on purpose
+/// (what is sounding *now*, for a live display). Scoring the app's decoder
+/// on a transcription benchmark measures the mismatch, not the model.
+List<Note> _runCometBeat(OnnxModel model, Float64List audio44k) => [
+      for (final n in cb.basicPitchTranscribe(audio44k, model: model))
+        (onsetMs: n.onMs, offsetMs: n.offMs, midi: n.midi.toDouble())
+    ];
 
 List<Note> _runCrispasr(CrispasrSession s, Float64List audio44k, int rate) {
   final audio = _resample(audio44k, 44100, rate.toDouble());
@@ -144,7 +170,7 @@ void main(List<String> argv) async {
   var data = '/mnt/storage/tuner-bench/datasets/musicnet';
   var onnxPath = '../assets/models/basic_pitch.onnx';
   var limit = 0;
-  var want = 'onnx,bp,piano,mt3';
+  var want = 'onnx,cbdec,bp,piano,mt3';
   for (int i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--data':
@@ -168,7 +194,9 @@ void main(List<String> argv) async {
 
   // Open what is available; a missing model is a skipped row, never a crash.
   OnnxModel? onnx;
-  if (wanted.contains('onnx')) onnx = loadOnnxModel(onnxPath);
+  if (wanted.contains('onnx') || wanted.contains('cbdec')) {
+    onnx = loadOnnxModel(onnxPath);
+  }
 
   final sessions = <String, CrispasrSession>{};
   final rates = <String, int>{};
@@ -208,7 +236,8 @@ void main(List<String> argv) async {
   }
 
   final engines = <String>[
-    if (onnx != null) 'onnx',
+    if (onnx != null && wanted.contains('onnx')) 'onnx',
+    if (onnx != null && wanted.contains('cbdec')) 'cbdec',
     ...sessions.keys,
   ];
   final noOffset = {for (final e in engines) e: NoteScore()};
@@ -225,9 +254,11 @@ void main(List<String> argv) async {
       final sw = Stopwatch()..start();
       List<Note> est;
       try {
-        est = e == 'onnx'
-            ? _runOnnx(onnx!, wav.samples)
-            : _runCrispasr(sessions[e]!, wav.samples, rates[e]!);
+        est = switch (e) {
+          'onnx' => _runOnnx(onnx!, wav.samples),
+          'cbdec' => _runCometBeat(onnx!, wav.samples),
+          _ => _runCrispasr(sessions[e]!, wav.samples, rates[e]!),
+        };
       } catch (err) {
         stdout.write('[$e failed] ');
         continue;

@@ -40,6 +40,7 @@ FILES=(
   "transcription/tuning.dart"
   "transcription/pyin.dart"
   "transcription/dio.dart"
+  "transcription/basic_pitch.dart"
   "chroma_analysis.dart"
   "pitch_analysis.dart"
   "crisp_dsp/resample.dart"

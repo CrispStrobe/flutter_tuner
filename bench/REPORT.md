@@ -2557,6 +2557,75 @@ with a bounded lag. That is §24's trick applied to the structure that
 actually earns the result, and it is the next piece of work rather than a
 tuning exercise.
 
+## 28. Note-level transcription: the first attempt measured my own bug
+
+The question this report could not answer until now: not "is this 11.6 ms
+slice's pitch right" but **can it turn a recording into notes**. MusicNet's
+standard test split, ten real classical recordings, 13,589 annotated notes,
+scored by `mir_eval.transcription`'s rules.
+
+The first run returned **8.0% F1**, and the right response to that was not to
+publish it. Basic Pitch's published note-level numbers are in the 70–80%
+range; 8% is not a model result, it is a harness result.
+
+**It was a clock.** The model emits 172 frames of 256 samples — 44,032
+samples — for a window that advances **43,844**. Timing each frame from a
+running index rather than from its window's start therefore gains 8.53 ms
+per window: **836 ms over a three-minute piece, against a 50 ms onset
+tolerance.** Every note after the first few seconds was scored against the
+wrong part of the reference.
+
+Computing each frame's time from its window start instead:
+
+| | F1 (2 pieces) |
+| --- | --- |
+| before | 8.0% |
+| after | **39.8%** |
+
+Five times the score from one line, and nothing about the model changed.
+
+### 28.1 What is still unresolved
+
+A second arm decodes **the same ONNX model** with CometBeat's faithful port
+of Spotify's `note_creation.py` — onset peak-picking by `argrelmax`, minimum
+note length, `inferOnsets`, overlapping windows with trimmed seams. It should
+be the better decoder. It scores **11.1%**.
+
+Its note *count* is closer to the truth than this repo's (1,630 against 1,723
+reference, where the hysteresis decoder emits 1,044), so it is segmenting
+plausibly and the notes are landing in the wrong places. A constant time
+offset would be the obvious culprit and **it is not one**: sweeping the
+estimate ±300 ms moves F1 between 6.8% and 15.7%, with no peak that would
+indicate a fixed shift.
+
+**This is recorded as unresolved rather than as a finding about CometBeat's
+decoder.** Mis-integration on my side is at least as likely as a defect on
+theirs — the port takes a runner callback and I may be feeding it a window
+geometry it does not expect — and §26 already cost one wrong conclusion about
+that project by measuring a component instead of a product. The honest
+statement is that two decoders over one model differ by 4x and I have not
+established why.
+
+### 28.2 What can be said
+
+* **The decoder dominates.** A timing bug worth five times the score, and two
+  decoders differing fourfold over identical model output, on a benchmark
+  meant to measure the model. §22 already found that this repository's
+  decoder answers a deliberately different question — what is sounding *now*,
+  for a live display — so scoring it on a transcription benchmark measures
+  the mismatch as much as the model.
+* **MusicNet is hard for this model, by design.** Basic Pitch is built for a
+  solo instrument or small ensemble; these are string trios, wind trios and
+  dense solo piano at nearly nine notes a second. A number here is not
+  comparable to one on GuitarSet or MAESTRO.
+* **Offsets are much harder than onsets**, as the literature says: adding the
+  offset condition takes 39.8% to 10.3%.
+
+The full ten-piece run is on CI. The ggml arms did not run at all — the
+libcrispasr build step failed there — so this measures the pure-Dart path
+only, and §17's comparison of the two runtimes remains the only place the two
+have been scored against each other.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
