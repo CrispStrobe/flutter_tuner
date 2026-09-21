@@ -1,0 +1,103 @@
+name: Bench (transcription, MusicNet)
+
+# How well do the transcribers actually transcribe?
+#
+# Every other benchmark here is FRAME-level — is this 11.6 ms slice's pitch
+# right. That cannot see a transcriber splitting one note into nine. This one
+# scores note events by mir_eval.transcription's rules against MusicNet's
+# standard test split: ten real classical recordings, 13,589 annotated notes,
+# solo piano through string and wind trios.
+#
+# Runs here rather than on the development VPS because the models are large
+# (piano-transcription 77 MB, MT3 96 MB) and slow on a shared core.
+
+on:
+  workflow_dispatch:
+    inputs:
+      engines:
+        description: 'Which transcribers (onnx,bp,piano,mt3)'
+        required: false
+        default: 'onnx,bp,piano'
+      limit:
+        description: 'Pieces to use (0 = all 10)'
+        required: false
+        default: '0'
+
+jobs:
+  transcribe:
+    name: Note-level transcription
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: ./tool/sync_core.sh --check
+        working-directory: bench
+
+      - run: dart pub get
+        working-directory: bench
+
+      # The test split is ~205 MB of an 11 GB tarball. The cache makes the
+      # download a one-off per key; without it every run streams the whole
+      # archive to reach members that sit at the end of it.
+      - name: Cache MusicNet test split
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: corpus/musicnet
+          key: musicnet-test-split-v1
+
+      - name: Fetch MusicNet test split (Zenodo 5120004, CC BY 4.0)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p corpus/musicnet
+          curl -sL --retry 3 \
+            "https://zenodo.org/records/5120004/files/musicnet.tar.gz?download=1" \
+          | tar -xz -C corpus/musicnet --wildcards \
+              'musicnet/test_data/*' 'musicnet/test_labels/*'
+          echo "audio: $(ls corpus/musicnet/musicnet/test_data | wc -l), labels: $(ls corpus/musicnet/musicnet/test_labels | wc -l)"
+
+      # libcrispasr is not bundled by the `crispasr` package, so the ggml arms
+      # need it built. Absent, those arms report themselves unavailable and
+      # the pure-Dart arm still runs — which is the designed behaviour, not a
+      # failure, so this step does not gate the job.
+      - name: Build libcrispasr (for the ggml arms)
+        continue-on-error: true
+        run: |
+          git clone -q --depth 1 https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr
+          cmake -S /tmp/crispasr -B /tmp/crispasr/build \
+            -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF > /dev/null
+          cmake --build /tmp/crispasr/build --target crispasr -j"$(nproc)" > /dev/null
+          mkdir -p "$HOME/.cache/crispasr"
+          find /tmp/crispasr/build -name 'libcrispasr.so*' -type f \
+            -exec cp {} "$HOME/.cache/crispasr/libcrispasr.so" \;
+          ls -l "$HOME/.cache/crispasr/" || true
+
+      - name: Transcribe and score
+        working-directory: bench
+        run: |
+          dart run bin/transcribe_eval.dart \
+            --data ../corpus/musicnet \
+            --engines "${{ inputs.engines }}" \
+            --limit ${{ inputs.limit }} | tee transcribe.txt
+
+      - name: Summary
+        working-directory: bench
+        run: |
+          {
+            echo '## Note-level transcription — MusicNet test split'
+            echo ''
+            echo '```'
+            cat transcribe.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcribe-results
+          path: bench/transcribe.txt
+          retention-days: 30

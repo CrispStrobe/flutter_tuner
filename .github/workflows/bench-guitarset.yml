@@ -20,7 +20,7 @@ on:
         required: true
         default: 'swipe'
         type: choice
-        options: [swipe, bench, notes, tracking, harmonics, hysteresis, decoder_rules]
+        options: [swipe, bench, notes, tracking, harmonics, hysteresis, decoder_rules, cometbeat]
       limit:
         description: 'Files to use (0 = all 180 of the subset)'
         required: false
@@ -43,6 +43,18 @@ jobs:
           sdk: stable
 
       - run: ./tool/sync_core.sh --check
+        working-directory: bench
+
+      # CometBeat's engines are COPIED into bench/lib/cometbeat/ (its whole
+      # transcription tree is Flutter-free, but a path dependency on a
+      # Flutter app would drag in the SDK). Clone it and verify the copies
+      # match, so numbers attributed to CometBeat cannot come from a stale
+      # snapshot of it.
+      - name: Fetch CometBeat and check the copies
+        if: inputs.tool == 'cometbeat'
+        run: |
+          git clone -q --depth 1 https://github.com/CrispStrobe/cometbeat.git ../cometbeat
+          ./tool/sync_cometbeat.sh --check ../cometbeat
         working-directory: bench
 
       - run: dart pub get
@@ -73,7 +85,12 @@ jobs:
         run: |
           # `swipe`, `hysteresis` and `decoder_rules` take their own flags; the
           # rest share --subset/--limit.
-          if [ "${{ inputs.tool }}" = "hysteresis" ] \
+          if [ "${{ inputs.tool }}" = "cometbeat" ]; then
+            dart run bin/cometbeat.dart \
+              --corpus guitar \
+              --data ../corpus/guitarset \
+              --limit ${{ inputs.limit }} | tee results.txt
+          elif [ "${{ inputs.tool }}" = "hysteresis" ] \
              || [ "${{ inputs.tool }}" = "decoder_rules" ]; then
             dart run bin/${{ inputs.tool }}.dart \
               --data ../corpus/guitarset \
