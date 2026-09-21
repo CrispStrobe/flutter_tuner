@@ -1,0 +1,176 @@
+{
+  "script_version": "v4",
+  "results": [
+    {
+      "model": "kong_piano_transcription",
+      "file": "kong_piano_transcription.onnx",
+      "size_mb": 154.2,
+      "ops": {
+        "nodes": 566,
+        "distinct": [
+          "Add",
+          "AveragePool",
+          "BatchNormalization",
+          "Cast",
+          "Clip",
+          "Concat",
+          "Constant",
+          "ConstantOfShape",
+          "Conv",
+          "Div",
+          "GRU",
+          "Gather",
+          "Identity",
+          "Log",
+          "MatMul",
+          "Mul",
+          "Pad",
+          "Pow",
+          "Relu",
+          "Reshape",
+          "Shape",
+          "Sigmoid",
+          "Slice",
+          "Sub",
+          "Transpose",
+          "Unsqueeze"
+        ],
+        "missing": [],
+        "opsets": {
+          "ai.onnx": 17
+        },
+        "pad_modes": [
+          "reflect"
+        ]
+      },
+      "notes": "42.95M params; sr=16000; logmel computed inside the graph (torchlibrosa Conv1d STFT)",
+      "max_abs_diff_traced": 7.748603820800781e-07,
+      "max_abs_diff_dynamic": 7.152557373046875e-07
+    },
+    {
+      "model": "onsets_and_frames",
+      "file": "onsets_and_frames.onnx",
+      "size_mb": 106.0,
+      "ops": {
+        "nodes": 150,
+        "distinct": [
+          "Add",
+          "Concat",
+          "Constant",
+          "ConstantOfShape",
+          "Conv",
+          "Gather",
+          "LSTM",
+          "MatMul",
+          "MaxPool",
+          "Relu",
+          "Reshape",
+          "Shape",
+          "Slice",
+          "Transpose",
+          "Unsqueeze"
+        ],
+        "missing": [],
+        "opsets": {
+          "ai.onnx": 17
+        },
+        "pad_modes": []
+      },
+      "notes": "26.49M params; weights = ddPn08/onsets-and-frames note/01/model.pt; input is a 229-bin log-mel at hop 512 / sr 16000, NOT raw audio - the front end must be reimplemented in Dart. Numeric check is ONNX (full-sequence LSTM) vs torch's chunked eval path.",
+      "max_abs_diff_traced": 6.961822509765625e-05,
+      "max_abs_diff_dynamic": 1.71661376953125e-05
+    },
+    {
+      "model": "hft_transformer",
+      "file": "hft_transformer.onnx",
+      "size_mb": 22.3,
+      "ops": {
+        "nodes": 1621,
+        "distinct": [
+          "Add",
+          "Cast",
+          "Concat",
+          "Constant",
+          "ConstantOfShape",
+          "Conv",
+          "Div",
+          "Expand",
+          "Gather",
+          "LayerNormalization",
+          "MatMul",
+          "Mul",
+          "Relu",
+          "Reshape",
+          "Shape",
+          "Slice",
+          "Softmax",
+          "Tile",
+          "Transpose",
+          "Unsqueeze"
+        ],
+        "missing": [],
+        "opsets": {
+          "ai.onnx": 17
+        },
+        "pad_modes": []
+      },
+      "notes": "5.52M params; ckpt epoch=9-step=46600.ckpt; input is a 256-bin log-mel window of exactly 192 frames (32+128+32) at hop 256 / sr 16000; FIXED time window by construction, dynamic axis is batch. Outputs are LOGITS (apply sigmoid).",
+      "max_abs_diff_traced": 1.33514404296875e-05,
+      "max_abs_diff_dynamic": 1.52587890625e-05
+    },
+    {
+      "model": "kong_piano_transcription_int8",
+      "file": "kong_piano_transcription.int8.onnx",
+      "size_mb": 119.0,
+      "ops": {
+        "nodes": 980,
+        "distinct": [
+          "Add",
+          "AveragePool",
+          "BatchNormalization",
+          "Cast",
+          "Clip",
+          "Concat",
+          "Constant",
+          "ConstantOfShape",
+          "ConvInteger",
+          "Div",
+          "DynamicQuantizeLinear",
+          "GRU",
+          "Gather",
+          "Identity",
+          "Log",
+          "MatMul",
+          "MatMulInteger",
+          "Mul",
+          "Pad",
+          "Pow",
+          "Relu",
+          "Reshape",
+          "Shape",
+          "Sigmoid",
+          "Slice",
+          "Sub",
+          "Transpose",
+          "Unsqueeze"
+        ],
+        "missing": [],
+        "opsets": {
+          "ai.onnx": 17
+        },
+        "pad_modes": [
+          "reflect"
+        ]
+      },
+      "max_abs_diff_traced": 0.12388911843299866,
+      "max_abs_diff_dynamic": null,
+      "notes": "dynamic int8 weights; diff is against the float32 ONNX, not against torch. Sigmoid outputs are in [0,1], so read the diff as an absolute probability error."
+    }
+  ],
+  "failures": [
+    {
+      "model": "4. YourMT3",
+      "error": "RuntimeError: YourMT3 not exported. Two reasons, both structural rather than incidental: (a) the decoder is autoregressive T5, so inference is a loop and not a graph - the honest artifact is encoder.onnx plus decoder_step.onnx with KV cache in/out plus a Dart-side greedy search; (b) its dependency set (nnAudio, einops, transformers, pytorch-lightning, mirdata) and its 1000+ token vocabulary mean the Dart side needs a tokenizer and an event decoder as well as a runtime. That is a project. The listing above is the scoping evidence, and this is recorded as SCOPED OUT, not as a failure."
+    }
+  ]
+}
