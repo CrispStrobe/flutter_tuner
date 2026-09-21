@@ -1,8 +1,9 @@
 # Reference transcribers on MusicNet — what the official code scores
 
 Run: `chr1s4/crisptuner-reference-transcribers`, CPU worker, python 3.12.13.
-Log: [`run-v3.log`](run-v3.log) (Basic Pitch), [`run-v4.log`](run-v4.log)
-(Kong). Corpus: MusicNet test split, Zenodo 5120004, streamed inside the
+Logs: [`run-v3.log`](run-v3.log) (Basic Pitch, ten pieces),
+[`run-v4.log`](run-v4.log) (Kong under PyTorch, ten pieces),
+[`run-v6.log`](run-v6.log) (the ONNX Runtime arms and all timings). Corpus: MusicNet test split, Zenodo 5120004, streamed inside the
 kernel and never committed. Metric: `mir_eval.transcription`, 50 ms onset,
 50 cents pitch.
 
@@ -199,7 +200,96 @@ threatens the 50 ms tolerance; the interesting half of §3 is the bowed and
 blown material, where Kong lags too (+37.1 ms) on notes it should not be
 transcribing at all.
 
-<!-- RUNTIME -->
+## 7. Native ONNX Runtime: the runtime question, which turned out to be the real one
+
+`bench/` measures the pure-Dart runtime at **~96× real time** for Kong — 96
+seconds of CPU per second of audio. That is not a backend, it is a reason
+not to have one. So the question was never op compatibility; it is whether a
+runtime exists that makes these models shippable. It does.
+
+All figures: Kaggle CPU worker, 4 cores, no GPU.
+
+| arm | runtime | audio | inference | **cost per second of audio** |
+| --- | --- | ---: | ---: | ---: |
+| Basic Pitch | onnxruntime, 4 threads | 1481 s | 67 s | **0.045×** (22× faster than real time) |
+| Kong | PyTorch CPU, 2 threads | 563 s | 975 s | 1.73× |
+| **Kong** | **onnxruntime, 4 threads** | 563 s | 561 s | **0.996×** |
+| Kong int8 | onnxruntime, 4 threads | 563 s | 2237 s | 3.97× |
+| Kong | *pure Dart (bench/)* | | | *~96×* |
+
+**Kong under ONNX Runtime is about 96× cheaper than the same model under the
+Dart runtime**, and lands just under real time on four commodity cores. That
+is the number that decides whether a native-ORT backend is worth building,
+and it says yes.
+
+One honest caveat on the PyTorch/ORT row: torch defaulted to **2** threads
+on this worker and ORT to **4**, so part of that 1.7× is thread count rather
+than runtime. The comparison that matters — Dart against ORT — is unaffected.
+
+### 7.1 ORT and PyTorch agree on the notes, not merely on the tensors
+
+The export was verified numerically at 7.7e-07 max abs diff. That is a claim
+about tensors, and a transcriber's output is the result of thresholding and
+peak-picking those tensors, where an arbitrarily small difference can flip a
+note. So it was worth checking at the level people actually consume.
+
+| piece | PyTorch | ORT | identical (onset to 1 ms, same pitch) |
+| --- | ---: | ---: | ---: |
+| 1759 | 1773 | 1773 | 1773 (100.0%) |
+| 2303 | 732 | 732 | 732 (100.0%) |
+| 2556 | 1464 | 1464 | 1464 (100.0%) |
+| 2628 | 1482 | 1482 | 1482 (100.0%) |
+| **total** | **5451** | **5451** | **5451 (100.0%)** |
+
+**F1 70.7% both.** Every per-piece row is identical to the decimal, and so
+is the metric audit. The export is faithful all the way to the notes, which
+is a stronger statement than the tensor check and the one a backend needs.
+
+### 7.2 The int8 graph is worse on both axes — do not ship it
+
+| | F1 | cost per second of audio |
+| --- | --- | --- |
+| Kong float32 ONNX | **70.7%** | 0.996× |
+| Kong int8 ONNX | **11.4%** | 3.97× |
+
+Dynamic int8 quantisation costs 59 F1 points *and* runs **four times
+slower** than the float32 graph. The accuracy loss is unsurprising in
+direction (the export notes a 0.124 absolute probability error against
+float32, which is enormous when the onset threshold is 0.3) but not in
+magnitude; the slowdown is the more useful finding, because it removes the
+tradeoff entirely. `ConvInteger`/`MatMulInteger` and the
+`DynamicQuantizeLinear` inserted around every op have no fast CPU kernel
+here, so it pays the quantisation overhead and gets nothing back. There is
+no argument for the int8 graph on this evidence: it is not a smaller-and-
+slightly-worse option, it is worse at everything except file size (119 MB
+against 154 MB).
+
+### 7.3 The two exports that are timed and not scored
+
+Onsets & Frames and HFT Transformer take *features*, not audio — a 229-bin
+log-mel at hop 512, and a 256-bin log-mel in fixed 192-frame windows.
+Reimplementing their front ends and note decoders unverified is exactly the
+failure mode this kernel exists to rule out, so they are timed only. Random
+input of the documented shape costs the same arithmetic as real input.
+
+| export | 1 thread | 4 threads |
+| --- | --- | --- |
+| `onsets_and_frames.onnx` | 2905 ms per 32 s of audio = **0.091×** | 2728 ms = **0.085×** |
+| `hft_transformer.onnx` | 5993 ms per 2.05 s of audio = **2.93×** | 5261 ms = **2.57×** |
+
+**Onsets & Frames is ~11× faster than real time on a single thread** and
+barely improves with four, which is what a bidirectional LSTM looks like —
+the recurrence is sequential and does not parallelise. For a mobile backend
+that is the good kind of profile: it will not degrade on a phone's weaker
+multicore.
+
+**HFT Transformer is 2.6–2.9× real time** and so the only one of the three
+that is not viable as it stands. Two caveats before writing it off: it is
+run one window at a time, and batching windows would amortise a lot of the
+per-call overhead across a 1621-node graph; and its 5.5 M parameters against
+Kong's 43 M say the arithmetic is not what costs, the graph structure is.
+Worth one measurement at batch 8 before concluding, rather than a verdict
+from this row.
 
 ## Operational notes
 
@@ -211,8 +301,16 @@ transcribing at all.
   **core** dependency, which would downgrade the image's TensorFlow 2.20 and
   take Keras 3 with it. `--no-deps` plus `onnxruntime` avoids that and pins
   the ONNX path, which is also the tighter comparison.
+* The ONNX graphs reach the worker through the private dataset
+  `chr1s4/crisptuner-transcriber-onnx` (383 MB) rather than being
+  re-exported in the kernel, so the bytes scored here are the same bytes
+  that were verified against PyTorch.
 * `piano_transcription_inference` 0.0.6 needs three things patched around
   it: its checkpoint fetch is an unchecked `os.system("wget")`, `torch.load`
   now defaults to `weights_only=True`, and its `load_audio` calls
   `librosa.core.audio.util`, which librosa's lazy loader no longer exposes.
   All three are handled in the kernel with the reason written next to them.
+* MusicNet's test WAVs are IEEE **float32**, which the stdlib `wave` module
+  refuses outright (`unknown format: 3`). That also settles the arithmetic:
+  at four bytes a sample the ten files are 1,481 s, which is the 24.7
+  minutes §30 quotes.
