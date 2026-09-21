@@ -149,9 +149,32 @@ List<Note> _runOnnx(OnnxModel model, Float64List audio44k) {
 /// that this repository's decoder answers a different question on purpose
 /// (what is sounding *now*, for a live display). Scoring the app's decoder
 /// on a transcription benchmark measures the mismatch, not the model.
+/// Its reported times carry the same clock drift this tool had, and the
+/// correction is applied here rather than in the copied source so
+/// `tool/sync_cometbeat.sh --check` keeps verifying the copy is faithful.
+///
+/// The stitched grid keeps 142 frames per window (172 minus 15 trimmed from
+/// each side) while the window advances 36,164 samples — and 142 x 256 =
+/// 36,352. So a frame's time gains 188 samples for every window it is past,
+/// 8.53 ms each, exactly the arithmetic that cost this tool five times its
+/// score. Measured: 11.1% F1 as-is, **47.8% corrected**.
+const int _cbFramesPerWindow = 142;
+const int _cbDriftSamples = 142 * 256 - 36164; // 188
+
+double _cbCorrect(double ms) {
+  final frame = ms * BasicPitchGeometry.sampleRate / 1000 / 256;
+  final window = frame ~/ _cbFramesPerWindow;
+  return ms -
+      1000 * window * _cbDriftSamples / BasicPitchGeometry.sampleRate;
+}
+
 List<Note> _runCometBeat(OnnxModel model, Float64List audio44k) => [
       for (final n in cb.basicPitchTranscribe(audio44k, model: model))
-        (onsetMs: n.onMs, offsetMs: n.offMs, midi: n.midi.toDouble())
+        (
+          onsetMs: _cbCorrect(n.onMs),
+          offsetMs: _cbCorrect(n.offMs),
+          midi: n.midi.toDouble()
+        )
     ];
 
 List<Note> _runCrispasr(CrispasrSession s, Float64List audio44k, int rate) {
