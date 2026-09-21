@@ -326,11 +326,32 @@ void main() {
   // honestly unavailable, and that the two runtimes describe the same
   // instant.
   group('CrispAsrBackend', () {
-    test('reports itself unavailable when nothing is configured', () {
+    test('opting in is a choice, not a capability probe', () {
+      // §25: once the model resolves itself through CrispASR's registry this
+      // backend is available wherever libcrispasr is, and §18.2 is why that
+      // must not make it the default. fromEnvironment returns null unless
+      // the user asked for it by name.
       expect(CrispAsrBackend.fromEnvironment(), isNull,
-          reason: 'no CRISPTUNER_BASIC_PITCH_GGUF in a test run');
-      expect(CrispAsrBackend(modelPath: '/nonexistent/basic-pitch.gguf')
-          .isAvailable, isFalse);
+          reason: 'neither $kBackendEnv nor $kModelEnv set in a test run');
+    });
+
+    test('an explicit model path that does not exist is unavailable', () {
+      expect(
+          CrispAsrBackend(modelPath: '/nonexistent/basic-pitch.gguf')
+              .isAvailable,
+          isFalse);
+    });
+
+    test('probing never throws, however broken the host', () {
+      // The whole point of §25.4's third recommendation: unavailability is a
+      // fall-through, not an exception for the caller to catch.
+      expect(() => CrispAsrBackend(libraryPath: '/nonexistent/libcrispasr.so')
+          .isAvailable, returnsNormally);
+      expect(
+          CrispAsrBackend(libraryPath: '/nonexistent/libcrispasr.so')
+              .isAvailable,
+          isFalse);
+      expect(() => CrispAsrBackend.fromEnvironment(), returnsNormally);
     });
 
     test('agrees with the ONNX backend on geometry', () {

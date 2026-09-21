@@ -11,10 +11,20 @@ import 'dart:typed_data';
 import 'transcription.dart';
 import 'transcription_backend.dart';
 
-class CrispAsrBackend implements TranscriptionBackend {
-  CrispAsrBackend({String? libraryPath, String? modelPath});
+/// Names kept identical to the FFI half so callers and tests compile
+/// against either without conditionals of their own.
+const String kCrispAsrBackendName = 'basic-pitch';
+const String kBackendEnv = 'CRISPTUNER_TRANSCRIPTION_BACKEND';
+const String kLibEnv = 'CRISPTUNER_CRISPASR_LIB';
+const String kModelEnv = 'CRISPTUNER_BASIC_PITCH_GGUF';
 
-  /// Always null here: there is nothing to configure on the web.
+class CrispAsrBackend implements TranscriptionBackend {
+  CrispAsrBackend(
+      {String? libraryPath, String? modelPath, bool allowDownload = true});
+
+  /// Always null here: there is no FFI to open a library with, and this
+  /// returns null rather than throwing for the same reason the FFI half
+  /// does — an unavailable backend is a fall-through, not an error.
   static CrispAsrBackend? fromEnvironment() => null;
 
   @override

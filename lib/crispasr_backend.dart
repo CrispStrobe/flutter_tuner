@@ -18,15 +18,22 @@
 /// segmented note events rather than per-frame activations and a note event
 /// bridges the frames where activation dips below threshold.
 ///
-/// **It is still not the default, and on most installs it will not be
-/// available at all.** The `crispasr` package is pure Dart FFI and does not
-/// bundle the native library: shipping this means a ~23 MB `libcrispasr` on
-/// five platforms and no web build, to speed up a mode that already runs in
-/// 324 ms on Apple Silicon and updates twice a second. So the backend loads
-/// the library if the host happens to have one and reports
-/// [isAvailable] false if not — which is the honest state for a tuner, and
-/// leaves the door open for MT3 (96 MB, 46.9M parameters), where the speed
-/// would actually decide whether the mode runs.
+/// **It is still not the default.** The `crispasr` package is pure Dart FFI
+/// and does not bundle the native library: shipping this means a ~23 MB
+/// `libcrispasr` on five platforms and no web build, to speed up a mode that
+/// already runs in 159 ms on Apple Silicon (§19) and updates twice a second.
+/// §18 then removed the rest of its case by porting the decoder advantage
+/// into pure Dart.
+///
+/// What changed in §25 is *availability*, not preference. The backend used
+/// to demand an environment variable pointing at a GGUF the user had to find
+/// for themselves, which meant it could not be reached at all; it now
+/// resolves the model through CrispASR's own registry and cache and looks
+/// for the library where a shipped app would keep it. So it is **selectable
+/// rather than theoretical** — and selection stays explicit
+/// (`CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr`), because availability must
+/// not become preference. The door this leaves open is MT3: 96 MB and 46.9M
+/// parameters, where speed decides whether the mode runs at all.
 library;
 
 export 'crispasr_backend_stub.dart'
