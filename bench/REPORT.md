@@ -2306,9 +2306,10 @@ MB copy rather than a link. Recorded because it is the kind of thing that
 reads as a broken build for an hour: the filesystem is ext4 and writable,
 `touch` succeeds, and only `ln -s` fails.
 
-Not recommended: the third runtime. Native ONNX Runtime FFI earns its place
-in an app with chords, stems and tablature to accelerate. Here §19 and §23
-already got 2.22× from an isolate pool in pure Dart, with nothing to ship.
+~~Not recommended: the third runtime.~~ **Reversed in §31.4.** That
+recommendation was sound for Basic Pitch, which is 35.7k parameters and runs
+in 159 ms per window in pure Dart. It does not survive contact with a model
+a thousand times larger.
 
 ## 26. CometBeat's detectors on both corpora
 
@@ -2782,6 +2783,37 @@ fifteen of them.
   `quantize_dynamic` will not touch GRU weights and those are most of the
   model, and it costs 0.12 absolute error on sigmoid outputs. Revisit only
   as a speed play.
+
+### 31.4 Reversing §25.4: the third runtime
+
+§25.4 recommended against native ONNX Runtime, on the grounds that §19 and
+§23 had already extracted 2.22× from an isolate pool in pure Dart with
+nothing to ship. **That was right about Basic Pitch and wrong as a general
+rule, and §31.1 is why.**
+
+Basic Pitch is 35.7k parameters and costs 159 ms per two-second window in
+pure Dart — comfortable. Kong is **1,203 times larger** and costs ~96×
+real time in the same runtime. A conclusion drawn on the small model does
+not transfer to the large one, and I drew it as though it would.
+
+The runtimes now stand like this for a model of that size:
+
+| runtime | ships where | Basic Pitch | a 43 M-parameter model |
+| --- | --- | --- | --- |
+| pure Dart (`onnx_runtime_dart`) | all six platforms, web included | fine (159 ms/window) | **~96× real time — unusable** |
+| native ONNX Runtime FFI | five platforms, no web | unmeasured | **the open question** |
+| CrispASR ggml FFI | five platforms, no web | 292 ms/window (§17) | unmeasured; §20's AVX2 work applies |
+
+CometBeat already depends on `onnxruntime: ^1.4.1` and has an `onnx_ffi`
+provider seam; this app has no native-ORT path at all. So the sibling
+project made the call that §25.4 talked this one out of, and for models this
+size it was the correct call.
+
+**What this does not change:** the transcription mode that ships here runs
+Basic Pitch, where pure Dart is fine and a native library would buy speed
+nobody is waiting for. The reversal applies to *adding a larger model*, not
+to what is already shipped — and §31.2's shortlist exists precisely because
+hFT-Transformer at 5.52 M parameters might be the one that needs neither.
 
 ### 31.3 Three corrections to this report's own pointers
 
