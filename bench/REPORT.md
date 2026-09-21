@@ -2186,6 +2186,89 @@ redundant by construction. Making pYIN more conservative is a matter of its
 own `switchProbability` and unvoiced floor, not of bolting the app's
 threshold on top — and that is the experiment worth running next.
 
+## 25. What CometBeat does with CrispASR, and what we should take from it
+
+CometBeat is the sibling project that overlaps this one most: Flutter, the
+same owner, live pitch detection, and the same `crispasr` package. Its
+`lib/core/audio/transcription/` holds **67 files** — pYIN with a note-HMM,
+rhythm and quantisation, CREPE, RMVPE, FCPE, WORLD DIO, Basic Pitch, chord
+recognition, stem separation, TabCNN — against this app's four. It is worth
+reading precisely because it solved the same integration problem first.
+
+### 25.1 Side by side
+
+| | CrispTuner (§17) | CometBeat |
+| --- | --- | --- |
+| runtimes | 2: pure-Dart ONNX, CrispASR ggml | **3**: + native ONNX Runtime FFI |
+| the seam | `TranscriptionBackend` interface | function typedefs — `F0Estimator`, `NeuralTranscriber`, `ChordEstimator` |
+| web safety | conditional export on `dart.library.ffi` | conditional export on `dart.library.io` |
+| unavailable | `isAvailable` false; `start()` throws | **returns `null`** at every failure point |
+| model | bundled 225 KB asset; GGUF from an env var | **CrispASR registry + cache, fetched on first use, never bundled** |
+| library path | env override → package default | env → macOS `Frameworks/` → `~/.cache/crispasr/` → package default |
+| choosing | `fromEnvironment() ?? TranscriptionService()` | user setting → `config.resolve()` → provider availability → fallback |
+| concurrency | isolate, drop-latest | direct call |
+| CrispASR arm | piano (basic-pitch GGUF) | pitch (CREPE), piano (Kong), separate, tab |
+
+The two differences that are *not* worth copying are the last two rows, and
+for the same reason: CometBeat transcribes a finished recording, this app
+drives a live display at 2 Hz. An isolate and drop-latest are the right
+answer here and unnecessary there.
+
+### 25.2 The one that exposes a defect in ours
+
+**Model resolution.** `crispasr_ffi_pitch_io.dart` resolves its GGUF through
+CrispASR's own registry and cache:
+
+```dart
+final RegistryEntry? entry = registryLookup('crepe', lib: lib);
+final dir = cacheDir(lib: lib);
+// cached? use it. download requested? cacheEnsureFile(entry.filename, entry.url)
+```
+
+— "no hand-rolled URLs", as its own comment puts it, and the model arrives on
+first use.
+
+Ours requires the user to set `CRISPTUNER_BASIC_PITCH_GGUF` to a path they
+obtained somehow, and `CrispAsrBackend.fromEnvironment()` returns null
+otherwise. §17.1 presented that as a deliberate "unavailable unless
+configured" stance. Read against CometBeat, it is better described as
+**a backend that is effectively never available** — nobody sets that variable,
+so the code path merged in #19 has never run outside the benchmark.
+
+The library-path chain is the same story in miniature. CometBeat looks in a
+built macOS app's `Frameworks/` directory, which is how the library would
+actually reach a user; ours looks at an environment variable and then the
+system loader, neither of which describes a shipped app.
+
+### 25.3 What CometBeat confirms about §22
+
+CometBeat ports Spotify's `note_creation` faithfully — `minNoteLenFrames`
+(127.7 ms), `inferOnsets`, onset peak-picking by `argrelmax`, and the melodia
+trick as an option. §22 measured causal versions of the first two here and
+found they **cost** F1, and concluded the reason was structural: an offline
+post-filter can delete a short note after watching it end, and a live
+debounce cannot.
+
+CometBeat is the offline case, and implements exactly the post-filter form.
+Both projects are right, which is the useful confirmation — the rules are not
+wrong, they are **not portable to a live display**, and that distinction now
+has an independent example rather than only an argument.
+
+### 25.4 What to do
+
+1. **Resolve the GGUF through CrispASR's registry**, as CometBeat does, so
+   `CrispAsrBackend` becomes reachable instead of theoretically available.
+   This is the change that would make §17's merged backend real.
+2. **Adopt the library-path chain**, including the macOS `Frameworks/` case.
+3. **Prefer null over throwing** for unavailability. Ours throws
+   `UnsupportedError` from `start()` and catches it in the worker; CometBeat
+   degrades silently at every step and the caller falls through. Theirs is
+   the better shape for something optional.
+
+Not recommended: the third runtime. Native ONNX Runtime FFI earns its place
+in an app with chords, stems and tablature to accelerate. Here §19 and §23
+already got 2.22× from an isolate pool in pure Dart, with nothing to ship.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
