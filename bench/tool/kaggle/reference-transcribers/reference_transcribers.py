@@ -50,7 +50,7 @@ import sys
 import time
 import urllib.request
 
-SCRIPT_VERSION = "reference-transcribers v1"
+SCRIPT_VERSION = "reference-transcribers v2"
 
 WORK = "/kaggle/working"
 DATA = os.path.join(WORK, "musicnet")
@@ -227,21 +227,41 @@ def load_pieces():
 # ---------------------------------------------------------------------------
 
 def run_basic_pitch(pieces, out_path):
-    """Spotify Basic Pitch, official code. The direct comparison to §30."""
+    """Spotify Basic Pitch, official code. The direct comparison to §30.
+
+    The model is pinned to the packaged **`nmp.onnx`**, not left to
+    `basic_pitch.__init__`'s try-import chain. Two reasons, and the second is
+    the important one:
+
+      * that chain prefers TensorFlow whenever it imports, and the whole
+        point of installing this package `--no-deps` is to avoid dragging
+        Kaggle's TensorFlow down to the `<2.15.1` the wheel pins;
+      * `nmp.onnx` is *the same file* our Dart pipeline runs. Pinning it
+        means any gap that shows up is decoding, not two different exports
+        of the weights — which is precisely the question §30 leaves open.
+    """
+    import basic_pitch
     from basic_pitch.inference import predict
-    try:
-        from basic_pitch import ICASSP_2022_MODEL_PATH as MODEL
-    except Exception:  # noqa: BLE001
-        MODEL = None
-    log(f"basic-pitch model path: {MODEL}")
+
+    pkg = os.path.dirname(basic_pitch.__file__)
+    MODEL = None
+    for cand in (os.path.join(pkg, "saved_models", "icassp_2022", "nmp.onnx"),):
+        if os.path.exists(cand):
+            MODEL = cand
+    if MODEL is None:
+        try:
+            from basic_pitch import ICASSP_2022_MODEL_PATH as MODEL
+            log("nmp.onnx not found in the wheel; falling back to the "
+                "package's own default model path")
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit(f"no basic-pitch model available: {exc}")
+    log(f"basic-pitch {getattr(basic_pitch, '__version__', '?')} "
+        f"model: {MODEL}")
 
     preds = {}
     for i, p in enumerate(pieces, 1):
         t0 = time.time()
-        if MODEL is None:
-            _, _, events = predict(p["audio"])
-        else:
-            _, _, events = predict(p["audio"], model_or_model_path=MODEL)
+        _, _, events = predict(p["audio"], model_or_model_path=MODEL)
         # (start_s, end_s, pitch_midi, amplitude, pitch_bends)
         preds[p["id"]] = [[float(e[0]), float(e[1]), float(e[2])]
                           for e in events]
@@ -587,11 +607,21 @@ def main():
               open(os.path.join(WORK, "pieces.json"), "w"), indent=1)
 
     installs = {
-        # basic-pitch ships its runtime as an extra; fall back to the plain
-        # package plus onnxruntime if the extra's name has moved.
+        # `pip install basic-pitch` on Linux/py>=3.11 pulls
+        # `tensorflow<2.15.1` as a CORE dependency (checked against the
+        # 0.4.0 wheel's metadata, not assumed), which would downgrade
+        # Kaggle's TensorFlow and take Keras 3 with it. Install the package
+        # without its dependency graph and supply only what the ONNX path
+        # needs; librosa, scipy, scikit-learn and numpy are already in the
+        # image. `[onnx]` is kept as a fallback in case a future wheel drops
+        # the pin. (The wheel pins `resampy<0.4.3`, which needs
+        # `pkg_resources` and so breaks on a modern setuptools; --no-deps
+        # means that pin is not enforced and 0.4.3 is used instead.)
         "basic_pitch": [
+            f"{sys.executable} -m pip install -q --no-deps basic-pitch "
+            f"&& {sys.executable} -m pip install -q onnxruntime resampy "
+            f"pretty_midi librosa scikit-learn setuptools",
             f"{sys.executable} -m pip install -q 'basic-pitch[onnx]'",
-            f"{sys.executable} -m pip install -q basic-pitch onnxruntime",
         ],
         "kong": [
             f"{sys.executable} -m pip install -q piano_transcription_inference",
