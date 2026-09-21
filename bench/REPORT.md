@@ -2746,7 +2746,47 @@ work actually was:
   throwing. A typo must not take the transcription mode down, and a test
   pins that.
 
-### 33.1 What this does and does not change
+### 33.1 Three corrections from wiring it into CometBeat
+
+The same change went into the sibling app, and doing it there corrected this
+report in three places.
+
+**MT3's autoregressive decode was the wrong thing to worry about.** I warned
+that 0.26× real time on a whole recording might not survive an interactive
+path. CometBeat has **no live note-transcription path at all** —
+`NeuralTranscriber` is a batch seam, whole buffer in, notes out. Nothing
+streams audio to a note model in either app.
+
+**The real cost runs the other way, and MT3 fixes it.** CometBeat's
+transcribe screen runs neural engines inline on the UI isolate. At 7.77×
+real time, the ggml model it already defaults to would block the UI for
+about **31 minutes** on a four-minute song; MT3 at 0.26× makes that about
+**62 seconds**. So MT3 is roughly **30× cheaper than the model that path
+already loads** — it is the first ggml note model that makes that path
+usable, rather than a heavyweight addition to it. I had the risk exactly
+inverted.
+
+**A bug of mine, in the same shape as §17.2's.** Generalising this backend
+to three models dropped the check on `pianoSampleRate`. That call returns
+**0** to mean "this backend has no piano arm" — deliberately a probe that
+never throws — so an unchecked read turns a wrong model into a silent
+per-window failure at transcribe time instead of a clear one at startup.
+CometBeat's copy had the identical defect and would have divided by it.
+Fixed in both.
+
+### 33.2 What MT3's advantage currently loses
+
+MT3 emits a **General MIDI program per note** — which instrument played it —
+and that is the whole point of a multi-instrument transcriber. The C ABI's
+note record is flat: `[start_ms, end_ms, midi, velocity]`. The program is
+dropped before either app can see it.
+
+So MT3's 76.5% is real and its headline capability is currently flattened to
+a single part. Recovering it needs a widened ABI in CrispASR, which is not a
+change either app can make, and it is the difference between "transcribes
+this recording well" and "transcribes this recording into parts".
+
+### 33.3 What this does and does not change
 
 It does **not** change the default. The mode still ships Basic Pitch through
 pure Dart, on all six platforms including the web, with no native library —

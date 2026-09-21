@@ -352,8 +352,18 @@ void _workerMain(_WorkerStart start) {
         libPath: start.libPath, backend: start.backend, nThreads: 2);
     // Ask, do not assume: a future GGUF at another rate would otherwise be
     // fed audio at the wrong speed and transpose every note silently.
+    // 0 is the sentinel for "this backend has no piano arm" (§17.2) — it is
+    // a capability probe that never throws, so an unchecked read turns a
+    // wrong model into a silent per-window failure later instead of a clear
+    // one now. An earlier version of this file threw when the rate did not
+    // match; generalising to three models dropped that check, and this is it
+    // restored in the form the three models actually need.
     final wanted = session.pianoSampleRate;
-    if (wanted > 0) rate = wanted;
+    if (wanted <= 0) {
+      throw StateError('${start.backend} reports no piano arm in this '
+          'libcrispasr build (pianoSampleRate == 0)');
+    }
+    rate = wanted;
   } catch (e) {
     session?.close();
     start.reply.send(_WorkerError('$e'));
