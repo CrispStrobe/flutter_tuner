@@ -2,7 +2,7 @@ name: Deploy to Vercel
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 # Required secrets:
