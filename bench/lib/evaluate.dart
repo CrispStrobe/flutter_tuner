@@ -15,6 +15,8 @@ import 'app/tuner_core.dart';
 import 'jams.dart';
 import 'metrics.dart';
 import 'mpm.dart';
+import 'cometbeat/contracts.dart' as cb;
+import 'cometbeat/note_hmm.dart' as cb;
 import 'pyin.dart';
 import 'refine.dart';
 import 'wav.dart';
@@ -80,6 +82,21 @@ class Variant {
   /// frame t+lag has been seen, which is what a streaming decoder could do.
   /// Null means the offline decode that §4.1 measured.
   final int? pyinLag;
+
+  /// Mask the decoded track's voicing with CometBeat's note-HMM, keeping
+  /// pYIN's own frequency inside a note.
+  ///
+  /// §24.1 left pYIN's one disqualifying weakness as voicing: 39.5% false
+  /// alarm against the shipped pipeline's 17.1%. §24.2 then showed this
+  /// app's threshold gate cannot fix it, because pYIN already HAS a voicing
+  /// model and the gate is a cruder version of the same decision.
+  ///
+  /// An HMM is a different mechanism — temporal rather than per-frame — and
+  /// §26.1 showed CometBeat's halves pYIN's gross errors on cello. What it
+  /// must not do is decide the *pitch*: `segmentNotes` returns `int midi`,
+  /// and a reading quantised to the semitone has thrown away the deviation
+  /// a tuner exists to show. So the notes are used as a voicing mask only.
+  final bool hmmMask;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -108,6 +125,7 @@ class Variant {
     this.isMpm = false,
     this.isPyin = false,
     this.pyinLag,
+    this.hmmMask = false,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -188,6 +206,12 @@ const List<Variant> defaultVariants = [
   // The app's own gate-and-median is what fixes exactly that. These put the
   // two together — the smoother is causal (a 5-frame median), so applying it
   // to a bounded-lag path is faithful rather than a cheat.
+  // The experiment §24.2 left open, with the mechanism that section said was
+  // missing. Lag 0 is included because §24.1 found greedy decoding is a
+  // different operating point rather than a worse one — the best held-note
+  // accuracy in the report.
+  Variant('pyin-lag0+hmm', isPyin: true, pyinLag: 0, hmmMask: true),
+  Variant('pyin-lag2+hmm', isPyin: true, pyinLag: 2, hmmMask: true),
   Variant('pyin-lag0+smoother', isPyin: true, pyinLag: 0, coreSmoother: true),
   Variant('pyin-lag2+smoother', isPyin: true, pyinLag: 2, coreSmoother: true),
 
@@ -359,8 +383,9 @@ FileResult evaluateFile({
   // pYIN decodes the whole file at once.
   for (final v in variants) {
     if (!v.isPyin) continue;
-    final path = pyin.snapToCandidates(
+    var path = pyin.snapToCandidates(
         pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
+    if (v.hmmMask) path = _hmmVoicingMask(path, hop, rate);
     final out = detected[v.name]!;
     final smoother = smoothers[v.name];
     for (int i = 0; i < out.length && i < path.length; i++) {
@@ -465,3 +490,34 @@ double framesPerSecond(int hop, double rate) => rate / hop;
 
 /// Convenience for the report: cents between two frequencies.
 double centsOf(double a, double b) => 1200 * math.log(a / b) / math.ln2;
+
+
+/// Keep pYIN's frequency where CometBeat's note-HMM says a note is sounding,
+/// and report nothing where it does not.
+///
+/// The HMM's own `int midi` is deliberately discarded — see [Variant.hmmMask].
+/// This asks one question and one only: is pYIN's *voicing* the fixable part
+/// of its disadvantage.
+List<double> _hmmVoicingMask(List<double> path, int hop, double rate) {
+  final track = <cb.PitchFrame>[
+    for (int i = 0; i < path.length; i++)
+      (
+        timeMs: 1000 * i * hop / rate,
+        f0Hz: path[i],
+        voicedProb: path[i] > 0 ? 1.0 : 0.0,
+      )
+  ];
+  final notes = cb.segmentNotes(track);
+  final out = List<double>.filled(path.length, 0);
+  if (notes.isEmpty) return out;
+  int n = 0;
+  for (int i = 0; i < path.length; i++) {
+    final t = 1000 * i * hop / rate;
+    while (n < notes.length && notes[n].offMs < t) {
+      n++;
+    }
+    if (n >= notes.length) break;
+    if (t >= notes[n].onMs && t <= notes[n].offMs) out[i] = path[i];
+  }
+  return out;
+}
