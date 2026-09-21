@@ -184,7 +184,8 @@ the numbers say don't:
 A worthwhile size reduction for Kong would have to quantize the GRU, which
 `quantize_dynamic` will not do. Better levers: **ship hFT-Transformer at
 22.3 MB instead**, or prune the pedal heads out of Kong's graph if pedal is not
-wanted.
+wanted. (Size turns out to be the wrong axis anyway — see the runtime numbers
+below.)
 
 ## What the op survey actually proves, and what it doesn't
 
@@ -247,21 +248,40 @@ Kernel-side notes, all of them from `/mnt/volume1/kaggle-usage.md`:
   *title*, not the `id`. `crisptuner-onnx-export` in the metadata silently
   became `crisptuner-transcriber-onnx-export`. The metadata now matches.
 
-## Dart-side smoke test (local, not on Kaggle)
+## Actually running them in `onnx_runtime_dart` (local, not on Kaggle)
+
+The op survey says "every op type is dispatched". That is not the same claim
+as "the runtime parses this file and produces the right numbers", so both were
+measured. `dart_smoke.dart` loads a `.onnx` with `OnnxModel.fromBytes`, feeds
+one deterministic tensor, and prints every output; `ort_ref.py` (three lines of
+onnxruntime) feeds the identical tensor as the reference.
+
+| Model | Parse | Run | vs onnxruntime |
+|---|---:|---:|---|
+| Onsets & Frames, 32 frames (~1 s) | 2.9 s | **7.8 s** | agrees to **~1e-6** |
+| Kong, 16 000 samples (1 s audio) | 5.6 s | **96.4 s** | agrees to **~1e-6** |
+
+So the route is proven end to end — PyTorch to ONNX to pure Dart, with matching
+numbers — and not merely inferred from a dispatch table. No missing kernel, no
+unsupported attribute, no silent wrong answer.
+
+**Throughput is the real obstacle, not compatibility.** Kong takes 96 s of CPU
+for 1 s of audio, roughly 96× real time; O&F is about 8×. §19 already measured
+this runtime at 0.78 GMAC/s, and Kong is ~60 convolutions over 1001 frames ×
+229 mel bins per 10-second segment, so this is the expected number rather than
+a surprise. Offline transcription of a short take is plausible today; live
+transcription is not. That makes throughput the next measurement, and it
+reframes the int8 question below: quantisation is interesting for *speed*,
+not for size.
 
 ```bash
-mkdir -p /tmp/onnxsmoke && cd /tmp/onnxsmoke   # any scratch dir
-# pubspec.yaml with a path dependency on onnx_runtime_dart, then:
-dart run bin/smoke.dart <model.onnx> <input_name> <dim> [<dim>...]
+dart run dart_smoke.dart <model.onnx> <input_name> <dim> [<dim>...]
+# e.g. dart run dart_smoke.dart kong_piano_transcription.onnx audio 1 16000
 ```
 
-`bin/smoke.dart` loads the file with `OnnxModel.fromBytes`, feeds one
-deterministic tensor, and prints load time, run time and every output's shape.
-Graph **parsing** is fast — hFT's 22 MB loads in 1.6 s. Execution of these
-graphs at realistic sizes is slow in pure Dart (§19 measured the runtime at
-0.78 GMAC/s), which is a throughput question rather than a correctness one and
-is the natural follow-on measurement: Kong is ~60 convolutions over 1001
-frames × 229 mel bins per 10-second segment.
+(It needs a `pubspec.yaml` with a path dependency on `onnx_runtime_dart`; it
+is kept here as a script rather than a package because it is a diagnostic, not
+part of the benchmark.)
 
 ## Recommendation
 
@@ -278,6 +298,10 @@ frames × 229 mel bins per 10-second segment.
    for the oldest architecture of the three is not a trade anyone would take.
 4. **Skip YourMT3** unless multi-instrument becomes a requirement, and note
    that the GitHub repo named for it is empty.
-5. **Skip int8** at the current tooling; measure the runtime cost first and
-   quantize only if throughput, not size, turns out to be the binding
-   constraint.
+5. **Skip int8** as a size play — it buys 23% for a 0.12 error. Revisit it
+   only as a *speed* play, and only after the throughput measurement below is
+   done properly.
+6. **The next measurement is throughput, not compatibility.** Compatibility is
+   settled: three graphs load and run in pure Dart and match onnxruntime to
+   ~1e-6. Kong at 96× real time and O&F at ~8× is what decides whether any of
+   this ships, and neither number came from a tuned build.
