@@ -2306,9 +2306,10 @@ MB copy rather than a link. Recorded because it is the kind of thing that
 reads as a broken build for an hour: the filesystem is ext4 and writable,
 `touch` succeeds, and only `ln -s` fails.
 
-Not recommended: the third runtime. Native ONNX Runtime FFI earns its place
-in an app with chords, stems and tablature to accelerate. Here §19 and §23
-already got 2.22× from an isolate pool in pure Dart, with nothing to ship.
+~~Not recommended: the third runtime.~~ **Reversed in §31.4.** That
+recommendation was sound for Basic Pitch, which is 35.7k parameters and runs
+in 159 ms per window in pure Dart. It does not survive contact with a model
+a thousand times larger.
 
 ## 26. CometBeat's detectors on both corpora
 
@@ -2715,6 +2716,116 @@ transcriber. It is a 35.7k-parameter instrument-agnostic model being asked
 for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
+
+## 31. The ONNX route: compatible, and far too slow
+
+§29.4 said the lever was a model with a dedicated onset head, and named the
+ONNX route as the way to reach the ones that publish only PyTorch weights.
+Three are now exported and verified, and the answer to "can the pure-Dart
+runtime run them" is **yes, and it does not matter**.
+
+| model | ONNX | params | max abs diff vs PyTorch |
+| --- | --- | --- | --- |
+| Kong / ByteDance high-res piano | 154 MB | 42.95 M | **7.7e-07** |
+| Onsets & Frames | 106 MB | 26.49 M | 7.0e-05 |
+| hFT-Transformer | **22 MB** | 5.52 M | 1.3e-05 |
+
+Each was re-run at an input length different from the one it was traced at —
+the only real test that `dynamic_axes` took — and Kong and Onsets & Frames
+were then loaded into `onnx_runtime_dart` itself and agreed with onnxruntime
+to ~1e-6. PyTorch → ONNX → pure Dart, measured rather than assumed.
+
+**Zero missing ops**, across all four graphs, diffed node by node against the
+runtime's dispatch table. Kong is 26 distinct ops, hFT does plain
+`MatMul`+`Softmax`+`LayerNormalization` attention with no fused op and no
+`com.microsoft` domain, and even the int8 variant's `ConvInteger` /
+`DynamicQuantizeLinear` / `MatMulInteger` are implemented.
+
+### 31.1 The question I asked was the wrong one
+
+§29.4 treated op compatibility as what decides the Dart route. It is not, and
+the measurement says so plainly: **Kong runs at ~96× real time in pure
+Dart** — 96 seconds of CPU per second of audio, so a three-minute piece is
+about five hours. Onsets & Frames is ~8×.
+
+That is not a surprise once it is written down. §19 measured the pure-Dart
+runtime at **0.78 GMAC/s**, and Kong has **1,203 times Basic Pitch's
+parameters**. Scaling §30's measured 0.12× real time by that factor predicts
+~144×; 96× is the same answer. The arithmetic was available before the
+export and I did not do it.
+
+So the conclusion inverts. Compatibility is solved and irrelevant;
+**throughput is the whole question**, and it puts these models out of reach
+of the pure-Dart path for anything but offline transcription of a short
+take.
+
+Which makes the **ggml route more important, not less** — it is where the
+speed would have to come from — and puts §20.1a's finding on the critical
+path rather than beside it: CrispASR's own `src/` compiles baseline x86-64
+with no AVX2, on every release leg, while the ggml it vendors gets AVX2 on
+fifteen of them.
+
+### 31.2 What is actually worth building
+
+* **hFT-Transformer**, if anything. 22 MB, 5.5 M parameters — 155× Basic
+  Pitch rather than 1,203× — SOTA on piano, a clean op set and a fixed
+  192-frame window that batches naturally. My own arithmetic puts it near
+  ~19× real time in pure Dart, which is still not live but is a different
+  order of problem. Its real work is a Dart log-mel front end, not the
+  runtime.
+* **Kong as an accuracy reference**, because its log-mel front end is *inside
+  the graph* (torchlibrosa's `Conv1d` STFT), so it takes raw 16 kHz audio
+  and removes an entire class of front-end mismatch bug. Too slow to ship in
+  Dart; ideal for establishing what the ceiling is.
+* **Onsets & Frames is a baseline, not a candidate.** 106 MB for the oldest
+  architecture here is nobody's trade.
+* **int8 quantisation is not a size play.** 154 → 119 MB is 23%, because
+  `quantize_dynamic` will not touch GRU weights and those are most of the
+  model, and it costs 0.12 absolute error on sigmoid outputs. Revisit only
+  as a speed play.
+
+### 31.4 Reversing §25.4: the third runtime
+
+§25.4 recommended against native ONNX Runtime, on the grounds that §19 and
+§23 had already extracted 2.22× from an isolate pool in pure Dart with
+nothing to ship. **That was right about Basic Pitch and wrong as a general
+rule, and §31.1 is why.**
+
+Basic Pitch is 35.7k parameters and costs 159 ms per two-second window in
+pure Dart — comfortable. Kong is **1,203 times larger** and costs ~96×
+real time in the same runtime. A conclusion drawn on the small model does
+not transfer to the large one, and I drew it as though it would.
+
+The runtimes now stand like this for a model of that size:
+
+| runtime | ships where | Basic Pitch | a 43 M-parameter model |
+| --- | --- | --- | --- |
+| pure Dart (`onnx_runtime_dart`) | all six platforms, web included | fine (159 ms/window) | **~96× real time — unusable** |
+| native ONNX Runtime FFI | five platforms, no web | unmeasured | **the open question** |
+| CrispASR ggml FFI | five platforms, no web | 292 ms/window (§17) | unmeasured; §20's AVX2 work applies |
+
+CometBeat already depends on `onnxruntime: ^1.4.1` and has an `onnx_ffi`
+provider seam; this app has no native-ORT path at all. So the sibling
+project made the call that §25.4 talked this one out of, and for models this
+size it was the correct call.
+
+**What this does not change:** the transcription mode that ships here runs
+Basic Pitch, where pure Dart is fine and a native library would buy speed
+nobody is waiting for. The reversal applies to *adding a larger model*, not
+to what is already shipped — and §31.2's shortlist exists precisely because
+hFT-Transformer at 5.52 M parameters might be the one that needs neither.
+
+### 31.3 Three corrections to this report's own pointers
+
+* **YourMT3's repository contains no code.** `github.com/mimbres/YourMT3` is
+  240 KB — a LICENCE and a README; the implementation lives in the HF Space.
+  §29.4 listed it as a candidate on the strength of the name.
+* **hFT's repository is `hft-transformer`*s*`-rewrite`**, plural. The
+  singular 404s, and a 404 clone surfaces as `could not read Username for
+  'https://github.com'` — which reads exactly like the no-internet failure
+  `kaggle-usage.md` warns about and is not one.
+* **That guide's gotcha #3 is too strong.** The CPU worker reached pypi,
+  Zenodo, HF and GitHub sub-second on both runs.
 
 ---
 
