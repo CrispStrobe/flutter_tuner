@@ -354,6 +354,32 @@ void main() {
       expect(() => CrispAsrBackend.fromEnvironment(), returnsNormally);
     });
 
+    test('every registry model is selectable and names itself', () {
+      // §32: all three hang off crispasr_session_piano, so supporting them is
+      // a choice of model rather than three code paths. A new enum value with
+      // no id or no display name is the failure this catches.
+      for (final m in CrispAsrModel.values) {
+        expect(m.id, isNotEmpty);
+        expect(m.displayName, isNotEmpty);
+        expect(m.nativeRate, anyOf(16000, 22050));
+        expect(CrispAsrBackend(model: m).id, '${m.id}-crispasr');
+      }
+      expect(CrispAsrModel.values.map((m) => m.id),
+          containsAll(['basic-pitch', 'piano-transcription', 'mt3']));
+    });
+
+    test('an unknown model name falls back rather than throwing', () {
+      // It reads an environment variable; a typo must not take the
+      // transcription mode down with it.
+      expect(crispAsrModelFromName(null), CrispAsrModel.basicPitch);
+      expect(crispAsrModelFromName('nonsense'), CrispAsrModel.basicPitch);
+      expect(crispAsrModelFromName('mt3'), CrispAsrModel.mt3);
+      expect(crispAsrModelFromName('  MT3 '), CrispAsrModel.mt3);
+      expect(crispAsrModelFromName('piano-transcription'),
+          CrispAsrModel.pianoTranscription);
+      expect(crispAsrModelFromName('kong'), CrispAsrModel.pianoTranscription);
+    });
+
     test('agrees with the ONNX backend on geometry', () {
       final ggml = CrispAsrBackend();
       final onnx = TranscriptionService();

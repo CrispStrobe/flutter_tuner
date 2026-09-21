@@ -2716,6 +2716,55 @@ for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
 
+## 33. All three models, in both apps
+
+§32 measured five transcribers. Two of them are worth reaching for, and
+reaching for them turned out to be cheap, because **`crispasr_session_piano`
+is one C entry point serving all three** — basic-pitch, piano-transcription
+and MT3 alike. Supporting them is a choice of model, not three code paths.
+
+| model | F1 | onset err p50 | cost/s of audio | size |
+| --- | --- | --- | --- | --- |
+| basic-pitch | 44.2% | 21.4 ms | 0.08× | 110 KB |
+| piano-transcription | 47.7% (**71.2%** solo piano) | 19.1 ms | 7.77× | 77 MB |
+| **mt3** | **76.5%** | **16.8 ms** | 0.26× | 96 MB |
+
+`CrispAsrBackend` now takes a `CrispAsrModel`. Three details were where the
+work actually was:
+
+* **Sample rates differ and are queried, not assumed.** basic-pitch wants
+  22050 Hz; piano-transcription and MT3 want 16000. Verified on this box
+  rather than read off a document — `pianoSampleRate` returns exactly that
+  for each. The capture path still decimates once to 22.05 kHz and the 16 kHz
+  models are resampled **on the worker isolate**, so no second decimation
+  chain touches the audio thread.
+* **Each model resolves itself** through CrispASR's registry and cache, so a
+  96 MB download happens on first use rather than being bundled — the §25.2
+  lesson applied from the start this time instead of after.
+* **The selector is tolerant.** `CRISPTUNER_CRISPASR_MODEL` is read from the
+  environment, so an unrecognised name falls back to basic-pitch rather than
+  throwing. A typo must not take the transcription mode down, and a test
+  pins that.
+
+### 33.1 What this does and does not change
+
+It does **not** change the default. The mode still ships Basic Pitch through
+pure Dart, on all six platforms including the web, with no native library —
+and §18's decoder work is what makes that path respectable. MT3 is reachable
+by a host that has libcrispasr and opts in by name.
+
+The honest shape of the choice is now:
+
+| | F1 | ships where | needs |
+| --- | --- | --- | --- |
+| Basic Pitch, pure Dart | 44.0% | **six platforms, web included** | nothing |
+| Basic Pitch, ggml | 44.2% | five platforms | libcrispasr |
+| MT3, ggml | **76.5%** | five platforms | libcrispasr + 96 MB |
+
+Thirty-two points of F1 for a native library and a download is a real trade
+rather than an obvious one, and it is now a trade a host can make instead of
+a thing this report merely measured.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
