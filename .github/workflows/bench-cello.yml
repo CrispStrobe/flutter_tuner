@@ -23,6 +23,12 @@ on:
         description: 'Analysis window in samples'
         required: false
         default: '4096'
+      cometbeat:
+        description: 'Also run CometBeat''s engines against MUSERC'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
   cello:
@@ -64,6 +70,32 @@ jobs:
           rm -f /tmp/MUSERC.zip
           ls corpus/muserc/MUSERC/SA | wc -l
 
+      # CometBeat's engines are copied into bench/lib/cometbeat/ rather than
+      # depended on (a Flutter app's pubspec would drag in the SDK). The
+      # --check run fails if the copies have drifted, so a number attributed
+      # to CometBeat cannot come from a stale snapshot.
+      - name: Fetch CometBeat and check the copies
+        if: inputs.cometbeat == 'true'
+        working-directory: bench
+        run: |
+          git clone -q --depth 1 https://github.com/CrispStrobe/cometbeat.git ../cometbeat
+          ./tool/sync_cometbeat.sh --check ../cometbeat
+
+      - name: CometBeat against MUSERC
+        if: inputs.cometbeat == 'true'
+        working-directory: bench
+        run: |
+          dart run bin/cometbeat.dart \
+            --corpus cello \
+            --data ../corpus/muserc/MUSERC/SA | tee cometbeat-cello.txt
+          {
+            echo '## CometBeat engines on MUSERC'
+            echo ''
+            echo '```'
+            cat cometbeat-cello.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run the cello benchmark
         working-directory: bench
         run: |
@@ -76,7 +108,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: cello-results
-          path: bench/cello-results.txt
+          path: |
+            bench/cello-results.txt
+            bench/cometbeat-cello.txt
           retention-days: 30
 
       - name: Summary
