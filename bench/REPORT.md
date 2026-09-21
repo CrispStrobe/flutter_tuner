@@ -2254,16 +2254,57 @@ Both projects are right, which is the useful confirmation — the rules are not
 wrong, they are **not portable to a live display**, and that distinction now
 has an independent example rather than only an argument.
 
-### 25.4 What to do
+### 25.4 What was done
 
-1. **Resolve the GGUF through CrispASR's registry**, as CometBeat does, so
-   `CrispAsrBackend` becomes reachable instead of theoretically available.
-   This is the change that would make §17's merged backend real.
-2. **Adopt the library-path chain**, including the macOS `Frameworks/` case.
-3. **Prefer null over throwing** for unavailability. Ours throws
-   `UnsupportedError` from `start()` and catches it in the worker; CometBeat
-   degrades silently at every step and the caller falls through. Theirs is
-   the better shape for something optional.
+All three, and `bin/backend_resolve.dart` proves the result on a machine
+with nothing configured:
+
+```
+library path : /home/claudeuser/.cache/crispasr/libcrispasr.so
+library      : opened
+registry     : basic-pitch-f16.gguf (~110 KB)
+cache dir    : /home/claudeuser/.cache/crispasr
+cached       : yes, 112160 bytes
+session      : open, wants 22050 Hz
+```
+
+1. **The GGUF resolves through CrispASR's registry and cache.**
+   `registryLookup('basic-pitch')` → cached file, or `cacheEnsureFile`
+   downloads it (110 KB from `cstr/basic-pitch-GGUF`) on the *worker
+   isolate*, never on the UI thread. Verified from cold: no cache, download,
+   session open.
+2. **The library-path chain** is env → a built macOS app's `Frameworks/` →
+   `~/.cache/crispasr/` → the package default. The `Frameworks/` entry is
+   the one that matters, because it is the only one that describes a shipped
+   app rather than a developer's shell.
+3. **Nothing throws to say "not here."** `isAvailable` probes and returns
+   false — a test asserts it stays `returnsNormally` against a nonexistent
+   library — and `fromEnvironment` returns null. The worker replies with an
+   error message instead of propagating an exception.
+
+**Availability is now separate from preference, which is the part that
+needed care.** Once a model downloads itself, this backend is available
+anywhere libcrispasr is, and §18.2 is precisely why that must not make it
+the default. Measured on this box with the library present:
+
+| | |
+| --- | --- |
+| `isAvailable` | **true** |
+| `fromEnvironment()` with no opt-in | **null** |
+| `fromEnvironment()` with `CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr` | a backend |
+
+The old `CRISPTUNER_BASIC_PITCH_GGUF` still opts in on its own, so anyone
+already using it keeps working.
+
+### 25.5 One thing the fix could not use
+
+CometBeat drops a development copy of the library at
+`~/.cache/crispasr/libcrispasr.{so,dylib}`, and the chain looks there. On
+this box `~/.cache` is a symlink onto `/mnt/volume1`, and creating a symlink
+inside it fails with `Input/output error` — so the drop had to be a real 23
+MB copy rather than a link. Recorded because it is the kind of thing that
+reads as a broken build for an hour: the filesystem is ext4 and writable,
+`touch` succeeds, and only `ln -s` fails.
 
 Not recommended: the third runtime. Native ONNX Runtime FFI earns its place
 in an app with chords, stems and tablature to accelerate. Here §19 and §23
