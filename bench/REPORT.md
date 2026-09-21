@@ -2716,6 +2716,56 @@ for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
 
+## 30. Note-level transcription, measured properly
+
+§28 and §29 were about getting the measurement right. This is the
+measurement. All ten MusicNet test pieces, 24.7 minutes, 13,589 reference
+notes, `mir_eval.transcription` rules.
+
+| decoder | precision | recall | F1 | onset err p50 | pitch err p50 | xRT |
+| --- | --- | --- | --- | --- | --- | --- |
+| this repo's (hysteresis run-length) | 53.5% | 29.8% | 38.3% | 22.3 ms | 0.0 c | 0.12 |
+| CometBeat's `note_creation` port | 52.4% | **37.9%** | **44.0%** | 21.5 ms | 0.0 c | 0.14 |
+
+With offsets required as well: 10.7% and 16.3%.
+
+Both run **the same ONNX model**, so the 5.7-point gap is entirely
+decoding — and it is recall, at equal precision. A faithful port of
+Spotify's note-creation finds a quarter more of the notes than turning runs
+of above-threshold frames into notes, which is what it is for.
+
+For scale: the first version of this table said **8.0%**, and every point of
+the difference is two clock bugs (§28) rather than anything about a model.
+
+**The pitch error column is 0.0 cents in both**, which is the same fact §29
+found from the other direction: when these systems find a note they have its
+pitch right, and everything that separates them from a good score is
+*timing*.
+
+### 30.1 The ggml arms still have not run
+
+Three times now. The intended comparison includes Kong's piano-transcription
+and MT3 — the models §29 identifies as the actual lever, because they carry
+dedicated onset heads and piano is the one instrument family that does not
+lag. They have never executed:
+
+1. First run: `git clone --depth 1` without `--recurse-submodules`, so
+   CrispASR's CMake refused to configure without its vendored ggml — and
+   `continue-on-error` reported the step **success**, so the run measured one
+   arm and presented it as the answer (§20.2a's shape exactly).
+2. Second run: submodule fixed, but the build target is `crispasr-lib`, not
+   `crispasr`; `gmake` exits 2 with "No rule to make target". This time the
+   added existence check caught it and the run **said so** — which is the
+   whole value of that check.
+3. Third: target fixed, and `libcrispasr.so` was being copied without the
+   `libggml*.so` it links, so `DynamicLibrary.open` would fail with the
+   library sitting right there. Now copied as a set, with `ldd` asserting no
+   unresolved dependencies and `LD_LIBRARY_PATH` set for the run.
+
+Recorded in this detail because the pattern is the point: each failure was
+*quieter* than the last would have been without the check added after it.
+The first one produced a green tick over a measurement that did not happen.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
