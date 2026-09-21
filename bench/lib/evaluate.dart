@@ -19,6 +19,7 @@ import 'cometbeat/contracts.dart' as cb;
 import 'cometbeat/note_hmm.dart' as cb;
 import 'pyin.dart';
 import 'refine.dart';
+import 'voicing_hmm.dart';
 import 'wav.dart';
 import 'yin.dart';
 
@@ -97,6 +98,19 @@ class Variant {
   /// and a reading quantised to the semitone has thrown away the deviation
   /// a tuner exists to show. So the notes are used as a voicing mask only.
   final bool hmmMask;
+
+  /// Mask voicing with this repo's own streaming two-state HMM
+  /// (`voicing_hmm.dart`), at the given lookahead in frames.
+  ///
+  /// §27.2 named the blocker: the offline note-HMM cannot run in a tuner.
+  /// This is the same idea at a size a tuner can afford — two states instead
+  /// of one per MIDI note, because the mask discards the note identity
+  /// anyway (§27.1), and a bounded lag instead of the whole track.
+  final int? voicingLag;
+
+  /// Cost model for [voicingLag], swept because the defaults were a guess.
+  final double? voicingSwitch;
+  final double? voicingEvidence;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -126,6 +140,9 @@ class Variant {
     this.isPyin = false,
     this.pyinLag,
     this.hmmMask = false,
+    this.voicingLag,
+    this.voicingSwitch,
+    this.voicingEvidence,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -211,6 +228,25 @@ const List<Variant> defaultVariants = [
   // different operating point rather than a worse one — the best held-note
   // accuracy in the report.
   Variant('pyin-lag0+hmm', isPyin: true, pyinLag: 0, hmmMask: true),
+  // The streaming replacement for the arm above. If these match, §27 has a
+  // path to shipping; if they do not, the note structure was doing work the
+  // voicing states cannot.
+  Variant('pyin-lag0+vhmm0', isPyin: true, pyinLag: 0, voicingLag: 0),
+  Variant('pyin-lag0+vhmm2', isPyin: true, pyinLag: 0, voicingLag: 2),
+  Variant('pyin-lag0+vhmm5', isPyin: true, pyinLag: 0, voicingLag: 5),
+  // The defaults above (switch 1.2, evidence 4.0) were a starting point, not
+  // a measurement. A weaker switch cost and weaker evidence should both make
+  // the model hold a note through a dip rather than cutting it.
+  Variant('vhmm-s0.4-e2', isPyin: true, pyinLag: 0, voicingLag: 2,
+      voicingSwitch: 0.4, voicingEvidence: 2.0),
+  Variant('vhmm-s0.4-e1', isPyin: true, pyinLag: 0, voicingLag: 2,
+      voicingSwitch: 0.4, voicingEvidence: 1.0),
+  Variant('vhmm-s2.5-e2', isPyin: true, pyinLag: 0, voicingLag: 2,
+      voicingSwitch: 2.5, voicingEvidence: 2.0),
+  Variant('vhmm-s5-e1', isPyin: true, pyinLag: 0, voicingLag: 2,
+      voicingSwitch: 5.0, voicingEvidence: 1.0),
+  Variant('vhmm-s5-e0.5', isPyin: true, pyinLag: 0, voicingLag: 2,
+      voicingSwitch: 5.0, voicingEvidence: 0.5),
   Variant('pyin-lag2+hmm', isPyin: true, pyinLag: 2, hmmMask: true),
   Variant('pyin-lag0+smoother', isPyin: true, pyinLag: 0, coreSmoother: true),
   Variant('pyin-lag2+smoother', isPyin: true, pyinLag: 2, coreSmoother: true),
@@ -386,6 +422,23 @@ FileResult evaluateFile({
     var path = pyin.snapToCandidates(
         pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     if (v.hmmMask) path = _hmmVoicingMask(path, hop, rate);
+    if (v.voicingLag != null) {
+      // pYIN's own claimed probability mass per frame is the emission: the
+      // mass it did not assign to any candidate IS its estimate of being
+      // unvoiced, so no new signal has to be invented.
+      final evidence = [
+        for (final f in pyinFrames)
+          f.probabilities.fold<double>(0, (a, b) => a + b).clamp(0.0, 1.0)
+      ];
+      final voiced = VoicingHmm(
+        lag: v.voicingLag!,
+        switchCost: v.voicingSwitch ?? 1.2,
+        evidenceWeight: v.voicingEvidence ?? 4.0,
+      ).decide(evidence);
+      for (int i = 0; i < path.length && i < voiced.length; i++) {
+        if (!voiced[i]) path[i] = 0;
+      }
+    }
     final out = detected[v.name]!;
     final smoother = smoothers[v.name];
     for (int i = 0; i < out.length && i < path.length; i++) {

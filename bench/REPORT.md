@@ -2503,6 +2503,60 @@ held notes, better on cents, near-parity on the errors — rather than
 improving a side mode or a runtime. Every runtime result in §17–§23 made
 something faster that was already fast enough; this makes the needle better.
 
+### 27.3 A streaming voicing model that does not work, and why
+
+§27.2 named the blocker — the note-HMM is offline — and the obvious fix
+looked small. The mask throws away the HMM's note identity (§27.1), so a
+model that decides *only* voiced against unvoiced should serve: two states
+instead of one per MIDI note, bounded lag instead of the whole track.
+`lib/voicing_hmm.dart` is that, built on §24's structure.
+
+It does not reproduce §27. Ten solo files:
+
+| variant | RPA% | oct% | gross% | held RPA% | \|err\| p50 | FA% |
+| --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | 69.39 | 0.62 | 3.58 | 76.23 | 2.85 | 19.08 |
+| pyin-lag0 **+ note HMM** (offline) | 77.49 | 0.48 | 5.48 | **86.59** | 2.45 | 31.32 |
+| pyin-lag0 + voicing HMM, lag 2 | 67.46 | 0.64 | 3.64 | 75.41 | 2.20 | **15.02** |
+
+It is far more conservative — false alarm 15.02%, better than the shipped
+19.08% — and it gives up almost all of §27's gain: held-note accuracy 75.41%
+against the note-HMM's 86.59%.
+
+**The constants are not the reason.** A sweep of the two costs across an
+order of magnitude each moves nothing that matters:
+
+| switch / evidence | RPA% | held RPA% | FA% |
+| --- | --- | --- | --- |
+| 0.4 / 1.0 | 67.52 | 75.46 | 14.94 |
+| 0.4 / 2.0 | 67.69 | 75.48 | 15.02 |
+| 2.5 / 2.0 | 67.48 | 75.96 | 14.47 |
+| 5.0 / 1.0 | 65.09 | 75.80 | 18.12 |
+| 5.0 / 0.5 | 66.62 | 78.01 | 20.83 |
+
+Every setting lands in the same place. That is the signature of a model that
+lacks information rather than one that is mistuned.
+
+**The diagnosis corrects an assumption in §27.1.** That section established
+that the note HMM's *output* must be discarded, because `int midi` quantises
+away the deviation a tuner exists to show — and that is still right. What it
+led me to assume, wrongly, is that the note states were therefore not
+load-bearing.
+
+They are. The note HMM decides voicing **using pitch continuity**: a frame
+belongs to note N when its f0 sits near N, and staying on N is cheap, so a
+frame whose *confidence* dipped is still held if its *pitch* is consistent
+with the note already in progress. A two-state model sees only pYIN's
+probability mass — a scalar — and has no way to know that the wobbly frame
+it is about to cut is the middle of a perfectly steady note.
+
+So the note states are needed for the **decision** and must not be used for
+the **answer**. Those are compatible, and they point at the design this
+should have had: a note-state HMM with a bounded lag, not a smaller model
+with a bounded lag. That is §24's trick applied to the structure that
+actually earns the result, and it is the next piece of work rather than a
+tuning exercise.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:
