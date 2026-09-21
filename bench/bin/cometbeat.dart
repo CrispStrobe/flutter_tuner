@@ -18,17 +18,60 @@
 // separated from gross ones.
 
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:tuner_bench/cello.dart';
 import 'package:tuner_bench/cometbeat/contracts.dart';
 import 'package:tuner_bench/cometbeat/dio.dart';
+import 'package:tuner_bench/cometbeat/note_hmm.dart';
 import 'package:tuner_bench/cometbeat/pyin.dart';
 import 'package:tuner_bench/jams.dart';
 import 'package:tuner_bench/metrics.dart';
 import 'package:tuner_bench/wav.dart';
 
 typedef Engine = ({String name, PitchTrack Function(Float64List, int) run});
+
+/// CometBeat's shipped monophonic pipeline is not the estimator alone:
+/// `route.dart` runs `segmentNotes` — an HMM over the pitch lattice — after
+/// it. Scoring the raw estimator measures a component, not the product, and
+/// the false-alarm column is where that shows: unvoiced frames the HMM would
+/// discard are counted against the estimator.
+///
+/// Two ways of putting the HMM back, because they answer different
+/// questions:
+///
+///  * **`+hmm`** is the shipped pipeline, and its notes carry an `int midi`
+///    — semitone-quantised. That is right for a transcriber and disqualifying
+///    for a tuner, and the cent column below says so numerically.
+///  * **`+hmm-mask`** uses the HMM only for the voiced/unvoiced decision and
+///    keeps the estimator's own frequency inside a note. That is the shape a
+///    tuner would want: pYIN's weakness against this app is voicing (§24.1),
+///    not pitch, and this separates the two.
+PitchTrack _applyHmm(PitchTrack track, {required bool keepOriginalHz}) {
+  final notes = segmentNotes(track);
+  if (notes.isEmpty) {
+    return [for (final f in track) (timeMs: f.timeMs, f0Hz: 0.0, voicedProb: 0.0)];
+  }
+  final out = <PitchFrame>[];
+  int n = 0;
+  for (final f in track) {
+    while (n < notes.length && notes[n].offMs < f.timeMs) {
+      n++;
+    }
+    final covered =
+        n < notes.length && f.timeMs >= notes[n].onMs && f.timeMs <= notes[n].offMs;
+    if (!covered) {
+      out.add((timeMs: f.timeMs, f0Hz: 0.0, voicedProb: 0.0));
+      continue;
+    }
+    final hz = keepOriginalHz && f.f0Hz > 0
+        ? f.f0Hz
+        : 440 * math.pow(2, (notes[n].midi - 69) / 12).toDouble();
+    out.add((timeMs: f.timeMs, f0Hz: hz, voicedProb: 1.0));
+  }
+  return out;
+}
 
 final _engines = <Engine>[
   (
@@ -42,6 +85,16 @@ final _engines = <Engine>[
   (
     name: 'cb-pyin',
     run: (mono, sr) => pyinF0(mono, sampleRate: sr),
+  ),
+  (
+    name: 'cb-pyin+hmm',
+    run: (mono, sr) =>
+        _applyHmm(pyinF0(mono, sampleRate: sr), keepOriginalHz: false),
+  ),
+  (
+    name: 'cb-pyin+hmm-mask',
+    run: (mono, sr) =>
+        _applyHmm(pyinF0(mono, sampleRate: sr), keepOriginalHz: true),
   ),
 ];
 
