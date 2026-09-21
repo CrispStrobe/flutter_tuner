@@ -2662,8 +2662,16 @@ Onset error of matched notes, per piece, measured at a wide tolerance:
 | 2298 | cello | +42 ms | 45.7% | 60.8% |
 
 **Piano sits at −12 ms and every bowed or blown instrument lags 39–70 ms** —
-straddling the tolerance. That is not label noise, which would not sort
-itself by instrument family. A piano attack is percussive and unambiguous; a
+straddling the tolerance.
+
+> **Correction (§32.2).** This section then argued "that is not label noise,
+> which would not sort itself by instrument family." **That reasoning is
+> wrong.** MusicNet's labels are MIDI aligned to audio by DTW, and DTW is
+> least reliable exactly where attacks are least percussive — so annotation
+> error *would* sort itself by instrument family, in the same direction. The
+> pattern is real and reproduces against a reference implementation; what it
+> is caused by remains open. The −12 ms figure is also about 15 ms out: the
+> reference measures +3.3 ms on the same file. A piano attack is percussive and unambiguous; a
 bowed onset is genuinely spread over tens of milliseconds, so the model fires
 when the pitch becomes *stable* while a MIDI note-on marks when the note was
 *intended*. The two definitions differ by about the length of a bow change.
@@ -2715,6 +2723,149 @@ transcriber. It is a 35.7k-parameter instrument-agnostic model being asked
 for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
+
+## 30. Note-level transcription, measured properly
+
+§28 and §29 were about getting the measurement right. This is the
+measurement. All ten MusicNet test pieces, 24.7 minutes, 13,589 reference
+notes, `mir_eval.transcription` rules.
+
+| decoder | precision | recall | F1 | onset err p50 | pitch err p50 | xRT |
+| --- | --- | --- | --- | --- | --- | --- |
+| this repo's (hysteresis run-length) | 53.5% | 29.8% | 38.3% | 22.3 ms | 0.0 c | 0.12 |
+| CometBeat's `note_creation` port | 52.4% | **37.9%** | **44.0%** | 21.5 ms | 0.0 c | 0.14 |
+
+With offsets required as well: 10.7% and 16.3%.
+
+Both run **the same ONNX model**, so the 5.7-point gap is entirely
+decoding — and it is recall, at equal precision. A faithful port of
+Spotify's note-creation finds a quarter more of the notes than turning runs
+of above-threshold frames into notes, which is what it is for.
+
+For scale: the first version of this table said **8.0%**, and every point of
+the difference is two clock bugs (§28) rather than anything about a model.
+
+**The pitch error column is 0.0 cents in both**, which is the same fact §29
+found from the other direction: when these systems find a note they have its
+pitch right, and everything that separates them from a good score is
+*timing*.
+
+### 30.1 The ggml arms still have not run
+
+Three times now. The intended comparison includes Kong's piano-transcription
+and MT3 — the models §29 identifies as the actual lever, because they carry
+dedicated onset heads and piano is the one instrument family that does not
+lag. They have never executed:
+
+1. First run: `git clone --depth 1` without `--recurse-submodules`, so
+   CrispASR's CMake refused to configure without its vendored ggml — and
+   `continue-on-error` reported the step **success**, so the run measured one
+   arm and presented it as the answer (§20.2a's shape exactly).
+2. Second run: submodule fixed, but the build target is `crispasr-lib`, not
+   `crispasr`; `gmake` exits 2 with "No rule to make target". This time the
+   added existence check caught it and the run **said so** — which is the
+   whole value of that check.
+3. Third: target fixed, and `libcrispasr.so` was being copied without the
+   `libggml*.so` it links, so `DynamicLibrary.open` would fail with the
+   library sitting right there. Now copied as a set, with `ldd` asserting no
+   unresolved dependencies and `LD_LIBRARY_PATH` set for the run.
+
+Recorded in this detail because the pattern is the point: each failure was
+*quieter* than the last would have been without the check added after it.
+The first one produced a green tick over a measurement that did not happen.
+
+## 32. The reference implementations answer it
+
+§28–§31 were about getting the measurement trustworthy. A Kaggle kernel now
+runs the **official** implementations over the same ten MusicNet pieces and
+scores them with **`mir_eval` itself**, which settles three questions at
+once.
+
+### 32.1 Our port is faithful — to 0.2 points
+
+| | precision | recall | F1 | with offsets |
+| --- | --- | --- | --- | --- |
+| reference `basic-pitch` 0.4.0, official `predict()` | 50.3% | 39.5% | **44.2%** | 16.7% |
+| ours, Dart port of `note_creation.py` | 52.4% | 37.9% | **44.0%** | 16.3% |
+
+Same `nmp.onnx`. More convincing than the aggregate, it agrees **piece by
+piece**: 52.5 against 53.0, 38.6 against 40.7, 24.9 against 24.0, 36.1
+against 36.3, 46.6 against 45.7.
+
+**So 44.0% is the model on this corpus, not our pipeline losing something.**
+After two clock bugs took this number from 8.0% to 44.0%, that was the
+question worth paying to answer.
+
+### 32.2 The onset lag reproduces — and my reasoning about it was wrong
+
+The reference shows the same pattern, larger: solo piano **+3.8 ms**,
+everything bowed or blown **+60.7 ms** (worst +111 ms), F1 57.5% against
+38.3%.
+
+§29.2 argued the pattern could not be label noise "which would not sort
+itself by instrument family." **That is exactly backwards.** MusicNet's
+labels are MIDI aligned to audio by dynamic time warping, and DTW is least
+reliable precisely where attacks are least percussive. Annotation error
+would sort itself by instrument family, in the same direction, for the same
+physical reason. "The model fires at pitch stability" and "the annotation
+marks intent" predict the same observation here, and this corpus cannot
+separate them. MAESTRO could.
+
+The specific number was also wrong: our −12 ms for solo piano is about 15 ms
+out, against the reference's +3.3 ms on the same file.
+
+### 32.3 `note_metrics.dart` is correct
+
+Scored against `mir_eval` on the same inputs: **16 of 20 pieces match
+exactly.** The other four differ by 1–4 matches out of hundreds, and all of
+them vanish under `mir_eval`'s four-decimal rounding of distances, which the
+Dart does not do. Of 240 randomised cases, 2 disagree without that rounding
+and **0** with it. Effect on any published number here: under 0.1 F1 points.
+
+That is the maximum-bipartite-matching claim of §28 checked against the
+implementation it was written from.
+
+### 32.4 Kong is the answer to §29.4
+
+**71.2% F1 on solo piano, against Basic Pitch's 57.5%** — and 88.0% on one
+piece, the best number anywhere in this report. §29.4 predicted that a model
+with a dedicated high-resolution onset head was the lever, and it was.
+
+On solo violin it emits 9 notes for 551 references. That is a piano model
+**correctly declining**, not failing, and it is the right behaviour to want.
+
+### 32.5 Native ONNX Runtime settles §31.4
+
+| arm | cost per second of audio |
+| --- | --- |
+| Basic Pitch, ORT, 4 threads | **0.045×** |
+| Kong, ORT, 4 threads | **0.996×** |
+| Kong, PyTorch CPU, 2 threads | 1.73× |
+| Kong, int8 ORT | 3.97× |
+| Kong, **pure Dart** | **~96×** |
+
+**Native ORT is roughly 96× cheaper than the pure-Dart runtime for this
+model, and lands just under real time on four cores.** §31.4 reversed
+§25.4's recommendation against a third runtime on an arithmetic argument;
+this is the measurement, and it is not close.
+
+And ORT agrees with PyTorch on the *transcription*, not merely on tensors:
+**5,451 of 5,451 notes identical**, F1 70.7% both ways, every per-piece row
+to the decimal.
+
+Two further results worth keeping:
+
+* **Onsets & Frames is 11× faster than real time on one thread** and barely
+  gains from four — its LSTM is sequential. That is an unusually good mobile
+  profile, and it revises §31.2's "baseline, not a candidate" on the speed
+  axis even though 106 MB still argues against it.
+* **The int8 graph is worse on both axes** — 11.4% F1 *and* 4× slower than
+  float. There is no trade-off to weigh, which is the cleanest possible
+  answer to §31.2's "revisit as a speed play".
+
+One caveat the kernel flags itself: torch had 2 threads and ORT 4 on that
+worker, so part of the PyTorch→ORT gap is thread count. The Dart-against-ORT
+comparison is unaffected.
 
 ---
 
