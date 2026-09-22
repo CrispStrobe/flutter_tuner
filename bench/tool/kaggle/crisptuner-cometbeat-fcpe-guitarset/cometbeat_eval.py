@@ -66,17 +66,22 @@ def models_dir():
 
 
 def install_dart():
+    """Unpack the SDK with `unzip`, NOT with `zipfile.extractall`.
+
+    Python's zipfile does not restore Unix permission bits, so every binary
+    in the SDK comes out non-executable. `dart --version` and `dart pub get`
+    still worked, because the front-end binary had been chmod'ed by hand, and
+    `dart run` did not: it exited 255 having written a single "." and nothing
+    else, three times, on three different kernels, with no error text
+    anywhere — including in a file it had been redirected to. A failure that
+    silent is worth naming; `unzip -q` is the one-word fix.
+    """
     if os.path.exists(DART):
         return
     zip_path = os.path.join(WORK, "dart.zip")
     urllib.request.urlretrieve(DART_URL, zip_path)
-    with zipfile.ZipFile(zip_path) as z:
-        z.extractall(WORK)
-    os.chmod(DART, 0o755)
-    for extra in ("dartaotruntime", "utils/gen_snapshot"):
-        p = os.path.join(WORK, "dart-sdk", "bin", extra)
-        if os.path.exists(p):
-            os.chmod(p, 0o755)
+    sh(f"unzip -q -o {zip_path} -d {WORK}")
+    sh(f"chmod -R u+rwX,go+rX {WORK}/dart-sdk")
     os.remove(zip_path)
     sh(f"{DART} --version")
 
@@ -191,6 +196,13 @@ def run_dart(limit=0):
         print(f"(no {log}: {exc})", flush=True)
     return rc
 
+
+# What the tree under test actually is, and whether it analyses. A clean
+# `dart analyze` rules out the whole class of "the clone is not the code you
+# think it is" (gotcha #24) in one line, and prints the compile error when it
+# is not clean — which `dart run` has proven it will not do reliably.
+sh(f"md5sum {bench}/bin/cometbeat.dart")
+subprocess.run(f"{DART} analyze bin/cometbeat.dart", shell=True, cwd=bench)
 
 # One file first. A configuration error — a missing model, a path the
 # `--models` loader does not recognise — costs a minute this way instead of
