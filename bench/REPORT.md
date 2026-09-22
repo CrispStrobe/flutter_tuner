@@ -3666,19 +3666,39 @@ recommendation narrows: **q4_0 where onset and pitch are what matter, q8_0
 as the default.** At 30.8 MiB q8_0 is indistinguishable from fp32 on every
 column, and there is no remaining case for shipping f32 at all.
 
-**Speed — and this qualifies §36.3.** On the same 4-vCPU box: **0.73 CPU-
-seconds per audio-second** at f32, 0.75 at q8_0 and q4_0. Quantisation buys
-no speed here, because 46% of this model is convolution and those kernels
-run F32 either way.
+**Speed — and this qualifies §36.3.** Quantisation buys no speed here:
+0.73 CPU-seconds per audio-second at f32, 0.75 at q8_0 and q4_0, because
+46% of this model is convolution and those kernels run F32 either way.
 
-That is **about an order of magnitude slower than native ORT's 0.055×**, and
-§36.3's "speed is already not the objection" was a statement about ORT that
-should not have been carried across to a runtime that did not exist yet.
-Two causes, neither fixed: a fresh ggml allocator per convolution chunk, and
-a single-threaded scalar recurrence for the BiLSTM. Still comfortably faster
-than real time for offline transcription, which is what this arm is for —
-but the port's case is size and portability, not throughput, and §36.3 read
-as though it were both.
+Against native ORT the gap was first written up as "about an order of
+magnitude", which was wrong twice over: it set the ggml arm's **whole
+process** — startup, a 106 MB model load, the mel, inference and the note
+decoder — against ORT's **inference call alone**, and it compared
+CPU-seconds on one side with wall-clock on the other.
+
+Measured in matched units, `crispasr --piano -m onsets-and-frames-f32.gguf
+-t N -f input16k.wav` against the same ONNX export under onnxruntime
+1.23.2, both on the same 30 s 16 kHz clip. Running the ggml arm at 5 s and
+30 s separates the fixed cost from the marginal one — 4.41 and 21.18
+CPU-seconds, so 1.06 CPU-seconds of load and startup and **0.671
+CPU-seconds per audio-second** thereafter:
+
+| | ggml arm | native ORT | ratio |
+| --- | --- | --- | --- |
+| CPU-s per audio-second, 1 thread, marginal | 0.671 | 0.103 | **6.5×** |
+| wall, each at 4 threads | 0.439× real time | 0.080× | **5.5×** |
+
+So **5.5 to 7×, not ten**. (The 0.055× quoted for ORT elsewhere in §36 and
+§37 is its best figure from a different pass; on this clip, today, on this
+box, it is 0.080×.) The direction is unchanged and so is the conclusion —
+two causes, neither fixed: a fresh ggml allocator per convolution chunk,
+and a single-threaded scalar recurrence for the BiLSTM where
+`piano_transcription.cpp` threads its BiGRU directions. Still comfortably
+faster than real time for offline transcription, which is what this arm is
+for. But §36.3's "speed is already not the objection" was a statement about
+ORT that should not have been carried across to a runtime that did not
+exist yet: the port's case is size and portability, not throughput, and
+that section read as though it were both.
 
 **One thing found by accident, worth more than the port.** Validating the
 mel front end turned up that CrispASR's `core_mel` was linking Debian's
