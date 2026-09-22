@@ -15,9 +15,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:tuner_bench/app/harmonics.dart';
 import 'package:tuner_bench/app/tuner_core.dart';
 import 'package:tuner_bench/metrics.dart';
 import 'package:tuner_bench/mpm.dart';
+import 'package:tuner_bench/narrowband.dart';
 import 'package:tuner_bench/refine.dart';
 import 'package:tuner_bench/yin.dart';
 
@@ -78,6 +80,11 @@ void main(List<String> args) {
       'mpm': CentHistogram(),
       'yin + instantaneous frequency': CentHistogram(),
       'yin + IF, stiffness fitted': CentHistogram(),
+      'yin + IF, fundamental only': CentHistogram(),
+      'yin + spectral harmonic LSQ': CentHistogram(),
+      'yin + goertzel (f0 only)': CentHistogram(),
+      'yin + goertzel (8 harmonics)': CentHistogram(),
+      'yin + PLL': CentHistogram(),
     };
     final rng = math.Random(11);
     int frames = 0;
@@ -109,6 +116,31 @@ void main(List<String> args) {
                 block, plain.pitch, rate * 1.0,
                 fitInharmonicity: true);
             results['yin + IF, stiffness fitted']!.add(cents(r2.frequency, f0));
+            // Isolates the least-squares fit from the phase vocoder: the
+            // same instantaneous-frequency estimator, restricted to the
+            // fundamental, so the only difference from the row above is
+            // whether the other partials are fitted at all.
+            final r3 = refineByInstantaneousFrequency(
+                block, plain.pitch, rate * 1.0,
+                maxPartials: 1, fitInharmonicity: false);
+            results['yin + IF, fundamental only']!
+                .add(cents(r3.frequency, f0));
+            // And the app's own harmonic fit, which reads partial
+            // frequencies off the interpolated spectrum rather than from
+            // phase advance: magnitude-weighted LSQ over up to 12 partials.
+            results['yin + goertzel (f0 only)']!.add(cents(
+                refineByGoertzel(block, plain.pitch, rate * 1.0), f0));
+            results['yin + goertzel (8 harmonics)']!.add(cents(
+                refineByGoertzel(block, plain.pitch, rate * 1.0,
+                    harmonics: 8),
+                f0));
+            results['yin + PLL']!
+                .add(cents(refineByPll(block, plain.pitch, rate * 1.0), f0));
+            final hp = analyseHarmonics(block, plain.pitch, rate * 1.0);
+            if (hp.fittedF0 > 0) {
+              results['yin + spectral harmonic LSQ']!
+                  .add(cents(hp.fittedF0, f0));
+            }
           }
           if (step6.pitched) {
             results['yin + step6']!.add(cents(step6.pitch, f0));

@@ -16,6 +16,7 @@ import 'package:tuner_bench/app/detectors.dart';
 import 'package:tuner_bench/app/tuner_core.dart';
 import 'package:tuner_bench/mpm.dart';
 import 'package:tuner_bench/pyin.dart';
+import 'package:tuner_bench/narrowband.dart';
 import 'package:tuner_bench/refine.dart';
 import 'package:tuner_bench/wav.dart';
 import 'package:tuner_bench/yin.dart';
@@ -103,6 +104,18 @@ Future<void> main(List<String> args) async {
   rows.add((
     name: 'instantaneous-frequency refinement alone',
     ms: measure((b) => refineByInstantaneousFrequency(b, 196.0, rate), reps: 5)
+  ));
+  rows.add((
+    name: 'Goertzel refinement, f0 only (2x13 points)',
+    ms: measure((b) => refineByGoertzel(b, 196.0, rate), reps: 5)
+  ));
+  rows.add((
+    name: 'Goertzel refinement, 8 harmonics (2x13 points)',
+    ms: measure((b) => refineByGoertzel(b, 196.0, rate, harmonics: 8), reps: 5)
+  ));
+  rows.add((
+    name: 'PLL refinement',
+    ms: measure((b) => refineByPll(b, 196.0, rate), reps: 5)
   ));
   rows.add((
     name: 'pYIN front end (FFT YIN + candidate set)',

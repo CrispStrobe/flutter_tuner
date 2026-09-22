@@ -10,11 +10,13 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'app/harmonics.dart';
 import 'app/detectors.dart';
 import 'app/tuner_core.dart';
 import 'jams.dart';
 import 'metrics.dart';
 import 'mpm.dart';
+import 'narrowband.dart';
 import 'cometbeat/contracts.dart' as cb;
 import 'cometbeat/note_hmm.dart' as cb;
 import 'pyin.dart';
@@ -24,7 +26,23 @@ import 'wav.dart';
 import 'yin.dart';
 
 /// What to do to a raw YIN estimate after the fact.
-enum Refinement2 { none, instantaneousFrequency, instantaneousFrequencyStiff }
+enum Refinement2 {
+  none,
+  instantaneousFrequency,
+  instantaneousFrequencyStiff,
+
+  /// The app's own `analyseHarmonics`: partial frequencies read off the
+  /// interpolated spectrum rather than from phase advance, then the same
+  /// magnitude-weighted least-squares fit with a stiffness term.
+  spectralHarmonicLsq,
+
+  /// Goertzel sweep across a narrow band around the coarse estimate: the
+  /// DFT evaluated where the note actually is, rather than on the bin grid.
+  goertzel,
+
+  /// The same sweep, summing the magnitude at eight partials at once.
+  goertzelHarmonic,
+}
 
 /// How the app's running median is managed.
 ///
@@ -269,6 +287,26 @@ const List<Variant> defaultVariants = [
       medianPolicy: MedianPolicy.app,
       refine: Refinement2.instantaneousFrequency,
       referenceOffset: 2560),
+  // Same least-squares fit, but over spectral peaks instead of phase
+  // advance — this is the app's shipped `analyseHarmonics`, and it reads
+  // the end of the window like the phase arms do.
+  Variant('app+harmonic-lsq',
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.spectralHarmonicLsq,
+      referenceOffset: 2560),
+  // The Goertzel sweep reads the whole window, so the instant it describes
+  // is the window's centre rather than its start.
+  Variant('app+goertzel',
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.goertzel,
+      referenceOffset: 2048),
+  Variant('app+goertzel-h8',
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.goertzelHarmonic,
+      referenceOffset: 2048),
 ];
 
 class FileResult {
@@ -376,7 +414,14 @@ FileResult evaluateFile({
           value = 0;
         } else {
           value = r.pitch;
-          if (v.refine != Refinement2.none) {
+          if (v.refine == Refinement2.goertzel) {
+            value = refineByGoertzel(block, value, rate);
+          } else if (v.refine == Refinement2.goertzelHarmonic) {
+            value = refineByGoertzel(block, value, rate, harmonics: 8);
+          } else if (v.refine == Refinement2.spectralHarmonicLsq) {
+            final profile = analyseHarmonics(block, value, rate);
+            if (profile.fittedF0 > 0) value = profile.fittedF0;
+          } else if (v.refine != Refinement2.none) {
             final refined = refineByInstantaneousFrequency(
               block,
               value,
