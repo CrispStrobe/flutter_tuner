@@ -166,6 +166,8 @@ List<NoteEvent> segmentNotes(
             onMs: track[runStart].timeMs,
             offMs: track[t - 1].timeMs + hopMs,
             confidence: (conf / len).clamp(0.0, 1.0),
+            // pYIN tracks one f0; it has no notion of timbre or instrument.
+            program: gmProgramUnknown,
           ),
         );
       }

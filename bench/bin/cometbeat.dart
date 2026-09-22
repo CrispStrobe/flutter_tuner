@@ -1,6 +1,7 @@
 // CometBeat's pitch engines, against this report's corpora and rules.
 //
 //   dart run bin/cometbeat.dart --corpus guitar --data <dir> [--limit N]
+//                                [--models <dir>] [--engines a,b]
 //   dart run bin/cometbeat.dart --corpus cello  --data <dir> [--limit N]
 //
 // §25 compared the two projects' CrispASR *integration*. This compares their
@@ -9,9 +10,12 @@
 // transcription tree is Flutter-free, so they can be run here directly
 // (tool/sync_cometbeat.sh copies them; CI checks the copies are current).
 //
-// Only the model-free engines are included. CREPE, RMVPE and FCPE would each
-// need their GGUF or ONNX resolved and would measure a model rather than
-// CometBeat, and §13 already has numbers for crepe.
+// The model-free engines run unconditionally. RMVPE and FCPE — CometBeat's
+// two neural F0 estimators — need an ONNX on disk, so they join the table
+// only when `--models <dir>` holds them and are SKIPPED WITH A PRINTED
+// REASON otherwise, never silently dropped. They are scored through exactly
+// the same code path as `cb-pyin`, on the same reference frames, so the rows
+// are comparable line for line.
 //
 // Same rules as every other table here: the frame is scored at the instant
 // the estimator's answer describes, correct within 50 cents, octave errors
@@ -21,11 +25,17 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:onnx_runtime_dart/onnx_runtime_dart.dart';
+import 'package:onnx_runtime_dart/onnx_runtime_dart_io.dart';
 import 'package:tuner_bench/cello.dart';
 import 'package:tuner_bench/cometbeat/contracts.dart';
 import 'package:tuner_bench/cometbeat/dio.dart';
+import 'package:tuner_bench/cometbeat/fcpe.dart';
+import 'package:tuner_bench/cometbeat/fcpe_mel.dart';
 import 'package:tuner_bench/cometbeat/note_hmm.dart';
 import 'package:tuner_bench/cometbeat/pyin.dart';
+import 'package:tuner_bench/cometbeat/rmvpe.dart';
+import 'package:tuner_bench/cometbeat/rmvpe_mel.dart';
 import 'package:tuner_bench/jams.dart';
 import 'package:tuner_bench/metrics.dart';
 import 'package:tuner_bench/wav.dart';
@@ -38,7 +48,7 @@ import 'package:tuner_bench/wav.dart';
 /// three times per file. On a 20-second guitar recording that is 54 seconds
 /// of work to produce 18 seconds' worth of answer, and it is why the first
 /// full run timed out after three files.
-const engineNames = <String>[
+const modelFreeEngines = <String>[
   'cb-dio',
   'cb-dio-norefine',
   'cb-pyin',
@@ -46,10 +56,89 @@ const engineNames = <String>[
   'cb-pyin+hmm-mask',
 ];
 
+/// The engines this run scores: the model-free set, plus whichever neural
+/// models [loadNeural] actually found, minus anything `--engines` excluded.
+final engineNames = <String>[...modelFreeEngines];
+
+/// `--engines a,b` restricts the run. The default (empty) is everything.
+///
+/// It exists because the neural arms cost two orders of magnitude more than
+/// the model-free ones: without it, measuring RMVPE's throughput means also
+/// paying for pYIN and DIO on every file, and the timing column then reports
+/// a number dominated by contention between them rather than the model.
+final engineFilter = <String>{};
+
+bool _wanted(String name) => engineFilter.isEmpty || engineFilter.contains(name);
+
+/// A loaded neural estimator: the ONNX plus its mel asset, resolved ONCE for
+/// the whole run — 361 MB and 25 seconds of parse for RMVPE is not a cost any
+/// per-file loop should pay, and the timing column would then be reporting it
+/// rather than the model's inference.
+class _Neural {
+  _Neural.rmvpe(this.model, RmvpeMel mel) : rmvpeMel = mel, fcpeAssets = null;
+  _Neural.fcpe(this.model, FcpeAssets a) : fcpeAssets = a, rmvpeMel = null;
+  final OnnxModel model;
+  final RmvpeMel? rmvpeMel;
+  final FcpeAssets? fcpeAssets;
+}
+
+_Neural? _rmvpe;
+_Neural? _fcpe;
+
+/// Resolve both ONNX bundles from [dir]. A missing model is reported and its
+/// engine left out of the table — never a crash, and never a silent omission
+/// that would let a short table pass for a complete one.
+void loadNeural(String dir) {
+  for (final spec in const [
+    ('cb-rmvpe', 'rmvpe.onnx', 'rmvpe_mel.bin'),
+    ('cb-fcpe', 'fcpe.onnx', 'fcpe_mel.bin'),
+  ]) {
+    final (name, onnx, asset) = spec;
+    if (!_wanted(name)) continue; // `--engines` excluded it; don't pay 361 MB.
+    final m = File('$dir/$onnx'), a = File('$dir/$asset');
+    if (!m.existsSync() || !a.existsSync()) {
+      final missing = [
+        if (!m.existsSync()) m.path,
+        if (!a.existsSync()) a.path,
+      ].join(', ');
+      stdout.writeln('skipping $name: missing $missing');
+      continue;
+    }
+    final sw = Stopwatch()..start();
+    final model = loadOnnxModel(m.path);
+    if (name == 'cb-rmvpe') {
+      _rmvpe = _Neural.rmvpe(model, RmvpeMel.fromBytes(a.readAsBytesSync()));
+    } else {
+      _fcpe = _Neural.fcpe(model, FcpeAssets.fromBytes(a.readAsBytesSync()));
+    }
+    sw.stop();
+    engineNames.add(name);
+    stdout.writeln('loaded $name from ${m.path} '
+        '(${(m.lengthSync() / 1e6).toStringAsFixed(0)} MB, '
+        '${sw.elapsedMilliseconds} ms)');
+  }
+}
+
+/// How a frame's voiced/unvoiced decision is read, per engine.
+///
+/// pYIN and DIO emit a genuine voicing PROBABILITY, so 0.5 means something and
+/// every other table in this report uses it. RMVPE and FCPE do not: their
+/// `voicedProb` is the RAW peak salience of the 360-bin lattice, and the
+/// voicing decision has already been taken inside the estimator against its
+/// own documented threshold (RMVPE 0.03, FCPE 0.006) — an unvoiced frame comes
+/// back with `f0Hz == 0`. Re-gating those at 0.5 would impose a second
+/// threshold the model never had and would zero out most of FCPE, whose peak
+/// latents live near 1e-2. So each engine is asked in the terms it answers in.
+bool _isVoiced(String engine, PitchFrame f) =>
+    engine == 'cb-rmvpe' || engine == 'cb-fcpe'
+        ? f.f0Hz > 0
+        : f.voicedProb >= 0.5;
+
 Map<String, PitchTrack> runAllEngines(Float64List mono, int sr,
     Map<String, double> millis) {
   final out = <String, PitchTrack>{};
   void timed(String name, PitchTrack Function() f) {
+    if (!_wanted(name)) return;
     final sw = Stopwatch()..start();
     out[name] = f();
     sw.stop();
@@ -61,9 +150,29 @@ Map<String, PitchTrack> runAllEngines(Float64List mono, int sr,
   timed('cb-pyin', () => pyinF0(mono, sampleRate: sr));
   // The two HMM arms reuse the track above; their cost is the HMM, which is
   // what the timing column should say.
-  final raw = out['cb-pyin']!;
+  // The HMM arms are a post-process on the pYIN track, so `--engines` may ask
+  // for one without asking for pYIN itself — in which case the estimator still
+  // has to run, and its cost belongs to pYIN's row, not to the HMM's.
+  final raw = out['cb-pyin'] ??
+      (_wanted('cb-pyin+hmm') || _wanted('cb-pyin+hmm-mask')
+          ? pyinF0(mono, sampleRate: sr)
+          : const <PitchFrame>[]);
   timed('cb-pyin+hmm', () => _applyHmm(raw, keepOriginalHz: false));
   timed('cb-pyin+hmm-mask', () => _applyHmm(raw, keepOriginalHz: true));
+  // Neural arms, at each model's own default threshold and per-frame argmax
+  // decode (no Viterbi) — the shipped default, so the row describes what
+  // CometBeat would actually hand a caller.
+  final r = _rmvpe;
+  if (r != null) {
+    timed('cb-rmvpe',
+        () => rmvpeF0(mono, model: r.model, mel: r.rmvpeMel!, sampleRate: sr));
+  }
+  final f = _fcpe;
+  if (f != null) {
+    timed('cb-fcpe',
+        () => fcpeF0(mono, model: f.model, assets: f.fcpeAssets!,
+            sampleRate: sr));
+  }
   return out;
 }
 
@@ -114,7 +223,7 @@ PitchTrack _applyHmm(PitchTrack track, {required bool keepOriginalHz}) {
 /// nothing within half a hop — the engines pick their own frame rates, so
 /// the comparison has to meet each one where it lands rather than assume a
 /// shared grid.
-double? _at(PitchTrack track, double t, double toleranceMs) {
+double? _at(String engine, PitchTrack track, double t, double toleranceMs) {
   if (track.isEmpty) return null;
   final ms = t * 1000;
   double best = double.infinity;
@@ -123,7 +232,7 @@ double? _at(PitchTrack track, double t, double toleranceMs) {
     final d = (f.timeMs - ms).abs();
     if (d < best) {
       best = d;
-      f0 = f.voicedProb >= 0.5 ? f.f0Hz : 0;
+      f0 = _isVoiced(engine, f) ? f.f0Hz : 0;
     }
   }
   if (best > toleranceMs) return null;
@@ -145,16 +254,24 @@ void main(List<String> argv) {
   var corpus = 'guitar';
   var data = '/mnt/storage/tuner-bench/datasets';
   var limit = 0;
+  var models = '/mnt/storage/tuner-bench/onnx/cometbeat';
   for (int i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--corpus':
         corpus = argv[++i];
       case '--data':
         data = argv[++i];
+      case '--models':
+        models = argv[++i];
+      case '--engines':
+        engineFilter.addAll(argv[++i].split(','));
       case '--limit':
         limit = int.parse(argv[++i]);
     }
   }
+
+  loadNeural(models);
+  engineNames.removeWhere((e) => !_wanted(e));
 
   final stats = {for (final e in engineNames) e: MethodStats(e)};
   final millis = <String, double>{};
@@ -184,7 +301,7 @@ void main(List<String> argv) {
         // report scores the same reference frames.
         for (double t = 0; t < truth.duration; t += truth.hop) {
           final active = truth.activeAt(t, truth.hop);
-          final got = _at(track, t, 25) ?? 0;
+          final got = _at(name, track, t, 25) ?? 0;
           // Voicing over EVERY frame, mono accuracy over the monophonic
           // ones — the same split lib/evaluate.dart uses, so VR and FA mean
           // here what they mean in §13 rather than coming out as zero.
@@ -226,7 +343,7 @@ void main(List<String> argv) {
         final track = tracks[name]!;
         final st = stats[name]!;
         for (final f in track) {
-          final got = f.voicedProb >= 0.5 ? f.f0Hz : 0.0;
+          final got = _isVoiced(name, f) ? f.f0Hz : 0.0;
           // A MUSERC take is one sustained note throughout, so every frame
           // is a voiced reference frame — there is no unvoiced span to
           // build a false-alarm rate from, and the column is left empty

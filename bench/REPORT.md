@@ -3188,6 +3188,145 @@ in-place op execution and buffer reuse in `onnx_runtime_dart`. That is a
 change to a dependency this project owns, and it is the first time anything
 measured here has pointed at that file rather than at a model.
 
+### 34.6 RMVPE and FCPE, on the tuner's corpora
+
+The other two. Both ship inside CometBeat, both are modern neural F0
+estimators, and §26 declined to score them because doing so would measure a
+model rather than CometBeat. That was the right call for *that* comparison
+and leaves the obvious question unasked: are they better than what this app
+ships? `tool/sync_cometbeat.sh` already copies CometBeat's engines here, so
+the answer cost five more entries in its `FILES` list.
+
+One thing the sync itself turned up: **the copies on `main` were already
+stale, and `--check` was failing there.** Upstream had widened `NoteEvent`
+with a General MIDI `program` field and — this one matters — **replaced
+`basic_pitch.dart`'s uniform frame clock with a stitched one, citing this
+report's 11.1% → 47.8%**. §34.7 is what that did to our own number.
+
+**GuitarSet, 40 solo files** — the first 40 by sorted name, not the 180 of
+§13 and §26. The subset moves things: `cb-pyin` scores 80.45 here against
+82.63 on all 180, and its false-alarm rate 64.89 against 53.90. **Only the
+within-run comparison is safe**; do not difference these against §26.
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-dio | 45.84 | 59.27 | 8.44 | 32.29 | 5.35 | 73.28 | 62.53 |
+| cb-dio (no refine) | 34.79 | 44.99 | 3.56 | 51.45 | 13.50 | 73.28 | 62.53 |
+| cb-pyin | 80.45 | 82.62 | 4.82 | 12.56 | 3.25 | 97.75 | 64.89 |
+| cb-pyin+hmm | 78.20 | 89.25 | 2.01 | 8.74 | 8.70 | 86.05 | 37.13 |
+| cb-pyin+hmm-mask | 78.28 | 89.34 | 2.48 | 8.18 | 3.20 | 86.05 | 37.13 |
+| **cb-fcpe** | **90.80** | **92.57** | **0.41** | **7.02** | 3.35 | 96.81 | 60.61 |
+| cb-rmvpe | *not measurable here — see below* | | | | | | |
+
+**MUSERC cello**, 109 takes (RMVPE: the first 55, for the same reason):
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 | takes |
+| --- | --- | --- | --- | --- | --- | --- |
+| cb-dio | 86.92 | 90.90 | 0.67 | 8.44 | 12.30 | 109 |
+| cb-pyin | 88.32 | 91.55 | 1.05 | 7.41 | 11.95 | 109 |
+| cb-pyin+hmm | 90.27 | 95.22 | 0.78 | 4.01 | *0.05* | 109 |
+| cb-pyin+hmm-mask | 88.06 | 92.88 | 0.80 | 6.32 | 11.85 | 109 |
+| **cb-fcpe** | 87.99 | 92.52 | 0.74 | 6.74 | 11.65 | 109 |
+| **cb-rmvpe** | 77.58 | **98.38** | **0.02** | **1.60** | **5.50** | 55 |
+
+§26.1's trap was checked before either cent column was written down.
+MUSERC's reference is the exact equal-tempered frequency of the labelled
+note, so anything that rounds to a semitone scores ~0 cents by construction —
+which is what `cb-pyin+hmm`'s *0.05* is, and it is in the table only as the
+control. Both new decoders emit **continuous** cents (RMVPE's
+`to_local_average_cents` is a salience-weighted mean over nine 20-cent bins;
+FCPE's `local_argmax` is the same shape over its cent table), so 5.50 and
+11.65 are real residuals and are reportable.
+
+**FCPE is the best pitch estimator this benchmark has measured.** On the same
+40 files it beats CometBeat's own pYIN by **+10.3 points of RPA** and cuts
+octave errors from 4.82% to **0.41%** — a twelvefold reduction, in the one
+failure mode a tuner's users actually notice — at the same cent precision.
+That is not the usual trade. Every other estimator that answered more often
+in this report answered worse; this one answers more often *and* better.
+
+**And it is still not a tuner.** Its false-alarm rate is **60.61%** against
+the shipped pipeline's 17.07%: on three frames in five where the reference
+says nothing is sounding, FCPE names a pitch. A needle driven by it would
+twitch through every rest. §26's one-line verdict — a transcription app wants
+the answer, a tuner wants the silence — survives contact with a much better
+estimator, which is the strongest form that finding has taken.
+
+What is *not* established is that the voicing is unfixable. FCPE's threshold
+is 0.006 and untested; an energy gate is the other obvious lever; §27's pYIN
+work is precedent for a mask fixing exactly this. Neither was measured here,
+so neither is claimed.
+
+**RMVPE is the most accurate estimator here and the least deployable.** On
+cello it reports on 98.38% of the frames it answers at with **0.02% octave
+errors, 1.60% gross and 5.50 cents** — twice the precision of anything else
+in that table. It is also 361 MB, costs ≈2.4× real time on one core, and
+**cannot be run on GuitarSet on this machine at all**: its U-Net takes a
+whole file as one un-chunked forward pass, so a single 22-second recording
+reaches 3.5 GB of resident memory and is killed, and the cello run died at
+take 81 with 3.82 GB. The 55-take row is the deterministic prefix that
+survived.
+
+That is the same failure as hFT's in §34.5, from a different direction:
+**the memory a pure-Dart ONNX graph needs is governed by its activations,
+not by its weights**, and two of the four models here are out of reach for
+that reason alone rather than for anything about their accuracy. Chunking
+RMVPE's input would fix it and would no longer be the engine CometBeat
+ships, so it was not done.
+
+| | cost vs real time, 1 core | peak RSS | verdict for a tuner |
+| --- | --- | --- | --- |
+| **FCPE**, 43 MB | **≈0.60×** | 1.2 GB | best pitch here; disqualified on voicing as configured |
+| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB, OOM on guitar | no |
+
+(The per-file wall-clock figures behind those ratios were taken on a box at
+load 20–28 that gave the runs 49–79% of one core; the ratios are normalised
+by CPU seconds, which is why they are quoted that way and the raw
+milliseconds are not.)
+
+### 34.7 What CometBeat's fix did to our own Basic Pitch number
+
+`bin/transcribe_eval.dart` used to correct CometBeat's decoder times on the
+way out, because CometBeat had the 8.53 ms-per-window drift §28 found here.
+It does not have it any more. Re-applying our correction on top of their fix
+would have re-introduced the identical error in the identical direction —
+the bug twice over, and invisible, since both arms would still produce
+plausible notes. The correction is gone and the arm re-measured on the same
+ten pieces.
+
+| arm | precision | recall | F1 | with offsets | onset err p50 |
+| --- | --- | --- | --- | --- | --- |
+| §30, our correction over CometBeat's drifting clock | 52.4% | 37.9% | **44.0%** | 16.3% | 21.5 ms |
+| now, CometBeat's own fixed clock, no correction | 52.4% | 37.9% | **44.0%** | 16.3% | 21.5 ms |
+
+**Identical to the decimal**, which is the answer one wants: the two clocks
+are the same clock, our correction was arithmetically equivalent to their
+fix, and every Basic Pitch number in §30 and §32 stands unchanged. It is
+also the only way to know that, because the failure mode if they had *not*
+agreed would have been a smaller F1 and no error message.
+
+The lesson is not about Basic Pitch. **A correction applied to a dependency's
+output is a claim about that dependency's version**, and nothing in the
+build checks it. `tool/sync_cometbeat.sh --check` catches a stale copy; it
+cannot catch a correction that has become wrong because the thing it
+corrected was fixed.
+
+### 34.8 The four, in one place
+
+| model | where it was measured | best number | beats what ships? |
+| --- | --- | --- | --- |
+| **hFT-Transformer**, 22 MB | MusicNet, note level | **70.5% F1 on solo piano** (52.2% overall) | as a transcriber, yes — it is Kong's accuracy at a seventh of the size. **Not runnable in pure Dart**: >3.6 GB for one fixed window. |
+| **Onsets & Frames**, 106 MB | MusicNet, note level | **69.1% F1 on solo piano** (49.6% overall) | yes, and it is the one that runs in pure Dart, at ~0.8× real time. 106 MB is the price. |
+| **FCPE**, 43 MB | GuitarSet (40 files), MUSERC | **90.80% RPA, 0.41% octave** | on pitch, by a wide margin. On voicing, no: 60.61% false alarm against 17.07%. |
+| **RMVPE**, 361 MB | MUSERC (55 takes) only | **0.02% octave, 5.50 c** | not measurable on guitar (OOM), 2.4× real time, 361 MB. No. |
+
+Two of the four are out of reach of the pure-Dart runtime for the same
+reason, arrived at independently: **activation memory, not weights**. hFT is
+22 MB and needs 3.6 GB; RMVPE is 361 MB and needs 3.8 GB; Onsets & Frames is
+106 MB and runs. Nothing about a model's size on disk predicts whether
+`onnx_runtime_dart` can run it, and this report has now twice reasoned from
+parameter count and been wrong.
+
 ---
 
 ## 34. `RealFft` was not a real FFT

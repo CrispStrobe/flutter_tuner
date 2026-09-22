@@ -158,32 +158,18 @@ List<Note> _runOnnx(OnnxModel model, Float64List audio44k) {
 /// that this repository's decoder answers a different question on purpose
 /// (what is sounding *now*, for a live display). Scoring the app's decoder
 /// on a transcription benchmark measures the mismatch, not the model.
-/// Its reported times carry the same clock drift this tool had, and the
-/// correction is applied here rather than in the copied source so
-/// `tool/sync_cometbeat.sh --check` keeps verifying the copy is faithful.
-///
-/// The stitched grid keeps 142 frames per window (172 minus 15 trimmed from
-/// each side) while the window advances 36,164 samples — and 142 x 256 =
-/// 36,352. So a frame's time gains 188 samples for every window it is past,
-/// 8.53 ms each, exactly the arithmetic that cost this tool five times its
-/// score. Measured: 11.1% F1 as-is, **47.8% corrected**.
-const int _cbFramesPerWindow = 142;
-const int _cbDriftSamples = 142 * 256 - 36164; // 188
-
-double _cbCorrect(double ms) {
-  final frame = ms * BasicPitchGeometry.sampleRate / 1000 / 256;
-  final window = frame ~/ _cbFramesPerWindow;
-  return ms -
-      1000 * window * _cbDriftSamples / BasicPitchGeometry.sampleRate;
-}
-
+/// Its reported times USED to carry the same clock drift this tool had, and
+/// this file corrected them on the way out. It no longer does, and must not:
+/// CometBeat has taken the fix upstream — `basic_pitch.dart` now computes a
+/// frame's time from its window's start (`_stitchedFrameToMs`), citing this
+/// report's 11.1% -> 47.8% as the reason. Applying the old correction on top
+/// of the new clock would re-introduce the identical 8.53 ms per window in
+/// the same direction, which is the exact shape of the bug twice over. The
+/// correction was removed when `tool/sync_cometbeat.sh` pulled the fixed
+/// file in; §34.6 records what the refreshed measurement says.
 List<Note> _runCometBeat(OnnxModel model, Float64List audio44k) => [
       for (final n in cb.basicPitchTranscribe(audio44k, model: model))
-        (
-          onsetMs: _cbCorrect(n.onMs),
-          offsetMs: _cbCorrect(n.offMs),
-          midi: n.midi.toDouble()
-        )
+        (onsetMs: n.onMs, offsetMs: n.offMs, midi: n.midi.toDouble())
     ];
 
 /// hFT over a whole piece: stride the fixed 192-frame window, then its own
