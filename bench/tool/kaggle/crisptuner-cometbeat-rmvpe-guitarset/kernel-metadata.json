@@ -1,6 +1,6 @@
 {
- "id": "chr1s4/crisptuner-cometbeat-fcpe-guitar",
- "title": "CrispTuner CometBeat FCPE GuitarSet",
+ "id": "chr1s4/crisptuner-cometbeat-rmvpe-guitarset",
+ "title": "CrispTuner CometBeat RMVPE GuitarSet",
  "code_file": "cometbeat_eval.py",
  "language": "python",
  "kernel_type": "script",

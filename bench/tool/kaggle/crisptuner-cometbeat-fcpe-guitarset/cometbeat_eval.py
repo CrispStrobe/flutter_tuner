@@ -59,7 +59,7 @@ def require_internet():
 
 def models_dir():
     for p in ("/kaggle/input/crisptuner-onnx",
-              "/kaggle/input/datasets/chr1s4/crisptuner-onnx"):
+              "/kaggle/input/datasets/chr1str/crisptuner-onnx"):
         if os.path.isdir(p):
             return p
     raise SystemExit("crisptuner-onnx is not attached (gotcha #13)")

@@ -45,8 +45,13 @@ TOOL = os.path.join(BENCH, "tool")
 # The Kaggle account that owns the private model dataset. Private datasets are
 # per-account (gotcha #13): the dataset and the kernel must be the same
 # account, or the attachment silently fails as "not valid dataset sources".
-ACCOUNT = "chr1s4"
-MODEL_DATASET = f"{ACCOUNT}/crisptuner-onnx"
+# Kaggle caps a batch at TWO concurrent GPU sessions per account, and there
+# are four kernels here, so they are split across the two accounts
+# kaggle-usage.md documents. A private dataset is per-account (gotcha #13):
+# `crisptuner-onnx` is uploaded under BOTH, and each kernel attaches its own
+# account's copy. Which account a number came from is recorded in the report,
+# because it is a different machine draw even if it is the same machine type.
+ACCOUNTS = {"chr1s4", "chr1str"}
 DART_VERSION = "3.13.4"
 # Pin the branch the Dart kernels clone. `git push` does NOT update a Kaggle
 # kernel and a kernel that clones `main` would silently score a different
@@ -248,11 +253,11 @@ main_timing()
 '''
 
 
-def build_spectro():
+def build_spectro(account="chr1s4"):
     target = os.path.join(HERE, "spectro-eval")
     os.makedirs(target, exist_ok=True)
     body = "".join([
-        SPECTRO_PREAMBLE.replace("{account}", ACCOUNT),
+        SPECTRO_PREAMBLE.replace("{account}", account),
         strip_module(os.path.join(TOOL, "spectro_reference.py"),
                      drop_from="\ndef main():"),
         "\n\n",
@@ -274,7 +279,7 @@ def build_spectro():
     with open(os.path.join(target, "spectro_eval.py"), "w") as f:
         f.write(body)
     meta = {
-        "id": f"{ACCOUNT}/crisptuner-spectro-eval",
+        "id": f"{account}/crisptuner-spectro-eval",
         "title": "CrispTuner spectro eval",
         "code_file": "spectro_eval.py",
         "language": "python",
@@ -283,7 +288,7 @@ def build_spectro():
         "enable_gpu": "true",
         "enable_internet": "true",
         "competition_sources": [],
-        "dataset_sources": [MODEL_DATASET],
+        "dataset_sources": [f"{account}/crisptuner-onnx"],
         "kernel_sources": [],
         "model_sources": [],
     }
@@ -471,16 +476,25 @@ if rc != 0:
 '''
 
 
-def build_cometbeat(name, corpus, engines, subset, title):
+def slug(title):
+    """Kaggle derives a kernel's slug from its TITLE and quietly ignores a
+    non-matching `id` (gotcha #16), so the id is derived here rather than
+    written by hand."""
+    return "-".join("".join(c if c.isalnum() else " "
+                            for c in title.lower()).split())
+
+
+def build_cometbeat(corpus, engines, subset, title, account):
+    name = slug(title)
     target = os.path.join(HERE, name)
     os.makedirs(target, exist_ok=True)
     src = COMETBEAT.format(
         dart_version=DART_VERSION, repo=REPO, ref=REPO_REF, corpus=corpus,
-        engines=engines, subset=subset, account=ACCOUNT)
+        engines=engines, subset=subset, account=account)
     with open(os.path.join(target, "cometbeat_eval.py"), "w") as f:
         f.write(src)
     meta = {
-        "id": f"{ACCOUNT}/{name}",
+        "id": f"{account}/{name}",
         "title": title,
         "code_file": "cometbeat_eval.py",
         "language": "python",
@@ -489,7 +503,7 @@ def build_cometbeat(name, corpus, engines, subset, title):
         "enable_gpu": "true",
         "enable_internet": "true",
         "competition_sources": [],
-        "dataset_sources": [MODEL_DATASET],
+        "dataset_sources": [f"{account}/crisptuner-onnx"],
         "kernel_sources": [],
         "model_sources": [],
     }
@@ -503,12 +517,12 @@ def main():
     # One engine per GuitarSet kernel. RMVPE is the expensive and the
     # fragile one — ~2.4x real time and the thing that OOM-killed the VPS —
     # so pairing it with FCPE would risk losing both to one kill.
-    build_cometbeat("crisptuner-cometbeat-rmvpe-guitar", "guitar",
-                    "cb-rmvpe", 40, "CrispTuner CometBeat RMVPE GuitarSet")
-    build_cometbeat("crisptuner-cometbeat-fcpe-guitar", "guitar",
-                    "cb-fcpe", 40, "CrispTuner CometBeat FCPE GuitarSet")
-    build_cometbeat("crisptuner-cometbeat-cello", "cello",
-                    "cb-rmvpe,cb-fcpe", 55, "CrispTuner CometBeat cello")
+    build_cometbeat("guitar", "cb-rmvpe", 40,
+                    "CrispTuner CometBeat RMVPE GuitarSet", "chr1s4")
+    build_cometbeat("guitar", "cb-fcpe", 40,
+                    "CrispTuner CometBeat FCPE GuitarSet", "chr1str")
+    build_cometbeat("cello", "cb-rmvpe,cb-fcpe", 55,
+                    "CrispTuner CometBeat cello", "chr1str")
 
 
 if __name__ == "__main__":

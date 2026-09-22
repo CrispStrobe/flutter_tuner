@@ -1,6 +1,6 @@
 {
- "id": "chr1s4/crisptuner-cometbeat-rmvpe-guitar",
- "title": "CrispTuner CometBeat RMVPE GuitarSet",
+ "id": "chr1str/crisptuner-cometbeat-fcpe-guitarset",
+ "title": "CrispTuner CometBeat FCPE GuitarSet",
  "code_file": "cometbeat_eval.py",
  "language": "python",
  "kernel_type": "script",
@@ -9,7 +9,7 @@
  "enable_internet": "true",
  "competition_sources": [],
  "dataset_sources": [
-  "chr1s4/crisptuner-onnx"
+  "chr1str/crisptuner-onnx"
  ],
  "kernel_sources": [],
  "model_sources": []
