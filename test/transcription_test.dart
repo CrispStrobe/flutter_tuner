@@ -248,6 +248,26 @@ void main() {
     });
   });
 
+  group('TranscribedNote.program', () {
+    test('defaults to "no instrument", not to piano', () {
+      // -1 rather than 0, because 0 is Acoustic Grand Piano in General MIDI
+      // and would be indistinguishable from a real answer.
+      const n = TranscribedNote(60, 0.9, 0.1);
+      expect(n.program, -1);
+      expect(n.hasInstrument, isFalse);
+    });
+
+    test('carries a real program when the model gives one', () {
+      const violin = TranscribedNote(60, 0.9, 0.1, program: 40);
+      expect(violin.hasInstrument, isTrue);
+      expect(violin.program, 40);
+      // Percussion is 128, outside the 0-127 GM range, and still counts as
+      // an identification.
+      const drum = TranscribedNote(38, 0.9, 0.1, program: 128);
+      expect(drum.hasInstrument, isTrue);
+    });
+  });
+
   group('poolWorkersFor', () {
     test('never returns one — one worker is worse than none', () {
       // A single worker pays the per-conv message copy and gains no

@@ -404,7 +404,12 @@ void _workerMain(_WorkerStart start) {
           pcm[i] = a + (b - a) * t;
         }
       }
-      final events = session!.pianoNotes(pcm);
+      // pianoNotesWithPrograms rather than pianoNotes: MT3's whole advantage
+      // is that it says WHICH instrument played each note, and until crispasr
+      // 0.8.35 that was discarded at the C ABI. Against an older library, or
+      // a model that identifies no instrument, every program is -1 — the call
+      // degrades rather than needing a capability probe.
+      final events = session!.pianoNotesWithPrograms(pcm);
       final windowMs = 1000.0 * pcm.length / rate;
       final from = windowMs - _tailSeconds * 1000;
 
@@ -418,6 +423,7 @@ void _workerMain(_WorkerStart start) {
           e.midi,
           (e.velocity / 127).clamp(0.0, 1.0),
           e.onMs >= from ? 1.0 : 0.0,
+          program: e.program,
         ));
       }
       notes.sort((a, b) => b.strength.compareTo(a.strength));

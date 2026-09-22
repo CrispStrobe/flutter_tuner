@@ -71,7 +71,25 @@ class TranscribedNote {
   /// which is what distinguishes a new note from one still ringing.
   final double onset;
 
-  const TranscribedNote(this.midi, this.strength, this.onset);
+  /// General MIDI program — which instrument played this note.
+  ///
+  /// `0`-`127` is a GM program, `128` is percussion, and **`-1` means the
+  /// model does not identify an instrument**, which is the case for every
+  /// model this app runs except MT3. Deliberately `-1` and not `0`, because
+  /// `0` is *Acoustic Grand Piano* and would be indistinguishable from a
+  /// real answer.
+  ///
+  /// Multi-instrument transcription is what earns MT3 its 76.5% note-level
+  /// F1 against Basic Pitch's 44.2% (bench/REPORT.md §32), and until
+  /// crispasr 0.8.35 the instrument was discarded at the C ABI before any
+  /// caller could see it.
+  final int program;
+
+  const TranscribedNote(this.midi, this.strength, this.onset,
+      {this.program = -1});
+
+  /// Whether this note carries an instrument identification at all.
+  bool get hasInstrument => program >= 0;
 
   String get name => noteNameForMidi(midi);
 

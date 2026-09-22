@@ -2774,17 +2774,33 @@ per-window failure at transcribe time instead of a clear one at startup.
 CometBeat's copy had the identical defect and would have divided by it.
 Fixed in both.
 
-### 33.2 What MT3's advantage currently loses
+### 33.2 MT3's instruments, recovered
 
 MT3 emits a **General MIDI program per note** — which instrument played it —
 and that is the whole point of a multi-instrument transcriber. The C ABI's
-note record is flat: `[start_ms, end_ms, midi, velocity]`. The program is
-dropped before either app can see it.
+note record was flat: `[start_ms, end_ms, midi, velocity]`, so the program
+was dropped before either app could see it. Its 76.5% was real and its
+headline capability arrived flattened to a single part.
 
-So MT3's 76.5% is real and its headline capability is currently flattened to
-a single part. Recovering it needs a widened ABI in CrispASR, which is not a
-change either app can make, and it is the difference between "transcribes
-this recording well" and "transcribes this recording into parts".
+**Fixed in crispasr 0.8.35.** Widening the note record would break every
+existing reader, so the programs travel in a parallel array through
+`crispasr_session_piano_note_programs`, mirrored in the Dart and C# bindings.
+`-1` means "this model identifies no instrument" — deliberately not `0`,
+which is *Acoustic Grand Piano* and would be indistinguishable from an
+answer.
+
+And it works. MusicNet piece 1819, eight seconds, through `CrispAsrBackend`:
+
+| MT3 program | instrument | notes |
+| --- | --- | --- |
+| 60 | French Horn | 8 |
+| 70 | Bassoon | 13 |
+| 71 | Clarinet | 31 |
+
+The annotation for that piece lists instruments **61, 71, 72** — MusicNet
+numbers MIDI programs from 1, so those are GM 60, 70 and 71. **All three
+correct, and nothing else emitted.** That is the capability the 76.5% was
+always measuring and the ABI was always discarding.
 
 ### 33.3 What this does and does not change
 
