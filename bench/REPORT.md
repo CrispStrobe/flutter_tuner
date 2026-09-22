@@ -1305,6 +1305,12 @@ cents, octave errors separated from gross ones.
 | spice @0.9 | 52.02 | 56.54 | 0.05 | 7.93 | 6.74 | 62.9 | 48.7 | 27.7 |
 | Basic Pitch @0.5 | 86.15 | 92.28 | 0.18 | 6.47 | 27.5 | 99.0 | 93.6 | 30.1 |
 
+The precision refinements (§4.3, §4.6) are deliberately not rows here. Each
+one answers about a different instant in the window, so a table with one
+fixed reference offset per variant flatters whichever estimator that offset
+happens to suit; §4.6 reads them at each estimator's own best alignment
+instead, which is the only comparison between them that means anything.
+
 Guitar, in time rather than in frames (§9, §9.1):
 
 | | first reading | first correct | tracking lag |
