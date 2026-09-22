@@ -81,6 +81,9 @@ copies rather than a path dependency because a path dependency on the app
 package would drag in the Flutter SDK.
 
 ```sh
+bin/fft_real_timing.dart   # real-input vs complex FFT (REPORT.md §34);
+                           # one arm per process, see --list and --only
+
 tool/sync_core.sh          # copy ../lib/*.dart -> lib/app/*.dart
 tool/sync_core.sh --check  # exit 1 if they have drifted
 ```

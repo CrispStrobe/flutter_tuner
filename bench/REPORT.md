@@ -2823,6 +2823,133 @@ a thing this report merely measured.
 
 ---
 
+## 34. `RealFft` was not a real FFT
+
+`lib/fft_real.dart` exists because `package:fftea` returns a `Float64x2List`
+and dart2js has no SIMD: 15.56 ms for one 8192-point transform against 0.38 ms
+native, which is the measurement that took browser analysis from 345 frames a
+second to about 43. Replacing it was the single largest user-visible fix in
+this project.
+
+The replacement kept the name and not the optimisation. Despite being called
+`RealFft`, it was a **complex** FFT fed real input with the imaginary parts
+zeroed:
+
+```dart
+for (int i = 0; i < size; i++) {
+  _buffer[i * 2] = windowed[i];
+  _buffer[i * 2 + 1] = 0;   // half the arithmetic, spent on zeros
+}
+_fft.transform(_buffer);
+```
+
+The textbook remedy is to read the N real samples as N/2 *complex* points —
+even samples into the real parts, odd into the imaginary — run the half-length
+complex transform, and untangle the two interleaved spectra afterwards in one
+O(N) pass:
+
+    E[k] = (Z[k] + conj(Z[M-k])) / 2          M = N/2
+    O[k] = -i (Z[k] - conj(Z[M-k])) / 2
+    X[k] = E[k] + W_N^k O[k],   X[N-k] = conj(X[k])
+
+The untangle needs exactly the twiddle table the top butterfly stage of a
+full-length transform would have used, which `_cos`/`_sin` already are, so it
+costs no extra memory. `RealFft.realForward` is that; `RealFft.realInverse` is
+its counterpart, which matters because a conjugate-symmetric spectrum can be
+inverted the same half-length way. `transform` — the complex FFT — is
+unchanged and still public; nothing about the API shape moved.
+
+### 34.1 What it is worth
+
+`bench/bin/fft_real_timing.dart`, with the discipline §19.1 and §23 paid for:
+**one arm per process** (a shared process lets the JIT warm later arms), a
+throwaway process first so no arm owns the cold-cache slot, reps OUTER and
+arms INNER, a discarded warm-up pass inside each process and the median of
+six more. This VPS, four shared cores, load average ~11 — ratios are the
+result, absolutes are indicative. Median of the three per-arm medians:
+
+| | complex | real | speedup |
+| --- | --- | --- | --- |
+| **native Dart** | | | |
+| spectrum, N = 2048 | 0.124 ms | 0.073 ms | **1.71×** |
+| spectrum, N = 4096 | 0.284 ms | 0.179 ms | **1.59×** |
+| spectrum, N = 8192 | 0.700 ms | 0.402 ms | **1.74×** |
+| YIN autocorrelation, 2048/4096 → N = 8192 | 2.455 ms | 1.125 ms | **2.18×** |
+| **dart2js, node 20** | | | |
+| spectrum, N = 2048 | 0.420 ms | 0.203 ms | **2.07×** |
+| spectrum, N = 4096 | 0.923 ms | 0.433 ms | **2.13×** |
+| spectrum, N = 8192 | 2.147 ms | 1.293 ms | **1.66×** |
+| YIN autocorrelation, 2048/4096 → N = 8192 | 5.423 ms | 3.780 ms | **1.43×** |
+
+The same table on the minimum rather than the median — a loaded box's more
+honest statistic — gives 1.57–1.88× native and 1.61–2.13× under dart2js. Take
+**about 1.6–1.7×** as the number, which is where the arithmetic says it should
+land: an N/2 complex transform is a little over half an N-point one, and the
+untangle adds back an O(N) pass.
+
+**Dart's bounds checking does not eat the gain.** That was the live worry —
+the untangle indexes four places per bin and writes four — and it is not what
+happened on either runtime.
+
+The dart2js number is the one worth having, because the browser is where this
+file's existence is justified, and it is not an extrapolation: the benchmark
+compiles with `-Darm="…"`, one arm per compiled program, because dart2js does
+not hand `main` a command line. `bench-platforms.yml` now runs both the native
+and the dart2js arms on Apple Silicon, x86-64 Linux and Windows, which is
+where the numbers to quote in future should come from.
+
+### 34.2 `FftAutocorrelation` benefits, and by more than the spectrum does
+
+Yes — it is the biggest single win here, 2.18× natively. Three transforms
+become three half-length ones: both forward transforms take `realForward`,
+and because the product of two real-input spectra is itself conjugate
+symmetric, the inverse takes `realInverse`. The pointwise multiply also halves,
+since only bins `0 … N/2` are ever read back.
+
+This is the detector's hot path — YIN's difference function, every frame, on
+every platform — so it is the one that reaches a user. Against the 23 ms
+budget one analysis hop allows, §14's Apple Silicon YIN figure of 0.83 ms a
+frame has room to spare either way; the gain shows up as battery on a phone
+and as headroom in a browser tab, not as a needle that was lagging and now is
+not.
+
+### 34.3 Numerical agreement
+
+The output is not "close enough"; it is the same to double-precision
+rounding. `test/fft_real_test.dart` compares `realForward` against the
+zero-padded complex transform at N = 2, 4, 8, 64, 256, 2048, 4096 and 8192,
+bin by bin, and checks **real part, imaginary part and phase separately** —
+because `harmonics.dart` recovers a partial's instantaneous frequency from the
+phase difference between two frames a hop apart, and a spectrum that is right
+up to a conjugation would be silently wrong there while every magnitude test
+passed. Worst observed disagreement at N = 8192: 1.4×10⁻¹³ absolute on a
+spectrum whose peak bin is 172, and 4.6×10⁻¹⁴ radians of phase. The
+autocorrelation is checked against the direct O(N²) sum at the sizes the
+detector actually uses (2048 against 4096), worst case 1.1×10⁻¹². The
+conjugate mirror, the real-valued DC and Nyquist bins, and the
+`realInverse`/`realForward` round trip each have their own test.
+
+`RealSpectrum.complex` keeps its contract exactly: the full `size`-bin
+interleaved `[re0, im0, re1, im1, …]` buffer, upper half included as the
+conjugate mirror. `harmonics.dart` is untouched.
+
+### 34.4 Where it does not help
+
+Nowhere measured — but the honest caveat is that "nowhere measured" covers
+three runtimes and not six. The arms run on the Dart VM and on dart2js; the
+gain on dart2wasm, and on an ARM phone rather than an ARM Mac, is inferred
+from the same structure rather than measured. The mechanism (fewer butterflies,
+one extra linear pass, identical memory layout) is not one that plausibly
+inverts across a runtime the way `fftea`'s `Float64x2List` did — but that is
+precisely the reasoning this project has been wrong with before, so it is
+written down as an inference and not a result.
+
+One real cost, paid once: `RealFft(size)` still builds the full-length
+bit-reversal table its complex `transform` needs, even when only the real path
+is used — 16 KB at N = 4096, allocated at construction, never on a frame.
+
+---
+
 *Harness, exact commands and how the copied core is kept in sync:
 [`README.md`](README.md). Raw aggregates:
 `results/*.json`, gitignored — regenerate with `bin/bench.dart`.*
