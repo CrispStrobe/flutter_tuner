@@ -19,6 +19,7 @@ import 'dart:typed_data';
 import 'package:tuner_bench/app/tuner_core.dart';
 import 'package:tuner_bench/jams.dart';
 import 'package:tuner_bench/metrics.dart';
+import 'package:tuner_bench/narrowband.dart';
 import 'package:tuner_bench/refine.dart';
 import 'package:tuner_bench/wav.dart';
 import 'package:tuner_bench/yin.dart';
@@ -41,6 +42,7 @@ void main(List<String> args) {
   const offsets = [0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4095];
   final plain = {for (final o in offsets) o: CentHistogram()};
   final refined = {for (final o in offsets) o: CentHistogram()};
+  final goertzel = {for (final o in offsets) o: CentHistogram()};
   const hop = 1024;
   int frames = 0;
 
@@ -63,6 +65,7 @@ void main(List<String> args) {
       if (!r.pitched || r.probability <= 0.9) continue;
       final ifr =
           refineByInstantaneousFrequency(block, r.pitch, rate).frequency;
+      final gz = refineByGoertzel(block, r.pitch, rate, harmonics: 8);
       frames++;
       for (final o in offsets) {
         final t = (start + o) / rate;
@@ -73,6 +76,8 @@ void main(List<String> args) {
         if (e1.abs() <= 50) plain[o]!.add(e1);
         final e2 = cents(ifr, ref);
         if (e2.abs() <= 50) refined[o]!.add(e2);
+        final e3 = cents(gz, ref);
+        if (e3.abs() <= 50) goertzel[o]!.add(e3);
       }
     }
   }
@@ -81,15 +86,17 @@ void main(List<String> args) {
       'window $pitchWindowSize, hop $hop');
   stdout.writeln('');
   stdout.writeln('reference instant      YIN |err| p50   p90  |  '
-      'YIN+IF |err| p50   p90');
+      'YIN+IF |err| p50   p90  |  YIN+goertzel-h8 p50   p90');
   for (final o in offsets) {
-    final p = plain[o]!, q = refined[o]!;
+    final p = plain[o]!, q = refined[o]!, g = goertzel[o]!;
     stdout.writeln('  +$o samples '
                 '(${(1000 * o / 44100).toStringAsFixed(1)} ms)'
             .padRight(12) +
         '${p.absPercentile(0.5).toStringAsFixed(2).padLeft(10)}'
             '${p.absPercentile(0.9).toStringAsFixed(2).padLeft(7)}  |  '
             '${q.absPercentile(0.5).toStringAsFixed(2).padLeft(10)}'
-            '${q.absPercentile(0.9).toStringAsFixed(2).padLeft(7)}');
+            '${q.absPercentile(0.9).toStringAsFixed(2).padLeft(7)}  |  '
+            '${g.absPercentile(0.5).toStringAsFixed(2).padLeft(16)}'
+            '${g.absPercentile(0.9).toStringAsFixed(2).padLeft(7)}');
   }
 }

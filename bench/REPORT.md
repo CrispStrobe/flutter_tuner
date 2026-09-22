@@ -341,6 +341,13 @@ describing the end of the window instead of the start — which is worth
 remembering if latency is ever attacked directly, but it is the wrong tool
 for precision.
 
+One qualification, added later: this section conflates two things, the
+*measurement* of each partial's frequency and the *fit* of f0 to all of them
+at once. §4.6 separates them, and the fit turns out to be the good half. The
+verdict above survives — it is the phase measurement that loses — but "the
+premise of this line of work is false" is too broad, and §4.6 is the
+narrower claim.
+
 ### 4.4 Inharmonicity
 
 The stiffness fit works: given synthetic partials at f_n = n·f₀·√(1+Bn²) it
@@ -426,10 +433,133 @@ Recorded in the code because it is a trap: SWIPE′'s strength lands around
 This is a SWIPE′-*like* implementation, not Camacho's MATLAB — his full
 estimator includes an ERB-scaled loudness normalisation this does not.
 
-### 4.6 Neural models### 4.6 Neural models
+### 4.6 Narrow-band refinements: Goertzel, harmonic least squares, PLL
 
-Not measured, and the argument for skipping them is the shape of the results
-above rather than a prejudice. CREPE and SPICE are frame-level classifiers
+§4.3 killed the phase-vocoder refinement, but it did not settle the general
+question, because it conflated two things: *measuring* a partial's frequency
+from phase advance, and *fitting* f0 to several partials at once. Four
+estimators isolate the pieces, all on `bin/precision.dart`'s synthetic plucks
+where f0 is known exactly:
+
+| estimator | quiet: bias / \|err\| p50 / p90 / p99 | noisy | stiff string (B=10⁻⁴) |
+| --- | --- | --- | --- |
+| YIN, parabolic only | 0.02 / 0.05 / 0.10 / 0.10 | 0.11 / 0.25 / 0.65 / 1.85 | 0.74 / 0.70 / 1.00 / 1.00 |
+| YIN + IF, fundamental only | −0.01 / 0.05 / 1.45 / 3.60 | −0.01 / 0.25 / 1.25 / 3.70 | 0.08 / 0.10 / 1.40 / 3.60 |
+| YIN + IF, all partials (§4.3) | −0.00 / 0.05 / 0.65 / 1.80 | 0.01 / 0.25 / 1.10 / 3.05 | 1.86 / 1.90 / 2.20 / 3.35 |
+| YIN + IF, stiffness fitted (§4.3) | −0.15 / 0.05 / 0.90 / 3.30 | −0.25 / 0.20 / 1.25 / 3.35 | −0.02 / 0.05 / 0.90 / 3.35 |
+| YIN + spectral harmonic LSQ | −0.15 / 0.05 / 0.90 / 3.30 | −0.24 / 0.20 / 1.20 / 3.60 | −0.03 / 0.05 / 0.90 / 3.35 |
+| **YIN + Goertzel, f0 only** | −0.00 / 0.05 / **0.10** / 0.15 | −0.00 / **0.10** / **0.25** / **0.40** | 0.08 / 0.10 / 0.15 / 0.25 |
+| **YIN + Goertzel, 8 harmonics** | −0.00 / 0.05 / **0.05** / **0.05** | −0.00 / **0.05** / **0.15** / **0.30** | 0.37 / 0.40 / 0.50 / 0.50 |
+| YIN + PLL (best of 10 settings) | 0.07 / 0.40 / 1.95 / — | — | — |
+
+(cents, 4096-sample window, 168 frames per case)
+
+Four things fall out of that table, and only one of them is a
+recommendation.
+
+**The least-squares fit is real, and it is not the phase vocoder.** Rows two
+and three differ only in whether partials beyond the fundamental are fitted,
+and the fit halves the p90 on the quiet case (0.65 against 1.45). Fitting f0
+to ten partials genuinely uses more information than fitting it to one. What
+§4.3 measured as a loss was the phase measurement, not the fit.
+
+**Two independent implementations of that fit agree to 0.01 cents.** The
+app's own `analyseHarmonics` reads partial frequencies off the interpolated
+spectrum; `refine.dart` reads them from phase advance between sub-frames.
+Their rows are identical to two decimals in every column of every case. That
+is a cross-check on both, and it is the reason the spectral row is in this
+table at all — it measures nothing new, it confirms the model.
+
+**The Goertzel sweep is the first refinement in this report that beats plain
+YIN.** Evaluate the DFT *where the note is* — a coarse grid of 13 points
+across ±60 cents, then a zoom into the winner — and on the noisy case the p90
+falls from 0.65 cents to 0.15 and the p99 from 1.85 to 0.30. That is the case
+that matters: the quiet case was never the problem. Summing eight partials
+buys another factor of two on noise and costs 0.4 cents of bias on a stiff
+string, because a harmonic sum fits the *partials*, and a stiff string's
+partials are sharp by construction — the stiffness-fitted rows are the ones
+that get that case right.
+
+Zoom-FFT and the chirp-Z transform are not separate rows because they are not
+separate estimators: the CZT evaluates the DFT along an arc of the unit
+circle, which is the same numbers the Goertzel loop produces, computed by FFT
+instead. For a grid of tens of points the loop is cheaper; the estimate is
+identical by construction.
+
+**The PLL is not close.** A second-order loop, swept over five bandwidths
+and two settle fractions (`bin/pll_sweep.dart`): its best arm is
+p50 0.40 / p90 1.95 cents, eight times YIN's quiet-case p90. Slower loops
+never acquire inside a 93 ms frame — at 4 Hz the median is 20 cents — and
+faster ones track the noise, putting the p90 at a full semitone. The window a
+tuner can afford is simply shorter than the time constant a quiet loop needs.
+An analogue tuner could do this because its loop ran continuously; a
+frame-based one cannot.
+
+**Cost**, on this VPS at a 23.2 ms frame budget (`bin/timing.dart`):
+
+| stage | ms/frame | % of budget |
+| --- | --- | --- |
+| app YinEngine (shipped path) | 2.629 | 11.3% |
+| instantaneous-frequency refinement | 0.690 | 3.0% |
+| Goertzel, f0 only, 2×13 points | 1.015 | 4.4% |
+| Goertzel, 8 harmonics, 2×13 points | 6.466 | 27.8% |
+| PLL | 0.810 | 3.5% |
+
+Two-stage is what makes the f0-only arm affordable: a single 41-point grid
+cost 2.350 ms for the same answer, and the harmonic arm 11.043 ms.
+
+**And then the corpora say no anyway.** On the bowed corpus, where a
+sustained note's nominal is known and the needle's stillness needs no
+reference at all, the refinement changes nothing measurable: steady-take
+spread p90 is 5.48 cents with the shipped pipeline and 5.48 with either
+Goertzel arm, with an identical player-offset column (`bin/cello.dart`).
+
+That is not a contradiction of the table above; it is the relative size of
+two error sources. On a synthetic pluck the estimator's own resolution *is*
+the error budget, and the sweep cuts it fourfold. On a real bowed note the
+budget is the bow — 5.5 cents of it — against the 0.2 cents the refinement
+was going to save. 
+
+On GuitarSet the refinement does move the median, and only the median. Each
+estimator swept across the reference instant (`bin/alignment.dart`, 12 files,
+6515 pitched frames), read at its own best alignment:
+
+| estimator | best offset | \|err\| p50 | p90 |
+| --- | --- | --- | --- |
+| YIN alone | +0 samples | 2.20 | **7.35** |
+| YIN + instantaneous frequency | +2560 (58.0 ms) | 2.40 | 14.25 |
+| YIN + Goertzel, 8 harmonics | +1536 (34.8 ms) | **1.80** | 10.85 |
+
+The median gain is not an artefact of the alignment: at every offset from
++1024 onward the Goertzel column is the lower of the two, by 0.7 to 1.3
+cents. The p90 comparison is worth much less than it looks, because YIN's own
+p90 climbs from 7.35 to 24.55 cents across the same sweep — that is the
+*reference* drifting, not the estimator, and an estimator whose answer lives
+later in the window is charged for it. GuitarSet's ground truth is pYIN's
+output on a hexaphonic pickup; it cannot adjudicate a tail at this level, and
+the corpus that can — the bowed one — reports no difference at all.
+
+The full-corpus run agrees on the median and is confounded on everything
+else, because the fixed reference offset each variant declares is not each
+one's best: `app+goertzel-h8` lands at held-note \|err\| p50 2.05 against the
+shipped pipeline's 2.45, p90 9.70 against 7.70.
+
+**Verdict: no, with a caveat worth keeping.** Nothing here should ship
+today, because nothing here moves a number a player can see. But the
+Goertzel sweep is the one refinement in this report that is *actually* more
+precise rather than merely different, it costs less than half the detector
+it corrects, and if the error budget ever changes — a longer window, a
+quieter signal path, an instrument steadier than a bow — it is the tool to
+reach for. The PLL and the phase vocoder are not.
+
+### 4.7 Neural models
+
+Not measured *at the time this section was written*, and the argument for
+skipping them was the shape of the results above rather than a prejudice.
+They have since been measured — CREPE, PESTO and FCNF0++ against GuitarSet in
+§10.2 and against the cello corpus in §11.2 — and the conclusion below
+survived: CREPE names the note better than YIN and loses at cents by a factor
+of three. CREPE and SPICE are frame-level classifiers
 over a pitch grid — CREPE's is 360 bins of 20 cents, which still needs local
 interpolation to reach a tuner's resolution — and even CREPE's smallest
 configuration is on the order of half a million parameters, orders of
