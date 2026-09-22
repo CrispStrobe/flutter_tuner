@@ -67,11 +67,18 @@ class Activations {
   }
 }
 
+/// [ignoreZero] is hFT's own `mode_velocity: 'ignore_zero'`, which drops any
+/// note whose velocity head reads zero at the onset frame. It turns out to
+/// be the thing that decides how many notes hFT emits — see the sweep.
 List<Note> _hftNotes(Activations a,
-    {double onset = 0.5, double offset = 0.5, double mpe = 0.5}) {
+    {double onset = 0.5,
+    double offset = 0.5,
+    double mpe = 0.5,
+    bool ignoreZero = true}) {
   final vel = [
     for (final r in a.data['velocity']!)
-      Int32List.fromList([for (final v in r) v.round()])
+      Int32List.fromList(
+          [for (final v in r) ignoreZero ? v.round() : 1])
   ];
   return hftNotes(
       HftFrames(a.data['onset']!, a.data['offset']!, a.data['mpe']!, vel),
@@ -124,6 +131,12 @@ void main(List<String> argv) {
   final perPiece = <String, Map<String, NoteScore>>{
     for (final e in engines) e: {}
   };
+  // MIDI program 1 is piano. Both of these are PIANO transcribers, so the
+  // aggregate over a corpus that is half strings and winds is the wrong
+  // number to compare against a piano result — §29.2's point, and §32.4's
+  // when Kong emitted 9 notes for 551 violin references and was right to.
+  final pianoOnly = {for (final e in engines) e: NoteScore()};
+  final other = {for (final e in engines) e: NoteScore()};
 
   int refNotes = 0;
 
@@ -145,8 +158,28 @@ void main(List<String> argv) {
       withOffset[e]!
           .merge(scoreNotes(piece.notes, est, withOffset: true));
       perPiece[e]![piece.id] = s;
+      final isPiano = piece.instruments.every((i) => i == 1);
+      (isPiano ? pianoOnly : other)[e]!.merge(s);
     }
   }
+
+  // An engine whose cache is empty or partial is dropped rather than
+  // printed as a row of zeros: a zero that means "not measured" is exactly
+  // the shape of number this report has been burned by (§20.2a, §30.1).
+  final scoredEngines =
+      engines.where((e) => perPiece[e]!.isNotEmpty).toList();
+  for (final e in engines) {
+    if (!scoredEngines.contains(e)) {
+      stdout.writeln('$e: nothing scored — no activations present');
+    } else if (perPiece[e]!.length < chosen.length) {
+      stdout.writeln('$e: ${perPiece[e]!.length} of ${chosen.length} pieces '
+          'have activations — the rows below are that subset, not the split');
+    }
+  }
+  engines
+    ..clear()
+    ..addAll(scoredEngines);
+  if (engines.isEmpty) exit(2);
 
   stdout.writeln('\n${chosen.length} MusicNet test pieces, '
       '$refNotes reference notes\n');
@@ -162,6 +195,18 @@ void main(List<String> argv) {
         '${NoteScore.medianAbs(s.onsetErrorsMs).toStringAsFixed(1)} ms | '
         '${NoteScore.medianAbs(s.pitchErrorsCents).toStringAsFixed(1)} c |');
   }
+  stdout.writeln('\nSplit by what the model was trained on:\n');
+  stdout.writeln('| engine | material | precision | recall | F1 |');
+  stdout.writeln('| --- | --- | --- | --- | --- |');
+  for (final e in engines) {
+    for (final row in [('solo piano', pianoOnly[e]!), ('everything else', other[e]!)]) {
+      stdout.writeln('| $e | ${row.$1} | '
+          '${(100 * row.$2.precision).toStringAsFixed(1)}% | '
+          '${(100 * row.$2.recall).toStringAsFixed(1)}% | '
+          '**${(100 * row.$2.f1).toStringAsFixed(1)}%** |');
+    }
+  }
+
   stdout.writeln('\nOnset + pitch + offset:\n');
   stdout.writeln('| engine | precision | recall | F1 |');
   stdout.writeln('| --- | --- | --- | --- |');
@@ -225,5 +270,28 @@ void main(List<String> argv) {
           '${(100 * s.recall).toStringAsFixed(1)}% | '
           '${(100 * s.f1).toStringAsFixed(1)}% |');
     }
+  }
+
+  if (!engines.contains('hft')) return;
+  // hFT's onset threshold turns out to be inert: the velocity head zeroes
+  // the weak candidates independently, so `ignore_zero` removes exactly the
+  // notes a lower threshold would have added. Without it the threshold bites
+  // again — which is the only way to see that the lever exists at all.
+  stdout.writeln('\nhFT without `mode_velocity: ignore_zero` — the gate that '
+      'makes the row above flat:\n');
+  stdout.writeln('| onset/mpe | precision | recall | F1 |');
+  stdout.writeln('| --- | --- | --- | --- |');
+  for (final t in [0.2, 0.3, 0.5, 0.7]) {
+    final s = NoteScore();
+    for (final piece in chosen) {
+      final path = '$acts/hft/${piece.id}.bin';
+      if (!File(path).existsSync()) continue;
+      final a = Activations.read(path);
+      s.merge(scoreNotes(piece.notes,
+          _hftNotes(a, onset: t, mpe: t, ignoreZero: false)));
+    }
+    stdout.writeln('| $t | ${(100 * s.precision).toStringAsFixed(1)}% | '
+        '${(100 * s.recall).toStringAsFixed(1)}% | '
+        '${(100 * s.f1).toStringAsFixed(1)}% |');
   }
 }

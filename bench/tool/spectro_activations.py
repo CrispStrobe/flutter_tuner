@@ -74,13 +74,16 @@ def run_hft(sess, mono, secs):
     return HFT_HEADS, [out[h] for h in HFT_HEADS], dt
 
 
+OAF_FRAME_OUTPUT = "velocity"
+
+
 def run_oaf(sess, mono, secs):
     m = np.log(np.maximum(
         mel(mono[:-1], 16000, 2048, 512, 229, 30, 8000, 1.0, "reflect"), 1e-5))
     t0 = time.time()
     # Trap: `torch.onnx.export` was given four output names for five
     # outputs, so they slid by one. `velocity` IS the combined frame head.
-    on, fr = sess.run(["onset", "velocity"],
+    on, fr = sess.run(["onset", OAF_FRAME_OUTPUT],
                       {"mel": m[None, :, :].astype(np.float32)})
     dt = time.time() - t0
     return OAF_HEADS, [sigmoid(on[0]), sigmoid(fr[0])], dt
@@ -94,11 +97,18 @@ def main():
     ap.add_argument("--out", default="/mnt/storage/tuner-bench/acts")
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--limit", type=int, default=0)
+    # The evidence for the name-shift claim: `--oaf-frame-output frame` uses
+    # the graph output actually NAMED `frame`, which is the pre-combination
+    # activation head. If the reading is right this scores worse; if it is
+    # wrong it scores better, and the claim is retracted.
+    ap.add_argument("--oaf-frame-output", default="velocity")
     a = ap.parse_args()
 
     onnx = a.onnx or (
-        "/mnt/storage/tuner-bench/onnx/hft_transformer.onnx" if a.model == "hft"
+        "/mnt/storage/tuner-bench/onnx/hft_transformer.pruned.onnx" if a.model == "hft"
         else "/mnt/storage/tuner-bench/onnx/onsets_and_frames.onnx")
+    global OAF_FRAME_OUTPUT
+    OAF_FRAME_OUTPUT = a.oaf_frame_output
     so = ort.SessionOptions()
     so.intra_op_num_threads = a.threads
     so.inter_op_num_threads = 1

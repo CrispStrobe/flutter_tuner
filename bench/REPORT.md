@@ -2951,6 +2951,243 @@ Thirty-two points of F1 for a native library and a download is a real trade
 rather than an obvious one, and it is now a trade a host can make instead of
 a thing this report merely measured.
 
+## 34. The four models nobody had scored
+
+Four models were in this project's orbit with no number against them.
+**hFT-Transformer** and **Onsets & Frames** were exported to ONNX in §31,
+verified against PyTorch to 1e-5, checked op by op against the pure-Dart
+runtime's dispatch table — and never run on audio. **RMVPE** and **FCPE**
+ship inside CometBeat and had never been scored on either corpus; §26
+excluded them explicitly, on the grounds that scoring them would measure a
+model rather than CometBeat.
+
+The reason the first two had never run is not that anyone forgot. **Their
+input is not audio.** Kong's graph carries a torchlibrosa STFT inside it and
+Basic Pitch takes samples, so nothing in this benchmark had ever needed a mel
+spectrogram, and a mel spectrogram is not a thing one can approximate: the
+model was trained on one particular front end and a different one costs
+accuracy silently.
+
+### 34.1 The front end, and why it is checked rather than written
+
+`lib/mel.dart` reproduces `torchaudio.transforms.MelSpectrogram`, because
+that is what both checkpoints were trained with. Three of its settings are
+not librosa's defaults and each is individually small:
+
+* a **periodic** Hann window (`torch.hann_window`), not symmetric;
+* the **HTK** mel scale, not Slaney's;
+* **`slaney`** filter normalisation — unit area per filter, not unit peak,
+  which is a factor of two to three across the band.
+
+It also needed a resampler. `bin/transcribe_eval.dart` reaches 22.05 kHz for
+Basic Pitch by linear interpolation with no anti-aliasing filter at all,
+which is survivable there and is not survivable into 16 kHz, where
+everything above 8 kHz folds straight back into the band these models read.
+So `mel.dart` carries torchaudio's `sinc_interp_hann` resampler as well.
+
+Checked, not assumed, in three places:
+
+| check | result |
+| --- | --- |
+| log-mel vs librosa, synthetic signal, log domain | max abs diff **6.8e-08** (hFT), **6.1e-08** (O&F) |
+| resampler, 44.1 → 16 kHz on a 1 kHz tone | gain 0.9996, SNR **116 dB** |
+| the actual model input, real audio, whole window construction | max abs diff **1.9e-06** |
+
+The third is the one that matters: it takes 6 s of MusicNet, builds hFT's
+first two 192-frame windows in Dart and in numpy — resampler, margin
+padding, bin-major transpose and all — and diffs them. A wrong transpose or
+an off-by-one window does not raise an exception. It scores worse, and §12.1
+is this report's record of how long that can go unnoticed.
+
+### 34.2 Two traps, both found by reading the graph
+
+**The Onsets & Frames export's output names are shifted by one.**
+`torch.onnx.export` was handed four `output_names` for a forward that returns
+five tensors, so the names slid down the list: `onset` and `offset` are what
+they say, but **`frame` is the pre-combination activation head, `velocity`
+is the real frame prediction, and the unnamed fifth output `679` is the
+velocity.** Verified structurally rather than by guessing — walking each
+output's ancestors, `velocity` is the only graph output that has `onset`,
+`offset` and `frame` among them, which is exactly
+`combined_stack(cat([onset, offset, activation]))`.
+
+Measured, too. Decoding the output actually *named* `frame` changes nothing
+on the standard onset+pitch metric — `extract_notes` takes note starts from
+the onset head — and costs **9.1% → 5.6% F1 with offsets required** on the
+first three pieces, because the frame head is precisely what sets a note's
+duration. This is §12.1's failure mode with a smaller blast radius: an
+unlabelled model output does not announce that it has been misread.
+
+**Both models emit logits, not probabilities.** Every head ends in
+`nn.Linear` with no sigmoid, and each repo's own `infer.py` then thresholds
+at 0.5 as though it were a probability — which is really a sigmoid threshold
+of 0.62. The sigmoid is applied here and the threshold swept.
+
+### 34.3 What they score
+
+All ten MusicNet test pieces, 24.7 minutes, 13,589 reference notes,
+`mir_eval.transcription`'s rules through `lib/note_metrics.dart` (§32.3).
+The models run under native ONNX Runtime and everything after them — the
+decoder ported from each model's own inference code, and the metric — is
+this repository's, which is the same division §32 used.
+
+| transcriber | size | precision | recall | F1 | onset err p50 | pitch err p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **hFT-Transformer** (B head) | **22 MB** | 57.2% | 48.0% | **52.2%** | 20.6 ms | 0.0 c |
+| **Onsets & Frames** | 106 MB | 59.7% | 42.4% | **49.6%** | 20.5 ms | 0.0 c |
+| Basic Pitch, our port (§30) | 110 KB | 52.4% | 37.9% | 44.0% | 21.5 ms | 0.0 c |
+| Basic Pitch, reference (§32.1) | 110 KB | 50.3% | 39.5% | 44.2% | — | — |
+| Kong / piano-transcription (§33) | 77 MB | — | — | 47.7% | 19.1 ms | — |
+| MT3 (§33) | 96 MB | — | — | **76.5%** | 16.8 ms | — |
+
+With offsets required as well: hFT **18.5%**, O&F **13.8%**, against Basic
+Pitch's 16.3%.
+
+And split by the material, because both of these are **piano** models and
+half this corpus is strings and winds — §29.2's request, which no table here
+had yet answered:
+
+| transcriber | solo piano (3 pieces, 3,887 notes) | everything else |
+| --- | --- | --- |
+| **hFT-Transformer** | **70.5%** | 44.5% |
+| Onsets & Frames | **69.1%** | 40.4% |
+| Kong (§32.4) | 71.2% | — |
+| Basic Pitch, reference (§32.2) | 57.5% | — |
+
+**hFT-Transformer matches Kong on piano at one seventh of the size**: 70.5%
+against 71.2%, 22 MB against 154 MB of ONNX, 5.52 M parameters against
+42.95 M. §31.2 said "if anything, hFT" on an argument from size and op
+cleanliness alone; on quality that bet was right.
+
+Per piece, where the spread is the point:
+
+| piece | instruments | ref notes | hFT F1 | hFT onset p50 | O&F F1 | O&F onset p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1759 | piano | 1723 | 60.0% | 20.4 ms | 59.8% | 18.9 ms |
+| 1819 | horn/bassoon/clarinet | 1321 | 44.2% | 23.8 ms | 41.3% | 22.2 ms |
+| 2106 | violin/viola/cello | 2004 | 31.3% | 27.0 ms | 27.1% | 25.8 ms |
+| 2191 | violin | 551 | 42.1% | 25.8 ms | 40.3% | 24.9 ms |
+| 2298 | cello | 966 | 58.1% | 27.3 ms | 51.8% | 25.6 ms |
+| 2303 | piano | 718 | **88.6%** | 14.5 ms | 86.7% | 14.7 ms |
+| 2382 | violin/viola/cello | 1956 | 21.8% | 28.3 ms | 20.1% | 28.6 ms |
+| 2416 | horn/bassoon/clarinet | 1386 | 52.9% | 18.9 ms | 44.0% | 19.5 ms |
+| 2556 | piano | 1446 | 73.2% | 18.7 ms | 71.0% | 19.5 ms |
+| 2628 | piano/violin | 1518 | 66.6% | 15.1 ms | 63.0% | 18.2 ms |
+
+**88.6% on 2303 is the best number anywhere in this report**, and the piano
+pieces again carry onset errors of 14–20 ms where the bowed and blown ones
+sit at 25–28 ms. That is §29.2 and §32.2's pattern reproduced by two more
+models, from two more architectures, on the same corpus — and §32.2's
+correction stands: with MusicNet's DTW-aligned labels, this corpus cannot
+separate "the model fires at pitch stability" from "the annotation is least
+reliable where attacks are least percussive."
+
+**Neither beats MT3's 76.5%**, which remains the best overall transcriber
+this project has measured. What they are is the best *piano* transcribers,
+and hFT is by a wide margin the smallest thing that is.
+
+### 34.4 hFT's onset threshold is inert, and its velocity head is why
+
+§29.3 swept Basic Pitch's decoder and found the shipped defaults already at
+the F1 optimum. The same sweep here:
+
+| threshold | hFT P / R / F1 | O&F P / R / F1 |
+| --- | --- | --- |
+| 0.2 | 57.2 / 48.0 / **52.2** | 50.0 / 52.7 / 51.3 |
+| 0.3 | 57.2 / 48.0 / **52.2** | 54.1 / 49.5 / **51.7** |
+| 0.5 (default) | 57.2 / 48.0 / **52.2** | 59.7 / 42.4 / 49.6 |
+| 0.7 | 57.3 / 48.0 / **52.2** | 64.4 / 33.1 / 43.7 |
+
+O&F behaves the way a threshold is supposed to, trading precision for recall
+and peaking slightly off its default. **hFT does not move at all**, and the
+first reading — that its activations are saturated — is wrong: 0.3% of its
+onset head's values sit in [0.2, 0.5), so a lower threshold does admit more
+peaks.
+
+They are then thrown away by something else. hFT's decoder runs
+`mode_velocity: 'ignore_zero'`, which drops any note whose *velocity* head
+reads zero at the onset frame, and that gate removes exactly the candidates
+a lower threshold adds. On one piece: 1,459 notes at every threshold from
+0.2 to 0.7 with the gate, and 1,747 → 1,571 across the same range without
+it. Turning the gate off:
+
+| onset/mpe threshold, no velocity gate | precision | recall | F1 |
+| --- | --- | --- | --- |
+| 0.2 | 36.7% | 58.4% | 45.1% |
+| 0.3 | 39.9% | 57.3% | 47.0% |
+| 0.5 | 45.3% | 55.3% | 49.8% |
+| 0.7 | 52.8% | 51.3% | 52.1% |
+
+So the velocity gate is not incidental plumbing: **it is a better precision
+filter than the threshold is**, reaching 52.2% where the best thresholded
+arm without it reaches 52.1% while answering more often. It is also why
+there is no threshold lever to pull on hFT at all — §29.3's "that lever is
+spent" is, for this model, "that lever is not connected."
+
+### 34.5 Can the pure-Dart runtime run hFT? No — and not for the reason expected
+
+This is the question the section was for. §31.1 measured Kong at ~96× real
+time in `onnx_runtime_dart`, §31.2 scaled that by parameter count and put
+hFT at "near ~19× real time", and §31.4 made the whole case for a native
+runtime rest on model size.
+
+Measured, on a 10 s clip, in one isolate, with **Basic Pitch co-run in the
+same process** so the box's load divides out — this VPS was running 3.5×
+slow against §30's 0.12× for Basic Pitch when these were taken:
+
+| arm, pure Dart | as measured | at §30's load |
+| --- | --- | --- |
+| hFT log-mel (256 bins, hop 256) | 0.568× | ~0.16× |
+| O&F log-mel (229 bins, hop 512) | 0.050× | ~0.014× |
+| Basic Pitch (what ships) | 0.419× | 0.12× (§30) |
+| **Onsets & Frames, 26.49 M params** | **2.7×** | **~0.8×** |
+| **hFT-Transformer, 5.52 M params** | **killed by the kernel at 3.63 GB RSS** | — |
+
+Two results, and they invert each other.
+
+**Onsets & Frames runs in pure Dart at roughly real time.** §31.1 estimated
+~8× and §31.2 dismissed it as "a baseline, not a candidate"; at ~0.8× on a
+quiet machine it is an offline transcriber that needs no native library on
+any of the six platforms. The 106 MB is still nobody's favourite download,
+but the throughput objection is gone.
+
+**hFT cannot be run in that runtime at all here.** Not slowly — at all. One
+192-frame window, with the graph already pruned to the four outputs a
+transcriber reads, took the process past **3.63 GB of resident memory**
+before the kernel killed it, on a 7.7 GB box with other tenants. §31 had
+abandoned this run by hand at 1.4 GB and recorded it honestly as *not
+completed*; this says why, and the answer is not speed. The window is a
+fixed 192 frames, so that cost does not shrink with a shorter recording —
+**it is the floor**, and it is already disqualifying for a phone.
+
+Where does it go? Not into weights: 22 MB of them. hFT's attention runs over
+88 pitch tokens × 256 frequency bins per window, and `onnx_runtime_dart`
+materialises every intermediate tensor with no in-place reuse or buffer
+pooling, so the activations dominate by two orders of magnitude over the
+parameters. **Parameter count predicts neither hFT's memory nor its speed** —
+under native ORT it costs 1.55× real time on three threads over the whole
+test split, which is slower than Kong at 0.996× on four despite having one
+eighth the parameters. The arithmetic §31.2 did was the right arithmetic for
+a convolutional stack and the wrong arithmetic for a transformer.
+
+Pruning was not cosmetic, either. The exported graph keeps all fifteen
+forward outputs, two of which nobody decodes — `enc_vector` at
+[1, 128, 4, 88, 256] is 11.5 M floats on its own. `tool/prune_hft.py` cuts
+the graph to `onset_B`, `offset_B`, `mpe_B`, `velocity_B` (1,621 → 1,517
+nodes), which is what shipping it would do; the unpruned graph could not
+even be loaded and run here.
+
+**So, plainly: a strong transcriber cannot ship on all six platforms with no
+native library by choosing hFT.** It can by choosing Onsets & Frames, at
+106 MB and about real time, for 69.1% on piano against hFT's 70.5%. The
+1.4-point difference is not worth a native dependency; the 84 MB might be
+worth avoiding one.
+
+What would change the hFT answer is not a faster runtime but a leaner one:
+in-place op execution and buffer reuse in `onnx_runtime_dart`. That is a
+change to a dependency this project owns, and it is the first time anything
+measured here has pointed at that file rather than at a model.
+
 ---
 
 ## 34. `RealFft` was not a real FFT
