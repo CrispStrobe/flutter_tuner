@@ -19,6 +19,14 @@ const pipelines = [
   NotePipeline('after (PitchSmoother)', DetectorKind.yin, Smoothing.pitchSmoother),
   NotePipeline('no median at all', DetectorKind.yin, Smoothing.gateOnly),
   NotePipeline('MPM + PitchSmoother', DetectorKind.mpm, Smoothing.pitchSmoother),
+  // The narrow-band refinements from §4.6, on real bowed audio. MUSERC is
+  // the right corpus for them: a sustained note whose nominal is known, so
+  // the needle's stillness and its offset from the target are both
+  // meaningful, where GuitarSet's reference is itself pYIN's output.
+  NotePipeline('YIN + goertzel', DetectorKind.yin, Smoothing.pitchSmoother,
+      goertzelHarmonics: 1),
+  NotePipeline('YIN + goertzel-h8', DetectorKind.yin, Smoothing.pitchSmoother,
+      goertzelHarmonics: 8),
 ];
 
 double median(List<double> values) {

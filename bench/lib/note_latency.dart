@@ -24,6 +24,7 @@ import 'app/detectors.dart';
 import 'app/tuner_core.dart';
 import 'jams.dart';
 import 'metrics.dart';
+import 'narrowband.dart';
 import 'wav.dart';
 
 /// How the gate and the median are managed, so the shipped behaviour can be
@@ -45,7 +46,13 @@ class NotePipeline {
   final String name;
   final DetectorKind detector;
   final Smoothing smoothing;
-  const NotePipeline(this.name, this.detector, this.smoothing);
+
+  /// Optional narrow-band refinement applied to the detector's answer
+  /// before smoothing. `null` is the shipped path.
+  final int? goertzelHarmonics;
+
+  const NotePipeline(this.name, this.detector, this.smoothing,
+      {this.goertzelHarmonics});
 }
 
 const List<NotePipeline> defaultPipelines = [
@@ -227,7 +234,16 @@ List<NoteOutcome> measureFile({
   final readings = <_Reading>[];
   for (int start = 0; start + window <= samples.length; start += hop) {
     final block = Float64List.sublistView(samples, start, start + window);
-    final estimate = engine.analyse(block);
+    var estimate = engine.analyse(block);
+    final harmonics = pipeline.goertzelHarmonics;
+    if (harmonics != null && estimate.pitched && estimate.frequency > 0) {
+      estimate = PitchEstimate(
+        refineByGoertzel(block, estimate.frequency, sampleRate,
+            harmonics: harmonics),
+        estimate.probability,
+        estimate.pitched,
+      );
+    }
     double value = 0;
     switch (pipeline.smoothing) {
       case Smoothing.pitchSmoother:
