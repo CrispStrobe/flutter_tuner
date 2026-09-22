@@ -29,6 +29,17 @@ on:
         description: 'solo or comp'
         required: false
         default: 'solo'
+      models:
+        description: >-
+          cometbeat only: also fetch the neural F0 ONNX models so cb-rmvpe and
+          cb-fcpe join the table. `none` runs the model-free engines only;
+          `fcpe` adds the 43 MB one; `all` adds RMVPE's 361 MB too. RMVPE in
+          the pure-Dart runtime is the slow one — see REPORT.md §28 — so `all`
+          is worth pairing with a small --limit.
+        required: false
+        default: 'none'
+        type: choice
+        options: [none, fcpe, all]
 
 jobs:
   guitarset:
@@ -60,6 +71,22 @@ jobs:
       - run: dart pub get
         working-directory: bench
 
+      # The neural F0 models, from the same release the CometBeat model
+      # stores download from at run time. Kept out of the cache key above so
+      # a corpus hit does not also pin a model version.
+      - name: Fetch RMVPE / FCPE ONNX
+        if: inputs.tool == 'cometbeat' && inputs.models != 'none'
+        run: |
+          mkdir -p models
+          base=https://github.com/CrispStrobe/onnx_runtime_dart/releases/download/models-v1
+          curl -sL --retry 3 -o models/fcpe.onnx     "$base/fcpe.onnx"
+          curl -sL --retry 3 -o models/fcpe_mel.bin  "$base/fcpe_mel.bin"
+          if [ "${{ inputs.models }}" = "all" ]; then
+            curl -sL --retry 3 -o models/rmvpe.onnx    "$base/rmvpe.onnx"
+            curl -sL --retry 3 -o models/rmvpe_mel.bin "$base/rmvpe_mel.bin"
+          fi
+          ls -l models
+
       - name: Cache GuitarSet
         id: cache
         uses: actions/cache@v4
@@ -89,6 +116,7 @@ jobs:
             dart run bin/cometbeat.dart \
               --corpus guitar \
               --data ../corpus/guitarset \
+              --models ../models \
               --limit ${{ inputs.limit }} | tee results.txt
           elif [ "${{ inputs.tool }}" = "hysteresis" ] \
              || [ "${{ inputs.tool }}" = "decoder_rules" ]; then

@@ -41,6 +41,14 @@ FILES=(
   "transcription/pyin.dart"
   "transcription/dio.dart"
   "transcription/basic_pitch.dart"
+  # The two neural F0 estimators (§28). Both are web-safe by construction —
+  # they take a preloaded OnnxModel and a parsed mel asset, so the dart:io
+  # model stores stay upstream and bin/cometbeat.dart loads the ONNX itself.
+  "transcription/rmvpe.dart"
+  "transcription/rmvpe_mel.dart"
+  "transcription/fcpe.dart"
+  "transcription/fcpe_mel.dart"
+  "transcription/f0_viterbi.dart"
   "chroma_analysis.dart"
   "pitch_analysis.dart"
   "crisp_dsp/resample.dart"
@@ -53,7 +61,7 @@ for rel in "${FILES[@]}"; do
   tmp="$(mktemp)"
   # `package:comet_beat/core/audio/<anything>/<file>.dart` -> `<file>.dart`,
   # since everything lands in one directory.
-  sed -E "s|package:comet_beat/core/audio/([a-z_]+/)*([a-z_]+\.dart)|\2|g" \
+  sed -E "s|package:comet_beat/core/audio/([a-z0-9_]+/)*([a-z0-9_]+\.dart)|\2|g" \
     "$SRC/$rel" > "$tmp"
   if [ "$CHECK" = "1" ]; then
     if ! diff -q "$tmp" "$DEST/$base" >/dev/null 2>&1; then

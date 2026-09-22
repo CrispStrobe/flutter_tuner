@@ -29,6 +29,15 @@ on:
         default: 'false'
         type: choice
         options: ['false', 'true']
+      models:
+        description: >-
+          cometbeat only: also fetch the neural F0 ONNX so cb-rmvpe and
+          cb-fcpe join the table. `none` = model-free engines only, `fcpe`
+          adds the 43 MB one, `all` adds RMVPE's 361 MB too.
+        required: false
+        default: 'none'
+        type: choice
+        options: [none, fcpe, all]
 
 jobs:
   cello:
@@ -81,12 +90,26 @@ jobs:
           git clone -q --depth 1 https://github.com/CrispStrobe/cometbeat.git ../cometbeat
           ./tool/sync_cometbeat.sh --check ../cometbeat
 
+      - name: Fetch RMVPE / FCPE ONNX
+        if: inputs.cometbeat == 'true' && inputs.models != 'none'
+        run: |
+          mkdir -p models
+          base=https://github.com/CrispStrobe/onnx_runtime_dart/releases/download/models-v1
+          curl -sL --retry 3 -o models/fcpe.onnx     "$base/fcpe.onnx"
+          curl -sL --retry 3 -o models/fcpe_mel.bin  "$base/fcpe_mel.bin"
+          if [ "${{ inputs.models }}" = "all" ]; then
+            curl -sL --retry 3 -o models/rmvpe.onnx    "$base/rmvpe.onnx"
+            curl -sL --retry 3 -o models/rmvpe_mel.bin "$base/rmvpe_mel.bin"
+          fi
+          ls -l models
+
       - name: CometBeat against MUSERC
         if: inputs.cometbeat == 'true'
         working-directory: bench
         run: |
           dart run bin/cometbeat.dart \
             --corpus cello \
+            --models ../models \
             --data ../corpus/muserc/MUSERC/SA | tee cometbeat-cello.txt
           {
             echo '## CometBeat engines on MUSERC'

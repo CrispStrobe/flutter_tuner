@@ -15,9 +15,18 @@ on:
   workflow_dispatch:
     inputs:
       engines:
-        description: 'Which transcribers (onnx,bp,piano,mt3)'
+        description: 'Which transcribers (onnx,bp,piano,mt3,hft,oaf)'
         required: false
         default: 'onnx,bp,piano'
+      models_url:
+        description: >-
+          Base URL holding hft_transformer.pruned.onnx and
+          onsets_and_frames.onnx. The hFT and O&F arms are SKIPPED without
+          it: those two graphs are the output of the Kaggle export kernel
+          (tool/kaggle/onnx-export) and are not published anywhere a runner
+          can reach, so there is no default that would work.
+        required: false
+        default: ''
       limit:
         description: 'Pieces to use (0 = all 10)'
         required: false
@@ -98,12 +107,27 @@ jobs:
             echo "::warning::libcrispasr NOT built — only the pure-Dart arms run"
           fi
 
+      # The two spectrogram models, if this run was given somewhere to get
+      # them. Absent, `transcribe_eval.dart` prints "model not found" for
+      # each and scores the arms it does have — never a silent omission.
+      - name: Fetch the exported spectrogram models
+        if: inputs.models_url != ''
+        run: |
+          mkdir -p corpus/onnx
+          for f in hft_transformer.pruned.onnx onsets_and_frames.onnx; do
+            curl -sL --retry 3 -o "corpus/onnx/$f" "${{ inputs.models_url }}/$f" \
+              || echo "::warning::could not fetch $f"
+          done
+          ls -l corpus/onnx || true
+
       - name: Transcribe and score
         working-directory: bench
         run: |
           dart run bin/transcribe_eval.dart \
             --data ../corpus/musicnet \
             --engines "${{ inputs.engines }}" \
+            --hft-onnx ../corpus/onnx/hft_transformer.pruned.onnx \
+            --oaf-onnx ../corpus/onnx/onsets_and_frames.onnx \
             --limit ${{ inputs.limit }} | tee transcribe.txt
 
       - name: Summary

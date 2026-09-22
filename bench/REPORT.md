@@ -2957,8 +2957,6 @@ Thirty-two points of F1 for a native library and a download is a real trade
 rather than an obvious one, and it is now a trade a host can make instead of
 a thing this report merely measured.
 
----
-
 ## 34. `RealFft` was not a real FFT
 
 `lib/fft_real.dart` exists because `package:fftea` returns a `Float64x2List`
@@ -3084,6 +3082,383 @@ One real cost, paid once: `RealFft(size)` still builds the full-length
 bit-reversal table its complex `transform` needs, even when only the real path
 is used — 16 KB at N = 4096, allocated at construction, never on a frame.
 
+## 35. The four models nobody had scored
+
+Four models were in this project's orbit with no number against them.
+**hFT-Transformer** and **Onsets & Frames** were exported to ONNX in §31,
+verified against PyTorch to 1e-5, checked op by op against the pure-Dart
+runtime's dispatch table — and never run on audio. **RMVPE** and **FCPE**
+ship inside CometBeat and had never been scored on either corpus; §26
+excluded them explicitly, on the grounds that scoring them would measure a
+model rather than CometBeat.
+
+The reason the first two had never run is not that anyone forgot. **Their
+input is not audio.** Kong's graph carries a torchlibrosa STFT inside it and
+Basic Pitch takes samples, so nothing in this benchmark had ever needed a mel
+spectrogram, and a mel spectrogram is not a thing one can approximate: the
+model was trained on one particular front end and a different one costs
+accuracy silently.
+
+### 35.1 The front end, and why it is checked rather than written
+
+`lib/mel.dart` reproduces `torchaudio.transforms.MelSpectrogram`, because
+that is what both checkpoints were trained with. Three of its settings are
+not librosa's defaults and each is individually small:
+
+* a **periodic** Hann window (`torch.hann_window`), not symmetric;
+* the **HTK** mel scale, not Slaney's;
+* **`slaney`** filter normalisation — unit area per filter, not unit peak,
+  which is a factor of two to three across the band.
+
+It also needed a resampler. `bin/transcribe_eval.dart` reaches 22.05 kHz for
+Basic Pitch by linear interpolation with no anti-aliasing filter at all,
+which is survivable there and is not survivable into 16 kHz, where
+everything above 8 kHz folds straight back into the band these models read.
+So `mel.dart` carries torchaudio's `sinc_interp_hann` resampler as well.
+
+Checked, not assumed, in three places:
+
+| check | result |
+| --- | --- |
+| log-mel vs librosa, synthetic signal, log domain | max abs diff **6.8e-08** (hFT), **6.1e-08** (O&F) |
+| resampler, 44.1 → 16 kHz on a 1 kHz tone | gain 0.9996, SNR **116 dB** |
+| the actual model input, real audio, whole window construction | max abs diff **1.9e-06** |
+
+The third is the one that matters: it takes 6 s of MusicNet, builds hFT's
+first two 192-frame windows in Dart and in numpy — resampler, margin
+padding, bin-major transpose and all — and diffs them. A wrong transpose or
+an off-by-one window does not raise an exception. It scores worse, and §12.1
+is this report's record of how long that can go unnoticed.
+
+### 35.2 Two traps, both found by reading the graph
+
+**The Onsets & Frames export's output names are shifted by one.**
+`torch.onnx.export` was handed four `output_names` for a forward that returns
+five tensors, so the names slid down the list: `onset` and `offset` are what
+they say, but **`frame` is the pre-combination activation head, `velocity`
+is the real frame prediction, and the unnamed fifth output `679` is the
+velocity.** Verified structurally rather than by guessing — walking each
+output's ancestors, `velocity` is the only graph output that has `onset`,
+`offset` and `frame` among them, which is exactly
+`combined_stack(cat([onset, offset, activation]))`.
+
+Measured, too. Decoding the output actually *named* `frame` changes nothing
+on the standard onset+pitch metric — `extract_notes` takes note starts from
+the onset head — and costs **9.1% → 5.6% F1 with offsets required** on the
+first three pieces, because the frame head is precisely what sets a note's
+duration. This is §12.1's failure mode with a smaller blast radius: an
+unlabelled model output does not announce that it has been misread.
+
+**Both models emit logits, not probabilities.** Every head ends in
+`nn.Linear` with no sigmoid, and each repo's own `infer.py` then thresholds
+at 0.5 as though it were a probability — which is really a sigmoid threshold
+of 0.62. The sigmoid is applied here and the threshold swept.
+
+### 35.3 What they score
+
+All ten MusicNet test pieces, 24.7 minutes, 13,589 reference notes,
+`mir_eval.transcription`'s rules through `lib/note_metrics.dart` (§32.3).
+The models run under native ONNX Runtime and everything after them — the
+decoder ported from each model's own inference code, and the metric — is
+this repository's, which is the same division §32 used.
+
+| transcriber | size | precision | recall | F1 | onset err p50 | pitch err p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **hFT-Transformer** (B head) | **22 MB** | 57.2% | 48.0% | **52.2%** | 20.6 ms | 0.0 c |
+| **Onsets & Frames** | 106 MB | 59.7% | 42.4% | **49.6%** | 20.5 ms | 0.0 c |
+| Basic Pitch, our port (§30) | 110 KB | 52.4% | 37.9% | 44.0% | 21.5 ms | 0.0 c |
+| Basic Pitch, reference (§32.1) | 110 KB | 50.3% | 39.5% | 44.2% | — | — |
+| Kong / piano-transcription (§33) | 77 MB | — | — | 47.7% | 19.1 ms | — |
+| MT3 (§33) | 96 MB | — | — | **76.5%** | 16.8 ms | — |
+
+With offsets required as well: hFT **18.5%**, O&F **13.8%**, against Basic
+Pitch's 16.3%.
+
+And split by the material, because both of these are **piano** models and
+half this corpus is strings and winds — §29.2's request, which no table here
+had yet answered:
+
+| transcriber | solo piano (3 pieces, 3,887 notes) | everything else |
+| --- | --- | --- |
+| **hFT-Transformer** | **70.5%** | 44.5% |
+| Onsets & Frames | **69.1%** | 40.4% |
+| Kong (§32.4) | 71.2% | — |
+| Basic Pitch, reference (§32.2) | 57.5% | — |
+
+**hFT-Transformer matches Kong on piano at one seventh of the size**: 70.5%
+against 71.2%, 22 MB against 154 MB of ONNX, 5.52 M parameters against
+42.95 M. §31.2 said "if anything, hFT" on an argument from size and op
+cleanliness alone; on quality that bet was right.
+
+Per piece, where the spread is the point:
+
+| piece | instruments | ref notes | hFT F1 | hFT onset p50 | O&F F1 | O&F onset p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1759 | piano | 1723 | 60.0% | 20.4 ms | 59.8% | 18.9 ms |
+| 1819 | horn/bassoon/clarinet | 1321 | 44.2% | 23.8 ms | 41.3% | 22.2 ms |
+| 2106 | violin/viola/cello | 2004 | 31.3% | 27.0 ms | 27.1% | 25.8 ms |
+| 2191 | violin | 551 | 42.1% | 25.8 ms | 40.3% | 24.9 ms |
+| 2298 | cello | 966 | 58.1% | 27.3 ms | 51.8% | 25.6 ms |
+| 2303 | piano | 718 | **88.6%** | 14.5 ms | 86.7% | 14.7 ms |
+| 2382 | violin/viola/cello | 1956 | 21.8% | 28.3 ms | 20.1% | 28.6 ms |
+| 2416 | horn/bassoon/clarinet | 1386 | 52.9% | 18.9 ms | 44.0% | 19.5 ms |
+| 2556 | piano | 1446 | 73.2% | 18.7 ms | 71.0% | 19.5 ms |
+| 2628 | piano/violin | 1518 | 66.6% | 15.1 ms | 63.0% | 18.2 ms |
+
+**88.6% on 2303 is the best number anywhere in this report**, and the piano
+pieces again carry onset errors of 14–20 ms where the bowed and blown ones
+sit at 25–28 ms. That is §29.2 and §32.2's pattern reproduced by two more
+models, from two more architectures, on the same corpus — and §32.2's
+correction stands: with MusicNet's DTW-aligned labels, this corpus cannot
+separate "the model fires at pitch stability" from "the annotation is least
+reliable where attacks are least percussive."
+
+**Neither beats MT3's 76.5%**, which remains the best overall transcriber
+this project has measured. What they are is the best *piano* transcribers,
+and hFT is by a wide margin the smallest thing that is.
+
+### 35.4 hFT's onset threshold is inert, and its velocity head is why
+
+§29.3 swept Basic Pitch's decoder and found the shipped defaults already at
+the F1 optimum. The same sweep here:
+
+| threshold | hFT P / R / F1 | O&F P / R / F1 |
+| --- | --- | --- |
+| 0.2 | 57.2 / 48.0 / **52.2** | 50.0 / 52.7 / 51.3 |
+| 0.3 | 57.2 / 48.0 / **52.2** | 54.1 / 49.5 / **51.7** |
+| 0.5 (default) | 57.2 / 48.0 / **52.2** | 59.7 / 42.4 / 49.6 |
+| 0.7 | 57.3 / 48.0 / **52.2** | 64.4 / 33.1 / 43.7 |
+
+O&F behaves the way a threshold is supposed to, trading precision for recall
+and peaking slightly off its default. **hFT does not move at all**, and the
+first reading — that its activations are saturated — is wrong: 0.3% of its
+onset head's values sit in [0.2, 0.5), so a lower threshold does admit more
+peaks.
+
+They are then thrown away by something else. hFT's decoder runs
+`mode_velocity: 'ignore_zero'`, which drops any note whose *velocity* head
+reads zero at the onset frame, and that gate removes exactly the candidates
+a lower threshold adds. On one piece: 1,459 notes at every threshold from
+0.2 to 0.7 with the gate, and 1,747 → 1,571 across the same range without
+it. Turning the gate off:
+
+| onset/mpe threshold, no velocity gate | precision | recall | F1 |
+| --- | --- | --- | --- |
+| 0.2 | 36.7% | 58.4% | 45.1% |
+| 0.3 | 39.9% | 57.3% | 47.0% |
+| 0.5 | 45.3% | 55.3% | 49.8% |
+| 0.7 | 52.8% | 51.3% | 52.1% |
+
+So the velocity gate is not incidental plumbing: **it is a better precision
+filter than the threshold is**, reaching 52.2% where the best thresholded
+arm without it reaches 52.1% while answering more often. It is also why
+there is no threshold lever to pull on hFT at all — §29.3's "that lever is
+spent" is, for this model, "that lever is not connected."
+
+### 35.5 Can the pure-Dart runtime run hFT? No — and not for the reason expected
+
+This is the question the section was for. §31.1 measured Kong at ~96× real
+time in `onnx_runtime_dart`, §31.2 scaled that by parameter count and put
+hFT at "near ~19× real time", and §31.4 made the whole case for a native
+runtime rest on model size.
+
+Measured, on a 10 s clip, in one isolate, with **Basic Pitch co-run in the
+same process** so the box's load divides out — this VPS was running 3.5×
+slow against §30's 0.12× for Basic Pitch when these were taken:
+
+| arm, pure Dart | as measured | at §30's load |
+| --- | --- | --- |
+| hFT log-mel (256 bins, hop 256) | 0.568× | ~0.16× |
+| O&F log-mel (229 bins, hop 512) | 0.050× | ~0.014× |
+| Basic Pitch (what ships) | 0.419× | 0.12× (§30) |
+| **Onsets & Frames, 26.49 M params** | **2.7×** | **~0.8×** |
+| **hFT-Transformer, 5.52 M params** | **killed by the kernel at 3.63 GB RSS** | — |
+
+Two results, and they invert each other.
+
+**Onsets & Frames runs in pure Dart at roughly real time.** §31.1 estimated
+~8× and §31.2 dismissed it as "a baseline, not a candidate"; at ~0.8× on a
+quiet machine it is an offline transcriber that needs no native library on
+any of the six platforms. The 106 MB is still nobody's favourite download,
+but the throughput objection is gone.
+
+**hFT cannot be run in that runtime at all here.** Not slowly — at all. One
+192-frame window, with the graph already pruned to the four outputs a
+transcriber reads, took the process past **3.63 GB of resident memory**
+before the kernel killed it, on a 7.7 GB box with other tenants. §31 had
+abandoned this run by hand at 1.4 GB and recorded it honestly as *not
+completed*; this says why, and the answer is not speed. The window is a
+fixed 192 frames, so that cost does not shrink with a shorter recording —
+**it is the floor**, and it is already disqualifying for a phone.
+
+Where does it go? Not into weights: 22 MB of them. hFT's attention runs over
+88 pitch tokens × 256 frequency bins per window, and `onnx_runtime_dart`
+materialises every intermediate tensor with no in-place reuse or buffer
+pooling, so the activations dominate by two orders of magnitude over the
+parameters. **Parameter count predicts neither hFT's memory nor its speed** —
+under native ORT it costs 1.55× real time on three threads over the whole
+test split, which is slower than Kong at 0.996× on four despite having one
+eighth the parameters. The arithmetic §31.2 did was the right arithmetic for
+a convolutional stack and the wrong arithmetic for a transformer.
+
+Pruning was not cosmetic, either. The exported graph keeps all fifteen
+forward outputs, two of which nobody decodes — `enc_vector` at
+[1, 128, 4, 88, 256] is 11.5 M floats on its own. `tool/prune_hft.py` cuts
+the graph to `onset_B`, `offset_B`, `mpe_B`, `velocity_B` (1,621 → 1,517
+nodes), which is what shipping it would do; the unpruned graph could not
+even be loaded and run here.
+
+**So, plainly: a strong transcriber cannot ship on all six platforms with no
+native library by choosing hFT.** It can by choosing Onsets & Frames, at
+106 MB and about real time, for 69.1% on piano against hFT's 70.5%. The
+1.4-point difference is not worth a native dependency; the 84 MB might be
+worth avoiding one.
+
+What would change the hFT answer is not a faster runtime but a leaner one:
+in-place op execution and buffer reuse in `onnx_runtime_dart`. That is a
+change to a dependency this project owns, and it is the first time anything
+measured here has pointed at that file rather than at a model.
+
+### 35.6 RMVPE and FCPE, on the tuner's corpora
+
+The other two. Both ship inside CometBeat, both are modern neural F0
+estimators, and §26 declined to score them because doing so would measure a
+model rather than CometBeat. That was the right call for *that* comparison
+and leaves the obvious question unasked: are they better than what this app
+ships? `tool/sync_cometbeat.sh` already copies CometBeat's engines here, so
+the answer cost five more entries in its `FILES` list.
+
+One thing the sync itself turned up: **the copies on `main` were already
+stale, and `--check` was failing there.** Upstream had widened `NoteEvent`
+with a General MIDI `program` field and — this one matters — **replaced
+`basic_pitch.dart`'s uniform frame clock with a stitched one, citing this
+report's 11.1% → 47.8%**. §35.7 is what that did to our own number.
+
+**GuitarSet, 40 solo files** — the first 40 by sorted name, not the 180 of
+§13 and §26. The subset moves things: `cb-pyin` scores 80.45 here against
+82.63 on all 180, and its false-alarm rate 64.89 against 53.90. **Only the
+within-run comparison is safe**; do not difference these against §26.
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-dio | 45.84 | 59.27 | 8.44 | 32.29 | 5.35 | 73.28 | 62.53 |
+| cb-dio (no refine) | 34.79 | 44.99 | 3.56 | 51.45 | 13.50 | 73.28 | 62.53 |
+| cb-pyin | 80.45 | 82.62 | 4.82 | 12.56 | 3.25 | 97.75 | 64.89 |
+| cb-pyin+hmm | 78.20 | 89.25 | 2.01 | 8.74 | 8.70 | 86.05 | 37.13 |
+| cb-pyin+hmm-mask | 78.28 | 89.34 | 2.48 | 8.18 | 3.20 | 86.05 | 37.13 |
+| **cb-fcpe** | **90.80** | **92.57** | **0.41** | **7.02** | 3.35 | 96.81 | 60.61 |
+| cb-rmvpe | *not measurable here — see below* | | | | | | |
+
+**MUSERC cello**, 109 takes (RMVPE: the first 55, for the same reason):
+
+| engine | RPA% | rep% | oct% | gross% | \|err\| p50 | takes |
+| --- | --- | --- | --- | --- | --- | --- |
+| cb-dio | 86.92 | 90.90 | 0.67 | 8.44 | 12.30 | 109 |
+| cb-pyin | 88.32 | 91.55 | 1.05 | 7.41 | 11.95 | 109 |
+| cb-pyin+hmm | 90.27 | 95.22 | 0.78 | 4.01 | *0.05* | 109 |
+| cb-pyin+hmm-mask | 88.06 | 92.88 | 0.80 | 6.32 | 11.85 | 109 |
+| **cb-fcpe** | 87.99 | 92.52 | 0.74 | 6.74 | 11.65 | 109 |
+| **cb-rmvpe** | 77.58 | **98.38** | **0.02** | **1.60** | **5.50** | 55 |
+
+§26.1's trap was checked before either cent column was written down.
+MUSERC's reference is the exact equal-tempered frequency of the labelled
+note, so anything that rounds to a semitone scores ~0 cents by construction —
+which is what `cb-pyin+hmm`'s *0.05* is, and it is in the table only as the
+control. Both new decoders emit **continuous** cents (RMVPE's
+`to_local_average_cents` is a salience-weighted mean over nine 20-cent bins;
+FCPE's `local_argmax` is the same shape over its cent table), so 5.50 and
+11.65 are real residuals and are reportable.
+
+**FCPE is the best pitch estimator this benchmark has measured.** On the same
+40 files it beats CometBeat's own pYIN by **+10.3 points of RPA** and cuts
+octave errors from 4.82% to **0.41%** — a twelvefold reduction, in the one
+failure mode a tuner's users actually notice — at the same cent precision.
+That is not the usual trade. Every other estimator that answered more often
+in this report answered worse; this one answers more often *and* better.
+
+**And it is still not a tuner.** Its false-alarm rate is **60.61%** against
+the shipped pipeline's 17.07%: on three frames in five where the reference
+says nothing is sounding, FCPE names a pitch. A needle driven by it would
+twitch through every rest. §26's one-line verdict — a transcription app wants
+the answer, a tuner wants the silence — survives contact with a much better
+estimator, which is the strongest form that finding has taken.
+
+What is *not* established is that the voicing is unfixable. FCPE's threshold
+is 0.006 and untested; an energy gate is the other obvious lever; §27's pYIN
+work is precedent for a mask fixing exactly this. Neither was measured here,
+so neither is claimed.
+
+**RMVPE is the most accurate estimator here and the least deployable.** On
+cello it reports on 98.38% of the frames it answers at with **0.02% octave
+errors, 1.60% gross and 5.50 cents** — twice the precision of anything else
+in that table. It is also 361 MB, costs ≈2.4× real time on one core, and
+**cannot be run on GuitarSet on this machine at all**: its U-Net takes a
+whole file as one un-chunked forward pass, so a single 22-second recording
+reaches 3.5 GB of resident memory and is killed, and the cello run died at
+take 81 with 3.82 GB. The 55-take row is the deterministic prefix that
+survived.
+
+That is the same failure as hFT's in §35.5, from a different direction:
+**the memory a pure-Dart ONNX graph needs is governed by its activations,
+not by its weights**, and two of the four models here are out of reach for
+that reason alone rather than for anything about their accuracy. Chunking
+RMVPE's input would fix it and would no longer be the engine CometBeat
+ships, so it was not done.
+
+| | cost vs real time, 1 core | peak RSS | verdict for a tuner |
+| --- | --- | --- | --- |
+| **FCPE**, 43 MB | **≈0.60×** | 1.2 GB | best pitch here; disqualified on voicing as configured |
+| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB, OOM on guitar | no |
+
+(The per-file wall-clock figures behind those ratios were taken on a box at
+load 20–28 that gave the runs 49–79% of one core; the ratios are normalised
+by CPU seconds, which is why they are quoted that way and the raw
+milliseconds are not.)
+
+### 35.7 What CometBeat's fix did to our own Basic Pitch number
+
+`bin/transcribe_eval.dart` used to correct CometBeat's decoder times on the
+way out, because CometBeat had the 8.53 ms-per-window drift §28 found here.
+It does not have it any more. Re-applying our correction on top of their fix
+would have re-introduced the identical error in the identical direction —
+the bug twice over, and invisible, since both arms would still produce
+plausible notes. The correction is gone and the arm re-measured on the same
+ten pieces.
+
+| arm | precision | recall | F1 | with offsets | onset err p50 |
+| --- | --- | --- | --- | --- | --- |
+| §30, our correction over CometBeat's drifting clock | 52.4% | 37.9% | **44.0%** | 16.3% | 21.5 ms |
+| now, CometBeat's own fixed clock, no correction | 52.4% | 37.9% | **44.0%** | 16.3% | 21.5 ms |
+
+**Identical to the decimal**, which is the answer one wants: the two clocks
+are the same clock, our correction was arithmetically equivalent to their
+fix, and every Basic Pitch number in §30 and §32 stands unchanged. It is
+also the only way to know that, because the failure mode if they had *not*
+agreed would have been a smaller F1 and no error message.
+
+The lesson is not about Basic Pitch. **A correction applied to a dependency's
+output is a claim about that dependency's version**, and nothing in the
+build checks it. `tool/sync_cometbeat.sh --check` catches a stale copy; it
+cannot catch a correction that has become wrong because the thing it
+corrected was fixed.
+
+### 35.8 The four, in one place
+
+| model | where it was measured | best number | beats what ships? |
+| --- | --- | --- | --- |
+| **hFT-Transformer**, 22 MB | MusicNet, note level | **70.5% F1 on solo piano** (52.2% overall) | as a transcriber, yes — it is Kong's accuracy at a seventh of the size. **Not runnable in pure Dart**: >3.6 GB for one fixed window. |
+| **Onsets & Frames**, 106 MB | MusicNet, note level | **69.1% F1 on solo piano** (49.6% overall) | yes, and it is the one that runs in pure Dart, at ~0.8× real time. 106 MB is the price. |
+| **FCPE**, 43 MB | GuitarSet (40 files), MUSERC | **90.80% RPA, 0.41% octave** | on pitch, by a wide margin. On voicing, no: 60.61% false alarm against 17.07%. |
+| **RMVPE**, 361 MB | MUSERC (55 takes) only | **0.02% octave, 5.50 c** | not measurable on guitar (OOM), 2.4× real time, 361 MB. No. |
+
+Two of the four are out of reach of the pure-Dart runtime for the same
+reason, arrived at independently: **activation memory, not weights**. hFT is
+22 MB and needs 3.6 GB; RMVPE is 361 MB and needs 3.8 GB; Onsets & Frames is
+106 MB and runs. Nothing about a model's size on disk predicts whether
+`onnx_runtime_dart` can run it, and this report has now twice reasoned from
+parameter count and been wrong.
+
+---
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:

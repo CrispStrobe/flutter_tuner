@@ -45,8 +45,30 @@ const String _inputName = 'serving_default_input_2:0';
 const String _noteOut = 'StatefulPartitionedCall:1'; // Yn (frame activations)
 const String _onsetOut = 'StatefulPartitionedCall:2'; // Yo (onset activations)
 
-/// Milliseconds of one model frame (`FFT_HOP / SR`), ≈ 11.61 ms.
-double _frameToMs(num frame) => frame * _fftHop / _sampleRate * 1000.0;
+/// Milliseconds of a frame in the STITCHED grid.
+///
+/// Replaces a uniform `frame * FFT_HOP / SR` clock, which is correct within
+/// one window and drifts across them.
+///
+/// The stitched grid keeps `_annotFrames - _overlapFrames` = 142 frames per
+/// window, but a window advances `_hopSize` = 36164 samples — and
+/// 142 × 256 = 36352. So treating the stitched index as a uniform clock
+/// gains **188 samples (8.53 ms) for every window a frame is past**: about
+/// 840 ms three minutes into a piece.
+///
+/// Window 0 is unaffected, because the 15-frame trim at the head exactly
+/// cancels the `_startPad`, so the error is zero at the start and grows
+/// linearly — which is what makes it easy to miss on short clips and fatal
+/// on long ones. Measured against MusicNet's test split with
+/// `mir_eval.transcription` rules (50 ms onset tolerance): note-level F1
+/// **11.1% before, 47.8% after**.
+double _stitchedFrameToMs(int frame) {
+  const framesPerWindow = _annotFrames - _overlapFrames; // 142
+  final window = frame ~/ framesPerWindow;
+  final withinWindow = frame % framesPerWindow;
+  final samples = window * _hopSize + withinWindow * _fftHop;
+  return samples / _sampleRate * 1000.0;
+}
 
 /// Default minimum note length in *frames* (~127.7 ms, the package default).
 const int _defaultMinNoteLen = 11;
@@ -321,9 +343,12 @@ List<NoteEvent> notesFromPosteriorgrams(
     for (final n in raw)
       (
         midi: n.midi,
-        onMs: _frameToMs(n.startFrame),
-        offMs: _frameToMs(n.endFrame),
+        onMs: _stitchedFrameToMs(n.startFrame),
+        offMs: _stitchedFrameToMs(n.endFrame),
         confidence: n.amp.clamp(0.0, 1.0),
+        // Basic Pitch is instrument-agnostic by design — one pitch grid, no
+        // timbre head. gmProgramUnknown, never 0.
+        program: gmProgramUnknown,
       ),
   ]..sort((a, b) => a.onMs.compareTo(b.onMs));
 }
