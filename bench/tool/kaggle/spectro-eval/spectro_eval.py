@@ -933,7 +933,12 @@ def main_timing():
 # The kernel's own entry point.
 # ---------------------------------------------------------------------------
 
-MODELS = models_dir()
+# NOT `MODELS`: `onnx_timing` already has a module-level `MODELS` tuple of
+# the four model names, and shadowing it with a directory path makes
+# `choices=("",) + MODELS` raise and `for name in MODELS` iterate over
+# characters. Caught by an AST duplicate-name check over the generated file,
+# which is now part of this generator.
+MODEL_DIR = models_dir()
 
 if CHILD:
     # A timing child: one model, one thread count, its own address space.
@@ -943,7 +948,7 @@ print("\n=== MusicNet test split, hFT and O&F, mir_eval ===\n", flush=True)
 sys.argv = [
     "spectro_notes",
     "--data", DATA,
-    "--models", MODELS,
+    "--models", MODEL_DIR,
     "--threads", "2",
     "--sweep",
     "--out", os.path.join(WORK, "spectro_notes.json"),
@@ -957,8 +962,8 @@ sys.argv = [
     "--wav", os.path.join(DATA, "musicnet", "test_data", "2191.wav"),
     "--seconds", "30",
     "--threads", "1,2,4",
-    "--models", MODELS,
-    "--cometbeat", MODELS,
+    "--models", MODEL_DIR,
+    "--cometbeat", MODEL_DIR,
     "--out", os.path.join(WORK, "onnx_timing.json"),
 ]
 main_timing()

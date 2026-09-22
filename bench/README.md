@@ -129,6 +129,9 @@ of the maths measures nothing.
 | `lib/hft.dart`, `lib/oaf.dart` | hFT-Transformer and Onsets & Frames: the window arithmetic and each model's own note decoder, ported from its inference code. REPORT.md §35. |
 | `bin/spectro_timing.dart` | What those two cost in the pure-Dart runtime, with the shipped Basic Pitch co-measured so the number survives a loaded box. |
 | `bin/spectro_eval.dart`, `tool/spectro_activations.py` | Note-level scoring on MusicNet from cached ORT activations — the model runs where it is fast, the decoder and the metric stay here. |
+| `tool/spectro_notes.py` | The same two models scored a second way: decoders ported to numpy, metric taken from `mir_eval` itself. A cross-check of the Dart path, not a substitute for it (REPORT.md §36.1). |
+| `tool/onnx_timing.py` | All four models under native ONNX Runtime at 1/2/4 intra-op threads, one process per (model, thread count) so the peak RSS belongs to a model (REPORT.md §36.2). |
+| `tool/kaggle/build_spectro_kernel.py` | Generates the four Kaggle kernels that finished §35's unfinished measurements, by concatenating a preamble with these tools verbatim — a script kernel uploads only its `code_file`, so it has to be one file, and it must not be a second copy of the evaluation. |
 | `tool/prune_hft.py` | Cuts hFT's graph to the four outputs a transcriber reads. Without it the pure-Dart runtime cannot load the graph on a 7.7 GB box. |
 | `bin/bench.dart` | The corpus run, one isolate per core. |
 | `bin/verify.dart` | Frame-by-frame agreement with the shipped package. |

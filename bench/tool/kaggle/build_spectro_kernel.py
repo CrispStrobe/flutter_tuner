@@ -80,6 +80,30 @@ def strip_module(path, drop_from=None, rename_main=None):
     return src.rstrip() + "\n"
 
 
+def check_no_shadowing(source):
+    """Concatenating three modules into one file silently merges their
+    top-level namespaces, and the loser is whichever name was assigned first.
+    That is how `onnx_timing`'s `MODELS` tuple became a directory path on the
+    first Kaggle push — no syntax error, no import error, just a TypeError
+    forty minutes into a run. A duplicate top-level name is a bug here, so it
+    is checked rather than reviewed for.
+    """
+    import ast
+    import collections
+    counts = collections.Counter()
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            counts[node.name] += 1
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    counts[t.id] += 1
+    dupes = sorted(k for k, v in counts.items() if v > 1)
+    if dupes:
+        raise SystemExit(f"generated kernel defines {dupes} twice; rename "
+                         f"one of them in the local tool")
+
+
 # ---------------------------------------------------------------------------
 # spectro-eval: Python, native ORT, MusicNet + the four-model timing table
 # ---------------------------------------------------------------------------
@@ -221,7 +245,12 @@ SPECTRO_DRIVER = '''
 # The kernel's own entry point.
 # ---------------------------------------------------------------------------
 
-MODELS = models_dir()
+# NOT `MODELS`: `onnx_timing` already has a module-level `MODELS` tuple of
+# the four model names, and shadowing it with a directory path makes
+# `choices=("",) + MODELS` raise and `for name in MODELS` iterate over
+# characters. Caught by an AST duplicate-name check over the generated file,
+# which is now part of this generator.
+MODEL_DIR = models_dir()
 
 if CHILD:
     # A timing child: one model, one thread count, its own address space.
@@ -231,7 +260,7 @@ print("\\n=== MusicNet test split, hFT and O&F, mir_eval ===\\n", flush=True)
 sys.argv = [
     "spectro_notes",
     "--data", DATA,
-    "--models", MODELS,
+    "--models", MODEL_DIR,
     "--threads", "2",
     "--sweep",
     "--out", os.path.join(WORK, "spectro_notes.json"),
@@ -245,8 +274,8 @@ sys.argv = [
     "--wav", os.path.join(DATA, "musicnet", "test_data", "2191.wav"),
     "--seconds", "30",
     "--threads", "1,2,4",
-    "--models", MODELS,
-    "--cometbeat", MODELS,
+    "--models", MODEL_DIR,
+    "--cometbeat", MODEL_DIR,
     "--out", os.path.join(WORK, "onnx_timing.json"),
 ]
 main_timing()
@@ -276,6 +305,7 @@ def build_spectro(account="chr1s4"):
         "# (spectro_reference is inlined above)\n")
     body = body.replace("    from spectro_reference import mel\n", "")
     body = body.replace("    from spectro_reference import resample\n", "")
+    check_no_shadowing(body)
     with open(os.path.join(target, "spectro_eval.py"), "w") as f:
         f.write(body)
     meta = {
