@@ -3596,9 +3596,13 @@ GFLOP per 2 s of audio, because its arithmetic is set by sequence length —
 **Recommendation, in order:**
 
 1. **O&F to ggml in CrispASR**, as a third arm beside basic-pitch and
-   piano-transcription, at q4_0. That buys 69.1% F1 on solo piano against
-   Basic Pitch's 57.5%, for something like 27 MB, on every platform CrispASR
-   builds for. `src/piano_transcription.cpp` is the template and is not
+   piano-transcription. That buys 69.1% F1 on solo piano against Basic
+   Pitch's 57.5%, for something like 27 MB, on every platform CrispASR
+   builds for.
+
+   *This has since been done, and §36.4 replaces the estimates in this
+   paragraph with measurements — including one that qualifies the
+   recommendation.* `src/piano_transcription.cpp` is the template and is not
    hypothetical: it is Kong's model in exactly this shape — a convolutional
    stack in a ggml graph with the recurrent layers computed by hand outside
    it, because ggml has no fused RNN op. O&F is that structure with BiLSTM
@@ -3615,6 +3619,68 @@ What would move hFT's floor is a change to the model rather than the
 runtime — a shorter frequency-token sequence, or attention restricted to a
 local window. That is a retraining question and outside what this report can
 settle.
+
+### 36.4 The port, measured
+
+Done, in CrispASR: `src/onsets_and_frames.{h,cpp}`, the convolutional stack
+and linear layers in a ggml graph with the BiLSTM computed by hand outside
+it, following `piano_transcription.cpp` exactly as §36.3 said it would.
+Three of the four numbers above were estimates; here is what they turned out
+to be.
+
+**Size — better than estimated.** 101.9 MiB at f32, **30.8 MiB at q8_0**,
+**18.6 MiB at q4_0**, against the "roughly 27 MB" guessed above.
+
+**Accuracy — f32 is free, q4_0 is nearly free, and the exception matters.**
+All ten MusicNet test pieces, 13,589 reference notes, `mir_eval`, every arm
+through the same decoder:
+
+| arm | size | F1 | F1 + offsets | solo piano |
+| --- | --- | --- | --- | --- |
+| ONNX export | 101.1 MiB | 49.6% | 13.8% | 69.0% |
+| ggml f32 | 101.9 MiB | **49.6%** | 13.8% | **69.0%** |
+| ggml q8_0 | 30.8 MiB | **49.6%** | 13.9% | **69.0%** |
+| ggml q4_0 | 18.6 MiB | 49.5% | **13.3%** | 68.9% |
+
+The ONNX row reproduces §35.3's published 49.6% / 69.1% to the digit, which
+is what calibrates the harness before any of the rest is claimed, and the
+f32 arm is F1-identical to it on every individual piece. Post-sigmoid
+agreement against ONNX on the same mel: f32 max 5.3e-07 with cosine
+1.00000000 and **100.0000% of decisions identical**.
+
+**q4_0 costs 0.1 point of note F1 — and 0.5 points of F1-with-offsets, a
+3.6% relative loss.** That is not noise and it is not a surprise: q4_0
+perturbs the frame head (cosine 0.9935) about five times as much as the
+onset head (0.9989), and the frame head is what sets note durations. So the
+recommendation narrows: **q4_0 where onset and pitch are what matter, q8_0
+as the default.** At 30.8 MiB q8_0 is indistinguishable from fp32 on every
+column, and there is no remaining case for shipping f32 at all.
+
+**Speed — and this qualifies §36.3.** On the same 4-vCPU box: **0.73 CPU-
+seconds per audio-second** at f32, 0.75 at q8_0 and q4_0. Quantisation buys
+no speed here, because 46% of this model is convolution and those kernels
+run F32 either way.
+
+That is **about an order of magnitude slower than native ORT's 0.055×**, and
+§36.3's "speed is already not the objection" was a statement about ORT that
+should not have been carried across to a runtime that did not exist yet.
+Two causes, neither fixed: a fresh ggml allocator per convolution chunk, and
+a single-threaded scalar recurrence for the BiLSTM. Still comfortably faster
+than real time for offline transcription, which is what this arm is for —
+but the port's case is size and portability, not throughput, and §36.3 read
+as though it were both.
+
+**One thing found by accident, worth more than the port.** Validating the
+mel front end turned up that CrispASR's `core_mel` was linking Debian's
+threaded MKL alongside libgomp, and the upper mel bins came back multiplied
+by the thread count — exactly ln 4 of log-domain error at four threads, ln 3
+at three. Silent, and affecting every `core_mel` backend rather than this
+one. Fixed by preferring OpenBLAS explicitly, guarded by a new parity test
+that runs `core_mel` through the sgemm and through its own scalar
+accumulation and requires them to agree — written before the fix and watched
+to fail at relative difference 1.0 — and filed as CrispASR issue #453 with
+the reproduction and the options deliberately not taken.
+
 
 ---
 
