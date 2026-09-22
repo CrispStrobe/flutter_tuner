@@ -20,6 +20,13 @@
 //   bp     Basic Pitch through CrispASR's ggml (the same model, §17)
 //   piano  Kong's piano-transcription through CrispASR (77 MB)
 //   mt3    MT3 through CrispASR (96 MB, 46.9M parameters)
+//   hft    hFT-Transformer through onnx_runtime_dart (22 MB, 5.52M params)
+//   oaf    Onsets & Frames through onnx_runtime_dart (106 MB, 26.49M params)
+//
+// The last two are the ONNX exports of §31, which had been verified against
+// PyTorch and never run on audio, because their input is a spectrogram and
+// nothing here could build one. `lib/mel.dart` can; `lib/hft.dart` and
+// `lib/oaf.dart` are their window arithmetic and their own decoders.
 
 import 'dart:ffi';
 import 'dart:io';
@@ -30,6 +37,8 @@ import 'package:onnx_runtime_dart/onnx_runtime_dart.dart';
 import 'package:onnx_runtime_dart/onnx_runtime_dart_io.dart';
 import 'package:tuner_bench/app/transcription.dart';
 import 'package:tuner_bench/cometbeat/basic_pitch.dart' as cb;
+import 'package:tuner_bench/hft.dart';
+import 'package:tuner_bench/oaf.dart';
 import 'package:tuner_bench/musicnet.dart';
 import 'package:tuner_bench/note_metrics.dart';
 import 'package:tuner_bench/wav.dart';
@@ -177,6 +186,21 @@ List<Note> _runCometBeat(OnnxModel model, Float64List audio44k) => [
         )
     ];
 
+/// hFT over a whole piece: stride the fixed 192-frame window, then its own
+/// `convert_label_to_note`. The B head is the second of the two stages and
+/// is what the paper reports; `infer.py` concatenates A and B, which emits
+/// every note twice.
+List<Note> _runHft(OnnxModel model, Float64List audio, int rate, String head) {
+  final f = hftForward(model, audio, rate);
+  return hftNotes(head == 'A' ? f.a : f.b);
+}
+
+/// Onsets & Frames over a whole piece, one forward pass — its time axis is
+/// dynamic, so the chunking its `infer.py` does for GPU memory is not
+/// needed.
+List<Note> _runOaf(OnnxModel model, Float64List audio, int rate) =>
+    oafNotes(oafForward(model, audio, rate));
+
 List<Note> _runCrispasr(CrispasrSession s, Float64List audio44k, int rate) {
   final audio = _resample(audio44k, 44100, rate.toDouble());
   final pcm = Float32List(audio.length);
@@ -194,6 +218,9 @@ void main(List<String> argv) async {
   var onnxPath = '../assets/models/basic_pitch.onnx';
   var limit = 0;
   var want = 'onnx,cbdec,bp,piano,mt3';
+  var hftPath = '/mnt/storage/tuner-bench/onnx/hft_transformer.pruned.onnx';
+  var oafPath = '/mnt/storage/tuner-bench/onnx/onsets_and_frames.onnx';
+  var hftHead = 'B';
   for (int i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--data':
@@ -204,6 +231,12 @@ void main(List<String> argv) async {
         limit = int.parse(argv[++i]);
       case '--engines':
         want = argv[++i];
+      case '--hft-onnx':
+        hftPath = argv[++i];
+      case '--oaf-onnx':
+        oafPath = argv[++i];
+      case '--hft-head':
+        hftHead = argv[++i];
     }
   }
   final wanted = want.split(',').map((s) => s.trim()).toSet();
@@ -219,6 +252,27 @@ void main(List<String> argv) async {
   OnnxModel? onnx;
   if (wanted.contains('onnx') || wanted.contains('cbdec')) {
     onnx = loadOnnxModel(onnxPath);
+  }
+
+  // The two spectrogram models. A missing file is a skipped row with a
+  // reason printed, never a crash and never a silent omission (§30.1).
+  OnnxModel? hft;
+  if (wanted.contains('hft')) {
+    if (File(hftPath).existsSync()) {
+      hft = loadOnnxModel(hftPath);
+      stdout.writeln('hft: ready (22 MB, head $hftHead)');
+    } else {
+      stdout.writeln('hft: model not found at $hftPath');
+    }
+  }
+  OnnxModel? oaf;
+  if (wanted.contains('oaf')) {
+    if (File(oafPath).existsSync()) {
+      oaf = loadOnnxModel(oafPath);
+      stdout.writeln('oaf: ready (106 MB)');
+    } else {
+      stdout.writeln('oaf: model not found at $oafPath');
+    }
   }
 
   final sessions = <String, CrispasrSession>{};
@@ -261,6 +315,8 @@ void main(List<String> argv) async {
   final engines = <String>[
     if (onnx != null && wanted.contains('onnx')) 'onnx',
     if (onnx != null && wanted.contains('cbdec')) 'cbdec',
+    if (hft != null) 'hft',
+    if (oaf != null) 'oaf',
     ...sessions.keys,
   ];
   final noOffset = {for (final e in engines) e: NoteScore()};
@@ -280,6 +336,8 @@ void main(List<String> argv) async {
         est = switch (e) {
           'onnx' => _runOnnx(onnx!, wav.samples),
           'cbdec' => _runCometBeat(onnx!, wav.samples),
+          'hft' => _runHft(hft!, wav.samples, wav.sampleRate, hftHead),
+          'oaf' => _runOaf(oaf!, wav.samples, wav.sampleRate),
           _ => _runCrispasr(sessions[e]!, wav.samples, rates[e]!),
         };
       } catch (err) {

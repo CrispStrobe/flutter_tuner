@@ -47,6 +47,24 @@ dart run bin/swipe.dart --limit 20 --hop 1024
 dart run bin/harmonics.dart --subset solo --skip 20
 ```
 
+Note-level transcription, and the two models §31 exported but never ran:
+
+```sh
+# hFT-Transformer and Onsets & Frames: what one costs in the pure-Dart
+# runtime, measured against a co-run of the model the app ships
+dart run bin/spectro_timing.dart --seconds 30
+
+# the front end, checked against librosa rather than assumed
+dart run bin/mel_check.dart > /tmp/dart_mel.json
+python3 tool/mel_reference.py /tmp/dart_mel.json
+
+# cache the head activations under native ORT, then decode and score in Dart
+python3 tool/prune_hft.py                       # once: drop the unused heads
+python3 tool/spectro_activations.py --model hft --out /mnt/storage/tuner-bench/acts
+python3 tool/spectro_activations.py --model oaf --out /mnt/storage/tuner-bench/acts
+dart run bin/spectro_eval.dart --acts /mnt/storage/tuner-bench/acts --sweep
+```
+
 `--data` points at the corpus and defaults to
 `/mnt/storage/tuner-bench/datasets`, which must contain `audio/*.wav` and
 `annotation/*.jams`.
@@ -107,6 +125,11 @@ of the maths measures nothing.
 | `lib/evaluate.dart` | One file in, every variant scored out. All YIN variants share one difference function per frame. The `app-fixed` variant calls the app's own `PitchSmoother` rather than reproducing it. |
 | `lib/metrics.dart` | RPA, octave and gross error rates, voicing recall and false alarm, and cent-error histograms. |
 | `lib/jams.dart`, `lib/wav.dart` | Just enough of each format. |
+| `lib/mel.dart` | A log-mel front end matching `torchaudio.transforms.MelSpectrogram` — periodic Hann, HTK mel scale, Slaney filter normalisation — plus torchaudio's `sinc_interp_hann` resampler. Two of the exported models take a spectrogram rather than audio, and this is it. Checked against librosa by `bin/mel_check.dart` + `tool/mel_reference.py`. |
+| `lib/hft.dart`, `lib/oaf.dart` | hFT-Transformer and Onsets & Frames: the window arithmetic and each model's own note decoder, ported from its inference code. REPORT.md §34. |
+| `bin/spectro_timing.dart` | What those two cost in the pure-Dart runtime, with the shipped Basic Pitch co-measured so the number survives a loaded box. |
+| `bin/spectro_eval.dart`, `tool/spectro_activations.py` | Note-level scoring on MusicNet from cached ORT activations — the model runs where it is fast, the decoder and the metric stay here. |
+| `tool/prune_hft.py` | Cuts hFT's graph to the four outputs a transcriber reads. Without it the pure-Dart runtime cannot load the graph on a 7.7 GB box. |
 | `bin/bench.dart` | The corpus run, one isolate per core. |
 | `bin/verify.dart` | Frame-by-frame agreement with the shipped package. |
 | `bin/timing.dart`, `bin/precision.dart`, `bin/alignment.dart` | Cost, precision floor, and where in the window an answer belongs. |
