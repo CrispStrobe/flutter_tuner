@@ -3908,27 +3908,64 @@ take** against a mean take of ~3.7 s (≈2.3× real time, reproducing §35.6's
 the whole 109-take run: **5.38 GB** — higher than §35.6's 3.82 GB because the
 run got further rather than being killed at take 81.
 
-### 37.4 RMVPE on GuitarSet
+### 37.4 GuitarSet, all 180 solo files
 
-*This subsection is the one §37 was chiefly for, and at the time of writing
-its two runs are still on the worker. `chr1s4/crisptuner-cometbeat-rmvpe-guitarset`
-and `chr1str/crisptuner-cometbeat-fcpe-guitarset` are RUNNING; the smoke
-gate passed and the full pass over 180 solo files is under way. The table is
-left empty rather than filled from the prefix, which is the mistake §37.3
-just finished documenting.*
+`bin/cometbeat.dart --corpus guitar --subset 40` on Kaggle CPU workers, one
+kernel per engine so an OOM in the expensive one cannot take the cheap one
+with it. Same runtime, decode and scoring as §35.6; only the machine and the
+file count differ.
 
-What is already known about the run, from the cello pass on the same kernel
-and the ORT figures in §37.2:
+**FCPE, all 180 solo files** (`chr1str/crisptuner-cometbeat-fcpe-guitarset`,
+Kaggle CPU worker, 50 min):
 
-* **It is not a memory question any more.** §35.6 could not run RMVPE on
-  GuitarSet because one 22-second file reached 3.5 GB on a 7.7 GB shared box.
-  The Kaggle worker has 31 GB and the cello pass peaked at 5.38 GB; the
-  longest GuitarSet solo file is 45.7 s against MUSERC's ~7 s, so the pure-Dart
-  run should peak several times higher and still fit.
-* **It is a time question.** GuitarSet's 180 solo files are 5,484 s of audio;
-  at the ≈2.3× real time the cello pass measured for `cb-rmvpe` in the Dart
-  runtime, the pass is roughly 3.5 hours of worker time. That is inside
-  Kaggle's limit and outside what this VPS would ever have given it.
+| engine | files | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-fcpe | first 40 | 90.80 | 92.57 | 0.41 | 7.02 | 3.35 | 96.81 | 60.61 |
+| **cb-fcpe** | **all 180** | **92.04** | **92.89** | **0.31** | **6.80** | **2.95** | **98.69** | **53.88** |
+
+The 40-file prefix row reproduces §35.6 **to the decimal** — 90.80 / 92.57 /
+0.41 / 7.02 / 3.35 / 96.81 / 60.61, every figure — from a different machine
+and a fresh `pub get`, which is the same determinism §37.3 found on cello.
+
+And here the prefix was **pessimistic**, which is the opposite of §37.3's
+cello result and worth noticing: RPA 90.80 → 92.04, octave errors 0.41% →
+0.31%, the cent residual 3.35 → 2.95, and the false-alarm rate 60.61% →
+53.88%. GuitarSet's filenames sort by player *and* style, so a 40-file prefix
+is the first two players' comping-free excerpts; it is a different bias from
+MUSERC's, and it happens to run the other way. **A prefix is not a sample,
+and knowing that does not tell you which direction it is wrong in.**
+
+Two things follow for the tuner.
+
+**§35.6's headline for FCPE survives the full corpus, and grows.** Against
+`cb-pyin`'s 82.63% RPA on the same 180 files (§13, §26), FCPE's 92.04% is
+**+9.4 points**, and its 0.31% octave-error rate against pYIN's 4.82% is a
+**fifteenfold** reduction rather than §35.6's twelvefold. This remains the
+only estimator in this report that answers more often *and* better.
+
+**And the voicing verdict survives too, slightly softened.** 53.88% false
+alarm against the shipped pipeline's 17.07% — better than the prefix's
+60.61%, still more than three times the shipped rate, and still a needle that
+twitches through every rest. §35.6's "a transcription app wants the answer, a
+tuner wants the silence" holds on 180 files as it did on 40.
+
+Cost, same run: **16,293 ms per file** against a mean file of 30.5 s — 0.53×
+real time in the pure-Dart runtime, reproducing §35.6's ≈0.60×. Peak RSS over
+the whole 180-file pass: **1.74 GB**, on files up to 45.7 s.
+
+**RMVPE, all 180 solo files** — `chr1s4/crisptuner-cometbeat-rmvpe-guitarset`
+was still RUNNING when this section was written. Its smoke run passed and the
+full pass is under way; at the ≈3.7× FCPE's per-file cost the cello run
+measured, it is roughly three hours of worker time. **The table is left empty
+rather than filled from its prefix** — which is exactly the error §37.3 and
+the FCPE rows above have now documented twice, in opposite directions.
+
+What the FCPE run does settle is the part §35.6 could not test at all:
+**GuitarSet's long files are not a memory problem in this runtime.** FCPE
+peaked at 1.74 GB across 180 files including the 45.7-second one. RMVPE's
+activations are larger — the cello pass peaked at 5.38 GB on ~7-second takes
+— so a 45.7-second guitar file is where it will be decided, and 31 GB is
+enough room to find out. That is the whole reason this went to Kaggle.
 
 ### 37.5 What still could not be measured, and four failures worth recording
 
