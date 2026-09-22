@@ -494,25 +494,35 @@ print("model dir contains:", sorted(os.listdir(models)), flush=True)
 
 
 def run_dart(limit=0):
-    """One `bin/cometbeat.dart` run, with its two streams merged.
+    """One `bin/cometbeat.dart` run, captured to a file and echoed back.
 
-    `2>&1` and `stdbuf -oL` are not decoration. The first attempt at this
-    kernel came back with exit 255 and an EMPTY log: Dart block-buffers
-    stdout when it is a pipe, so everything the run had printed died in the
-    buffer with the process, and whatever killed it was on a stream this
-    reader was not merging. A failure whose log is empty is indistinguishable
-    from a failure that never started.
+    Not decoration. The first two attempts came back exit 255 with a single
+    "." standing for the entire Dart run — first with the streams separate,
+    then with them merged by the shell. Kaggle's log collector does not
+    reliably carry a grandchild process's own file descriptors. Redirecting
+    to a file and printing it through Python does survive, because Python's
+    stdout is the thing Kaggle is actually reading.
     """
-    cmd = (f"stdbuf -oL -eL {{DART}} run bin/cometbeat.dart --corpus {{CORPUS}} "
+    log = os.path.join(WORK, f"dart-{{limit or 'full'}}.log")
+    cmd = (f"{{DART}} run bin/cometbeat.dart --corpus {{CORPUS}} "
            f"--data {{DATA}} --models {{models}} --engines {{ENGINES}} "
            f"--subset {{SUBSET}}" + (f" --limit {{limit}}" if limit else "") +
-           " 2>&1")
+           f" > {{log}} 2>&1")
     print(f"$ {{cmd}}", flush=True)
     # Not check=True: an OOM kill part-way through is a RESULT here, not a
     # harness failure, and the per-file progress lines say exactly how far
     # the run got. Swallowing the exit code would be wrong; hiding the log
     # would be worse.
-    return subprocess.run(cmd, shell=True, cwd=bench).returncode
+    rc = subprocess.run(cmd, shell=True, cwd=bench).returncode
+    # Read the file back and print it through Python. Merging the streams was
+    # not enough: the first two attempts came back with a single "." for the
+    # whole Dart run, which is what Kaggle's log collector does with a child
+    # process's own file descriptors. Anything Python prints survives.
+    try:
+        print(open(log).read(), flush=True)
+    except OSError as exc:
+        print(f"(no {{log}}: {{exc}})", flush=True)
+    return rc
 
 
 # One file first. A configuration error — a missing model, a path the
@@ -541,7 +551,7 @@ def slug(title):
                             for c in title.lower()).split())
 
 
-def build_cometbeat(corpus, engines, subset, title, account):
+def build_cometbeat(corpus, engines, subset, title, account, gpu=False):
     name = slug(title)
     target = os.path.join(HERE, name)
     os.makedirs(target, exist_ok=True)
@@ -557,7 +567,13 @@ def build_cometbeat(corpus, engines, subset, title, account):
         "language": "python",
         "kernel_type": "script",
         "is_private": "true",
-        "enable_gpu": "true",
+        # CPU, not GPU. None of this needs a GPU — it is a pure-Dart ONNX
+        # runtime on four cores — and kaggle-usage.md gotcha #3 says a CPU
+        # worker gets no internet, which would have made the Zenodo fetch
+        # impossible. MEASURED 2026-09-22: a CPU worker DID get internet and
+        # pulled both GuitarSet archives. That correction is what let these
+        # kernels keep running after the GPU quota ran out.
+        "enable_gpu": "true" if gpu else "false",
         "enable_internet": "true",
         "competition_sources": [],
         "dataset_sources": [f"{account}/crisptuner-onnx"],
