@@ -3347,7 +3347,7 @@ within-run comparison is safe**; do not difference these against §26.
 | cb-pyin+hmm | 78.20 | 89.25 | 2.01 | 8.74 | 8.70 | 86.05 | 37.13 |
 | cb-pyin+hmm-mask | 78.28 | 89.34 | 2.48 | 8.18 | 3.20 | 86.05 | 37.13 |
 | **cb-fcpe** | **90.80** | **92.57** | **0.41** | **7.02** | 3.35 | 96.81 | 60.61 |
-| cb-rmvpe | *not measurable in this runtime — see below, and §37.2* | | | | | | |
+| cb-rmvpe | *not measurable on this box — see below; measured on a 31 GB Kaggle worker in §37.4, and under native ORT in §37.2* | | | | | | |
 
 **MUSERC cello**, 109 takes (RMVPE: the first 55, for the same reason):
 
@@ -3410,12 +3410,15 @@ measurable *in that runtime*. Under native ONNX Runtime the identical
 un-chunked whole-clip forward costs **0.133× real time on one thread in
 1.2 GB**. The 3.0–3.8 GB and the OOM are properties of `onnx_runtime_dart`,
 exactly as §35.5 found for hFT and §36.1 confirmed for it — three models now,
-not one anecdote.
+not one anecdote. **§37.4 then ran the whole 180-file GuitarSet pass on a
+31 GB Kaggle worker and it finished**: 79.96% RPA, and a peak RSS of
+**16.68 GB** — so the 3.5 GB here was where the kernel killed it, not what it
+needed, and the guitar row below is now filled rather than empty.
 
 | | cost vs real time, 1 core | peak RSS | verdict for a tuner |
 | --- | --- | --- | --- |
 | **FCPE**, 43 MB | **≈0.60×** | 1.2 GB | best pitch here; disqualified on voicing as configured |
-| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB, OOM on guitar | no |
+| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB on cello; **16.68 GB on guitar** (§37.4), OOM here | no |
 
 (The per-file wall-clock figures behind those ratios were taken on a box at
 load 20–28 that gave the runs 49–79% of one core; the ratios are normalised
@@ -3939,7 +3942,7 @@ Two things follow for the tuner.
 
 **§35.6's headline for FCPE survives the full corpus, and grows.** Against
 `cb-pyin`'s 82.63% RPA on the same 180 files (§13, §26), FCPE's 92.04% is
-**+9.4 points**, and its 0.31% octave-error rate against pYIN's 4.82% is a
+**+9.4 points**, and its 0.31% octave-error rate against pYIN's 4.59% is a
 **fifteenfold** reduction rather than §35.6's twelvefold. This remains the
 only estimator in this report that answers more often *and* better.
 
@@ -3953,19 +3956,73 @@ Cost, same run: **16,293 ms per file** against a mean file of 30.5 s — 0.53×
 real time in the pure-Dart runtime, reproducing §35.6's ≈0.60×. Peak RSS over
 the whole 180-file pass: **1.74 GB**, on files up to 45.7 s.
 
-**RMVPE, all 180 solo files** — `chr1s4/crisptuner-cometbeat-rmvpe-guitarset`
-was still RUNNING when this section was written. Its smoke run passed and the
-full pass is under way; at the ≈3.7× FCPE's per-file cost the cello run
-measured, it is roughly three hours of worker time. **The table is left empty
-rather than filled from its prefix** — which is exactly the error §37.3 and
-the FCPE rows above have now documented twice, in opposite directions.
+**RMVPE, all 180 solo files** (`chr1s4/crisptuner-cometbeat-rmvpe-guitarset`,
+Kaggle CPU worker, 2 h 49 min) — **the row §35.6 could not fill at all.** It
+ran, un-chunked, whole-clip, exactly the engine CometBeat ships:
 
-What the FCPE run does settle is the part §35.6 could not test at all:
-**GuitarSet's long files are not a memory problem in this runtime.** FCPE
-peaked at 1.74 GB across 180 files including the 45.7-second one. RMVPE's
-activations are larger — the cello pass peaked at 5.38 GB on ~7-second takes
-— so a 45.7-second guitar file is where it will be decided, and 31 GB is
-enough room to find out. That is the whole reason this went to Kaggle.
+| engine | files | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-rmvpe | first 40 | 63.70 | 86.61 | 0.39 | 13.00 | 5.00 | 68.11 | 44.03 |
+| **cb-rmvpe** | **all 180** | **79.96** | **90.59** | **0.22** | **9.20** | **4.30** | **85.77** | **38.51** |
+
+**Three models, three prefixes, three different biases.** MUSERC's 55-take
+prefix flattered RMVPE (§37.3); GuitarSet's 40-file prefix was mildly
+pessimistic for FCPE; and for RMVPE on the same 40 files it is pessimistic by
+**16.3 points of RPA** — 63.70 against 79.96 — with voicing recall 68.11
+against 85.77. Had this row been filled from its prefix, as it nearly was, it
+would have said RMVPE loses to pYIN by 17 points when the true gap is 3. That
+is now the third worked example, and the rule from §37.3 stands: *a prefix is
+not a sample, and knowing that does not tell you which direction it is wrong
+in.*
+
+**On accuracy, RMVPE is not the win FCPE is.** Against `cb-pyin`'s 82.63% RPA
+on the same 180 files (§13, §26) it is **2.7 points worse**, and against
+FCPE's 92.04% (above) it is 12 points worse. What it does have is the
+cleanest octave column in this report — **0.22%** against pYIN's 4.59% and
+FCPE's 0.31% — and much the best voicing discipline of the three neural
+engines: **38.51%** false alarm against FCPE's 53.88% and pYIN's 53.90%. It
+buys that with recall: it voices only 85.77% of the frames the reference
+calls voiced, where FCPE voices 98.69%. It is the conservative one. For a
+tuner that wants the needle still during a rest, that is the more interesting
+shape — but 38.51% is still more than double the shipped pipeline's 17.07%,
+so it is a better starting point, not an answer.
+
+**And the memory number is the reason this section exists.** Peak RSS for the
+whole pass: **16.68 GB.** The single-file smoke run — one 22.3-second file,
+one process — already peaked at **8.94 GB**. The high-water mark climbed
+file by file to 16.68 GB at file 29, which is `00_SS3-84-Bb` at **45.7 s**,
+the longest in the corpus, and then did not move through the remaining 151
+files — including the five later files of the same 45.7 s length. So this is
+length-driven, not a leak: 16.68 GB is the ceiling a 45.7-second clip pushes
+`onnx_runtime_dart` to, and it stops climbing once the longest file has been
+seen.
+
+That settles the question the VPS could only half-answer. §35.6 recorded
+RMVPE being OOM-killed on GuitarSet at ~3.5 GB; **3.5 GB was where the kernel
+killed it, not what it needed.** It needs five times that. A 31 GB worker has
+the room; nothing this project would ship on does.
+
+**Put beside §37.2, the two numbers make the whole point of this report
+section.** Same model, same 361 MB graph, same un-chunked whole-clip forward,
+same ≈30 s of audio, same Kaggle hardware:
+
+| runtime | wall time | peak RSS |
+| --- | --- | --- |
+| native ONNX Runtime, 1 intra-op thread (§37.2) | **0.132×** real time | **1522 MB** |
+| `onnx_runtime_dart` (this run, mean over 180 files) | **1.83×** real time | **16,680 MB** |
+
+**Fourteen times the time and eleven times the memory, from the runtime
+alone** — and the native column is its *slowest* setting; at 4 intra-op
+threads it is 0.053×, which would make the gap 35-fold. (The Dart side's
+thread count is whatever `onnx_runtime_dart` defaults to and was not pinned,
+so the time ratio is the softer of the two figures; the memory ratio is
+not.) §35.6's "not measurable here" is now corrected twice over: not
+measurable *in that runtime*, on that machine — and the thing that is not
+measurable is not the model.
+
+For completeness on cost: **55,832 ms per file** against a mean file of
+30.5 s, which is 3.4× FCPE's 16,293 ms and 1.83× real time; total wall
+10,127 s for the 180 files.
 
 ### 37.5 What still could not be measured, and four failures worth recording
 
