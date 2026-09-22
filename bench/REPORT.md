@@ -2716,6 +2716,111 @@ for dense polyphonic classical at nine notes a second, which is outside what
 it was built for — and §10 already showed it doing the job it *was* built
 for, naming notes better than YIN on GuitarSet.
 
+## 33. All three models, in both apps
+
+§32 measured five transcribers. Two of them are worth reaching for, and
+reaching for them turned out to be cheap, because **`crispasr_session_piano`
+is one C entry point serving all three** — basic-pitch, piano-transcription
+and MT3 alike. Supporting them is a choice of model, not three code paths.
+
+| model | F1 | onset err p50 | cost/s of audio | size |
+| --- | --- | --- | --- | --- |
+| basic-pitch | 44.2% | 21.4 ms | 0.08× | 110 KB |
+| piano-transcription | 47.7% (**71.2%** solo piano) | 19.1 ms | 7.77× | 77 MB |
+| **mt3** | **76.5%** | **16.8 ms** | 0.26× | 96 MB |
+
+`CrispAsrBackend` now takes a `CrispAsrModel`. Three details were where the
+work actually was:
+
+* **Sample rates differ and are queried, not assumed.** basic-pitch wants
+  22050 Hz; piano-transcription and MT3 want 16000. Verified on this box
+  rather than read off a document — `pianoSampleRate` returns exactly that
+  for each. The capture path still decimates once to 22.05 kHz and the 16 kHz
+  models are resampled **on the worker isolate**, so no second decimation
+  chain touches the audio thread.
+* **Each model resolves itself** through CrispASR's registry and cache, so a
+  96 MB download happens on first use rather than being bundled — the §25.2
+  lesson applied from the start this time instead of after.
+* **The selector is tolerant.** `CRISPTUNER_CRISPASR_MODEL` is read from the
+  environment, so an unrecognised name falls back to basic-pitch rather than
+  throwing. A typo must not take the transcription mode down, and a test
+  pins that.
+
+### 33.1 Three corrections from wiring it into CometBeat
+
+The same change went into the sibling app, and doing it there corrected this
+report in three places.
+
+**MT3's autoregressive decode was the wrong thing to worry about.** I warned
+that 0.26× real time on a whole recording might not survive an interactive
+path. CometBeat has **no live note-transcription path at all** —
+`NeuralTranscriber` is a batch seam, whole buffer in, notes out. Nothing
+streams audio to a note model in either app.
+
+**The real cost runs the other way, and MT3 fixes it.** CometBeat's
+transcribe screen runs neural engines inline on the UI isolate. At 7.77×
+real time, the ggml model it already defaults to would block the UI for
+about **31 minutes** on a four-minute song; MT3 at 0.26× makes that about
+**62 seconds**. So MT3 is roughly **30× cheaper than the model that path
+already loads** — it is the first ggml note model that makes that path
+usable, rather than a heavyweight addition to it. I had the risk exactly
+inverted.
+
+**A bug of mine, in the same shape as §17.2's.** Generalising this backend
+to three models dropped the check on `pianoSampleRate`. That call returns
+**0** to mean "this backend has no piano arm" — deliberately a probe that
+never throws — so an unchecked read turns a wrong model into a silent
+per-window failure at transcribe time instead of a clear one at startup.
+CometBeat's copy had the identical defect and would have divided by it.
+Fixed in both.
+
+### 33.2 MT3's instruments, recovered
+
+MT3 emits a **General MIDI program per note** — which instrument played it —
+and that is the whole point of a multi-instrument transcriber. The C ABI's
+note record was flat: `[start_ms, end_ms, midi, velocity]`, so the program
+was dropped before either app could see it. Its 76.5% was real and its
+headline capability arrived flattened to a single part.
+
+**Fixed in crispasr 0.8.35.** Widening the note record would break every
+existing reader, so the programs travel in a parallel array through
+`crispasr_session_piano_note_programs`, mirrored in the Dart and C# bindings.
+`-1` means "this model identifies no instrument" — deliberately not `0`,
+which is *Acoustic Grand Piano* and would be indistinguishable from an
+answer.
+
+And it works. MusicNet piece 1819, eight seconds, through `CrispAsrBackend`:
+
+| MT3 program | instrument | notes |
+| --- | --- | --- |
+| 60 | French Horn | 8 |
+| 70 | Bassoon | 13 |
+| 71 | Clarinet | 31 |
+
+The annotation for that piece lists instruments **61, 71, 72** — MusicNet
+numbers MIDI programs from 1, so those are GM 60, 70 and 71. **All three
+correct, and nothing else emitted.** That is the capability the 76.5% was
+always measuring and the ABI was always discarding.
+
+### 33.3 What this does and does not change
+
+It does **not** change the default. The mode still ships Basic Pitch through
+pure Dart, on all six platforms including the web, with no native library —
+and §18's decoder work is what makes that path respectable. MT3 is reachable
+by a host that has libcrispasr and opts in by name.
+
+The honest shape of the choice is now:
+
+| | F1 | ships where | needs |
+| --- | --- | --- | --- |
+| Basic Pitch, pure Dart | 44.0% | **six platforms, web included** | nothing |
+| Basic Pitch, ggml | 44.2% | five platforms | libcrispasr |
+| MT3, ggml | **76.5%** | five platforms | libcrispasr + 96 MB |
+
+Thirty-two points of F1 for a native library and a download is a real trade
+rather than an obvious one, and it is now a trade a host can make instead of
+a thing this report merely measured.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:

@@ -29,7 +29,7 @@ dependencies:
   # unavailable unless a host has the native library. Declared here rather
   # than vendored so the conditional export compiles; the web build never
   # reaches it.
-  crispasr: ^0.8.33
+  crispasr: ^0.8.35
 
   flutter_pcm_sound: ^3.3.3
 

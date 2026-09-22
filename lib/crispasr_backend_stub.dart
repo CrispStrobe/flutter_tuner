@@ -14,13 +14,46 @@ import 'transcription_backend.dart';
 /// Names kept identical to the FFI half so callers and tests compile
 /// against either without conditionals of their own.
 const String kCrispAsrBackendName = 'basic-pitch';
+const String kModelNameEnv = 'CRISPTUNER_CRISPASR_MODEL';
+
+/// Mirrors the FFI half so callers and tests compile against either.
+enum CrispAsrModel {
+  basicPitch('basic-pitch', 22050),
+  pianoTranscription('piano-transcription', 16000),
+  mt3('mt3', 16000);
+
+  final String id;
+  final int nativeRate;
+  const CrispAsrModel(this.id, this.nativeRate);
+
+  String get displayName => switch (this) {
+        CrispAsrModel.basicPitch => 'Basic Pitch',
+        CrispAsrModel.pianoTranscription => 'Piano transcription',
+        CrispAsrModel.mt3 => 'MT3 (multi-instrument)',
+      };
+}
+
+CrispAsrModel crispAsrModelFromName(String? name) {
+  final n = (name ?? '').trim().toLowerCase();
+  for (final m in CrispAsrModel.values) {
+    if (m.id == n) return m;
+  }
+  return switch (n) {
+    'piano' || 'kong' => CrispAsrModel.pianoTranscription,
+    'mt3' => CrispAsrModel.mt3,
+    _ => CrispAsrModel.basicPitch,
+  };
+}
 const String kBackendEnv = 'CRISPTUNER_TRANSCRIPTION_BACKEND';
 const String kLibEnv = 'CRISPTUNER_CRISPASR_LIB';
 const String kModelEnv = 'CRISPTUNER_BASIC_PITCH_GGUF';
 
 class CrispAsrBackend implements TranscriptionBackend {
   CrispAsrBackend(
-      {String? libraryPath, String? modelPath, bool allowDownload = true});
+      {String? libraryPath,
+      String? modelPath,
+      bool allowDownload = true,
+      CrispAsrModel model = CrispAsrModel.basicPitch});
 
   /// Always null here: there is no FFI to open a library with, and this
   /// returns null rather than throwing for the same reason the FFI half

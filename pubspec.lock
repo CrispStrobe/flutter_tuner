@@ -77,10 +77,10 @@ packages:
     dependency: "direct main"
     description:
       name: crispasr
-      sha256: e62b9ad8971ab2597bd30ac174a8a9ac4bd4ca34f079c4a93c3184960ee2b321
+      sha256: "60416f04a505783aa8af95d0355903ecb587ddb207a06dfe659cc141740809cb"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.33"
+    version: "0.8.35"
   crypto:
     dependency: transitive
     description:

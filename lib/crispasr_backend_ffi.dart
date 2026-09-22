@@ -28,8 +28,55 @@ import 'package:crispasr/crispasr.dart';
 import 'transcription.dart';
 import 'transcription_backend.dart';
 
-/// The backend name in CrispASR's registry, which is also the GGUF it
-/// resolves (`basic-pitch-f16.gguf`, ~110 KB).
+/// The note-event models CrispASR can run, all through one C entry point.
+///
+/// `crispasr_session_piano` serves basic-pitch, piano-transcription and MT3
+/// alike — the parameter is still named `pcm_16k` after the first of them —
+/// so supporting all three is a *choice of model*, not three code paths.
+///
+/// Measured on MusicNet's test split, note-level F1 by
+/// `mir_eval.transcription`'s rules (`bench/REPORT.md` §32):
+///
+/// | model | F1 | onset err p50 | cost per second of audio | size |
+/// | --- | --- | --- | --- | --- |
+/// | `basic-pitch` | 44.2% | 21.4 ms | 0.08× | 110 KB |
+/// | `piano-transcription` | 47.7% (**71.2% on solo piano**) | 19.1 ms | 7.77× | 77 MB |
+/// | `mt3` | **76.5%** | **16.8 ms** | 0.26× | 96 MB |
+///
+/// MT3 is the one to reach for on real music: it finds three quarters of the
+/// notes where Basic Pitch finds under half, it is the only multi-instrument
+/// model of the three, and it still runs at a quarter of real time. Kong's
+/// piano-transcription is stronger *on piano* than its aggregate suggests
+/// and correctly declines on instruments it was not trained for — 9 notes
+/// emitted for 551 references on solo violin.
+enum CrispAsrModel {
+  /// 110 KB. The same model the pure-Dart path runs, for comparing runtimes.
+  basicPitch('basic-pitch', 22050),
+
+  /// 77 MB. Kong / ByteDance high-resolution piano transcription.
+  pianoTranscription('piano-transcription', 16000),
+
+  /// 96 MB, 46.9M parameters. Multi-instrument, and the best score in this
+  /// benchmark by a wide margin.
+  mt3('mt3', 16000);
+
+  /// The name CrispASR's registry and `CrispasrSession.open` both use.
+  final String id;
+
+  /// The rate the model expects. Queried from the session at startup anyway
+  /// — this is only the default for sizing the capture window.
+  final int nativeRate;
+
+  const CrispAsrModel(this.id, this.nativeRate);
+
+  String get displayName => switch (this) {
+        CrispAsrModel.basicPitch => 'Basic Pitch',
+        CrispAsrModel.pianoTranscription => 'Piano transcription',
+        CrispAsrModel.mt3 => 'MT3 (multi-instrument)',
+      };
+}
+
+/// Kept for callers that predate [CrispAsrModel].
 const String kCrispAsrBackendName = 'basic-pitch';
 
 /// Opt in with `CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr`.
@@ -45,6 +92,26 @@ const String kBackendEnv = 'CRISPTUNER_TRANSCRIPTION_BACKEND';
 /// Overrides, for development. Neither is needed any more.
 const String kLibEnv = 'CRISPTUNER_CRISPASR_LIB';
 const String kModelEnv = 'CRISPTUNER_BASIC_PITCH_GGUF';
+
+/// Which model the CrispASR backend should run: `basic-pitch`,
+/// `piano-transcription` or `mt3`. Unset or unrecognised means basic-pitch,
+/// the one that needs no download.
+const String kModelNameEnv = 'CRISPTUNER_CRISPASR_MODEL';
+
+/// Parse [kModelNameEnv], tolerantly. An unknown name falls back rather than
+/// throwing: this reads an environment variable, and a typo should not take
+/// the transcription mode down with it.
+CrispAsrModel crispAsrModelFromName(String? name) {
+  final n = (name ?? '').trim().toLowerCase();
+  for (final m in CrispAsrModel.values) {
+    if (m.id == n) return m;
+  }
+  return switch (n) {
+    'piano' || 'kong' => CrispAsrModel.pianoTranscription,
+    'mt3' => CrispAsrModel.mt3,
+    _ => CrispAsrModel.basicPitch,
+  };
+}
 
 /// Where libcrispasr might be, in the order worth trying.
 ///
@@ -88,8 +155,15 @@ class CrispAsrBackend implements TranscriptionBackend {
   /// download happens on the worker isolate, never on the UI thread.
   final bool allowDownload;
 
+  /// Which model to run. Defaults to the smallest, because it is the one
+  /// that needs no download.
+  final CrispAsrModel model;
+
   CrispAsrBackend(
-      {this.libraryPath, this.modelPath, this.allowDownload = true});
+      {this.libraryPath,
+      this.modelPath,
+      this.allowDownload = true,
+      this.model = CrispAsrModel.basicPitch});
 
   /// The backend when the user has opted in, or **null** — never a throw.
   static CrispAsrBackend? fromEnvironment() {
@@ -102,6 +176,7 @@ class CrispAsrBackend implements TranscriptionBackend {
     final backend = CrispAsrBackend(
       libraryPath: _nullIfEmpty(env[kLibEnv]),
       modelPath: _nullIfEmpty(model),
+      model: crispAsrModelFromName(env[kModelNameEnv]),
     );
     return backend.isAvailable ? backend : null;
   }
@@ -110,10 +185,10 @@ class CrispAsrBackend implements TranscriptionBackend {
       (s == null || s.isEmpty) ? null : s;
 
   @override
-  String get id => 'basic-pitch-crispasr';
+  String get id => '${model.id}-crispasr';
 
   @override
-  String get displayName => 'Basic Pitch (CrispASR/ggml)';
+  String get displayName => '${model.displayName} (CrispASR/ggml)';
 
   bool? _available;
 
@@ -130,12 +205,15 @@ class CrispAsrBackend implements TranscriptionBackend {
     try {
       final lib = DynamicLibrary.open(libraryPath ?? crispAsrLibPath());
       if (modelPath != null) return File(modelPath!).existsSync();
-      return registryLookup(kCrispAsrBackendName, lib: lib) != null;
+      return registryLookup(model.id, lib: lib) != null;
     } catch (_) {
       return false;
     }
   }
 
+  /// The capture path decimates to 22.05 kHz for every model; a model that
+  /// wants 16 kHz is resampled on the worker isolate rather than forcing a
+  /// second decimation chain into the audio thread.
   @override
   int get inputSampleRate => BasicPitchGeometry.sampleRate;
 
@@ -177,7 +255,7 @@ class CrispAsrBackend implements TranscriptionBackend {
       _isolate = await Isolate.spawn(
         _workerMain,
         _WorkerStart(_fromWorker!.sendPort, libraryPath ?? crispAsrLibPath(),
-            modelPath, allowDownload),
+            modelPath, allowDownload, model.id),
         debugName: 'crispasr-basic-pitch',
       );
       final answer = await ready.future;
@@ -218,8 +296,9 @@ class _WorkerStart {
   final String libPath;
   final String? modelPath;
   final bool allowDownload;
-  const _WorkerStart(
-      this.reply, this.libPath, this.modelPath, this.allowDownload);
+  final String backend;
+  const _WorkerStart(this.reply, this.libPath, this.modelPath,
+      this.allowDownload, this.backend);
 }
 
 class _WorkerError {
@@ -238,12 +317,12 @@ const double _tailSeconds =
 ///
 /// Runs on the worker isolate because the download is blocking network I/O
 /// and the model is only ~110 KB but the principle is the point.
-String? _resolveModel(
-    DynamicLibrary lib, String? explicit, bool allowDownload) {
+String? _resolveModel(DynamicLibrary lib, String? explicit,
+    bool allowDownload, String backend) {
   if (explicit != null && explicit.isNotEmpty) {
     return File(explicit).existsSync() ? explicit : null;
   }
-  final entry = registryLookup(kCrispAsrBackendName, lib: lib);
+  final entry = registryLookup(backend, lib: lib);
   if (entry == null) return null; // this build has no basic-pitch registered
   final dir = cacheDir(lib: lib);
   if (dir != null) {
@@ -261,23 +340,30 @@ void _workerMain(_WorkerStart start) {
 
   try {
     final lib = DynamicLibrary.open(start.libPath);
-    final model = _resolveModel(lib, start.modelPath, start.allowDownload);
+    final model = _resolveModel(
+        lib, start.modelPath, start.allowDownload, start.backend);
     if (model == null) {
-      start.reply.send(const _WorkerError(
-          'no basic-pitch GGUF: not cached and not downloadable'));
+      start.reply.send(_WorkerError(
+          'no ${start.backend} GGUF: not cached and not downloadable'));
       inbox.close();
       return;
     }
     session = CrispasrSession.open(model,
-        libPath: start.libPath, backend: kCrispAsrBackendName, nThreads: 2);
+        libPath: start.libPath, backend: start.backend, nThreads: 2);
     // Ask, do not assume: a future GGUF at another rate would otherwise be
     // fed audio at the wrong speed and transpose every note silently.
+    // 0 is the sentinel for "this backend has no piano arm" (§17.2) — it is
+    // a capability probe that never throws, so an unchecked read turns a
+    // wrong model into a silent per-window failure later instead of a clear
+    // one now. An earlier version of this file threw when the rate did not
+    // match; generalising to three models dropped that check, and this is it
+    // restored in the form the three models actually need.
     final wanted = session.pianoSampleRate;
-    if (wanted > 0) rate = wanted;
-    if (rate != BasicPitchGeometry.sampleRate) {
-      throw StateError('model wants $rate Hz, but the capture path decimates '
-          'to ${BasicPitchGeometry.sampleRate}');
+    if (wanted <= 0) {
+      throw StateError('${start.backend} reports no piano arm in this '
+          'libcrispasr build (pianoSampleRate == 0)');
     }
+    rate = wanted;
   } catch (e) {
     session?.close();
     start.reply.send(_WorkerError('$e'));
@@ -296,11 +382,34 @@ void _workerMain(_WorkerStart start) {
     if (message is! Float64List) return;
     final stopwatch = Stopwatch()..start();
     try {
-      final pcm = Float32List(message.length);
-      for (int i = 0; i < pcm.length; i++) {
-        pcm[i] = message[i];
+      // The capture path always delivers 22.05 kHz. basic-pitch wants that;
+      // piano-transcription and MT3 want 16 kHz, so they are resampled here
+      // rather than forcing a second decimation chain onto the audio thread.
+      // Linear is adequate downsampling a band-limited signal by 0.73.
+      final Float32List pcm;
+      if (rate == BasicPitchGeometry.sampleRate) {
+        pcm = Float32List(message.length);
+        for (int i = 0; i < pcm.length; i++) {
+          pcm[i] = message[i];
+        }
+      } else {
+        final ratio = BasicPitchGeometry.sampleRate / rate;
+        pcm = Float32List((message.length / ratio).floor());
+        for (int i = 0; i < pcm.length; i++) {
+          final x = i * ratio;
+          final j = x.floor();
+          final t = x - j;
+          final a = message[j];
+          final b = j + 1 < message.length ? message[j + 1] : a;
+          pcm[i] = a + (b - a) * t;
+        }
       }
-      final events = session!.pianoNotes(pcm);
+      // pianoNotesWithPrograms rather than pianoNotes: MT3's whole advantage
+      // is that it says WHICH instrument played each note, and until crispasr
+      // 0.8.35 that was discarded at the C ABI. Against an older library, or
+      // a model that identifies no instrument, every program is -1 — the call
+      // degrades rather than needing a capability probe.
+      final events = session!.pianoNotesWithPrograms(pcm);
       final windowMs = 1000.0 * pcm.length / rate;
       final from = windowMs - _tailSeconds * 1000;
 
@@ -314,6 +423,7 @@ void _workerMain(_WorkerStart start) {
           e.midi,
           (e.velocity / 127).clamp(0.0, 1.0),
           e.onMs >= from ? 1.0 : 0.0,
+          program: e.program,
         ));
       }
       notes.sort((a, b) => b.strength.compareTo(a.strength));

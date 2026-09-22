@@ -23,4 +23,4 @@ dependencies:
   # The ggml runtime, for bin/runtime_compare.dart only. FFI-only: it needs
   # libcrispasr present at run time, which is exactly the packaging cost the
   # comparison is about — `pub get` succeeds anywhere, the tool does not.
-  crispasr: ^0.8.33
+  crispasr: ^0.8.35

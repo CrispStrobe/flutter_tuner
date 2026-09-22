@@ -248,6 +248,26 @@ void main() {
     });
   });
 
+  group('TranscribedNote.program', () {
+    test('defaults to "no instrument", not to piano', () {
+      // -1 rather than 0, because 0 is Acoustic Grand Piano in General MIDI
+      // and would be indistinguishable from a real answer.
+      const n = TranscribedNote(60, 0.9, 0.1);
+      expect(n.program, -1);
+      expect(n.hasInstrument, isFalse);
+    });
+
+    test('carries a real program when the model gives one', () {
+      const violin = TranscribedNote(60, 0.9, 0.1, program: 40);
+      expect(violin.hasInstrument, isTrue);
+      expect(violin.program, 40);
+      // Percussion is 128, outside the 0-127 GM range, and still counts as
+      // an identification.
+      const drum = TranscribedNote(38, 0.9, 0.1, program: 128);
+      expect(drum.hasInstrument, isTrue);
+    });
+  });
+
   group('poolWorkersFor', () {
     test('never returns one — one worker is worse than none', () {
       // A single worker pays the per-conv message copy and gains no
@@ -352,6 +372,32 @@ void main() {
               .isAvailable,
           isFalse);
       expect(() => CrispAsrBackend.fromEnvironment(), returnsNormally);
+    });
+
+    test('every registry model is selectable and names itself', () {
+      // §32: all three hang off crispasr_session_piano, so supporting them is
+      // a choice of model rather than three code paths. A new enum value with
+      // no id or no display name is the failure this catches.
+      for (final m in CrispAsrModel.values) {
+        expect(m.id, isNotEmpty);
+        expect(m.displayName, isNotEmpty);
+        expect(m.nativeRate, anyOf(16000, 22050));
+        expect(CrispAsrBackend(model: m).id, '${m.id}-crispasr');
+      }
+      expect(CrispAsrModel.values.map((m) => m.id),
+          containsAll(['basic-pitch', 'piano-transcription', 'mt3']));
+    });
+
+    test('an unknown model name falls back rather than throwing', () {
+      // It reads an environment variable; a typo must not take the
+      // transcription mode down with it.
+      expect(crispAsrModelFromName(null), CrispAsrModel.basicPitch);
+      expect(crispAsrModelFromName('nonsense'), CrispAsrModel.basicPitch);
+      expect(crispAsrModelFromName('mt3'), CrispAsrModel.mt3);
+      expect(crispAsrModelFromName('  MT3 '), CrispAsrModel.mt3);
+      expect(crispAsrModelFromName('piano-transcription'),
+          CrispAsrModel.pianoTranscription);
+      expect(crispAsrModelFromName('kong'), CrispAsrModel.pianoTranscription);
     });
 
     test('agrees with the ONNX backend on geometry', () {
