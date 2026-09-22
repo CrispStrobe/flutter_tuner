@@ -490,14 +490,41 @@ sh("free -g || true")
 
 # `--models` is the mounted dataset: rmvpe.onnx, fcpe.onnx and the two mel
 # assets sit flat in it, which is the layout `loadNeural` expects.
-cmd = (f"{{DART}} run bin/cometbeat.dart --corpus {{CORPUS}} --data {{DATA}} "
-       f"--models {{models}} --engines {{ENGINES}} --subset {{SUBSET}}")
-# Not check=True: an OOM kill part-way through is a RESULT here, not a
-# harness failure, and the per-file progress lines say exactly how far the
-# run got. Swallowing the exit code would be wrong; hiding the log would be
-# worse.
-print(f"$ {{cmd}}", flush=True)
-rc = subprocess.run(cmd, shell=True, cwd=bench).returncode
+print("model dir contains:", sorted(os.listdir(models)), flush=True)
+
+
+def run_dart(limit=0):
+    """One `bin/cometbeat.dart` run, with its two streams merged.
+
+    `2>&1` and `stdbuf -oL` are not decoration. The first attempt at this
+    kernel came back with exit 255 and an EMPTY log: Dart block-buffers
+    stdout when it is a pipe, so everything the run had printed died in the
+    buffer with the process, and whatever killed it was on a stream this
+    reader was not merging. A failure whose log is empty is indistinguishable
+    from a failure that never started.
+    """
+    cmd = (f"stdbuf -oL -eL {{DART}} run bin/cometbeat.dart --corpus {{CORPUS}} "
+           f"--data {{DATA}} --models {{models}} --engines {{ENGINES}} "
+           f"--subset {{SUBSET}}" + (f" --limit {{limit}}" if limit else "") +
+           " 2>&1")
+    print(f"$ {{cmd}}", flush=True)
+    # Not check=True: an OOM kill part-way through is a RESULT here, not a
+    # harness failure, and the per-file progress lines say exactly how far
+    # the run got. Swallowing the exit code would be wrong; hiding the log
+    # would be worse.
+    return subprocess.run(cmd, shell=True, cwd=bench).returncode
+
+
+# One file first. A configuration error — a missing model, a path the
+# `--models` loader does not recognise — costs a minute this way instead of
+# the whole session, and the full run is only attempted once one file has
+# come out the other end.
+smoke = run_dart(limit=1)
+print(f"\\nsmoke run (1 file) exited {{smoke}}", flush=True)
+if smoke != 0:
+    raise SystemExit(f"smoke run failed ({{smoke}}); not spending the session")
+
+rc = run_dart()
 print(f"\\ncometbeat.dart exited {{rc}}", flush=True)
 sh("free -g || true")
 if rc != 0:
