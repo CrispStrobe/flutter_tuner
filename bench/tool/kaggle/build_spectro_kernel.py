@@ -315,7 +315,9 @@ def build_spectro(account="chr1s4"):
         "language": "python",
         "kernel_type": "script",
         "is_private": "true",
-        "enable_gpu": "true",
+        # CPU: nothing here uses a GPU, and a CPU worker turns out to get
+        # internet after all (see build_cometbeat).
+        "enable_gpu": "false",
         "enable_internet": "true",
         "competition_sources": [],
         "dataset_sources": [f"{account}/crisptuner-onnx"],
