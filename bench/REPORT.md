@@ -3461,6 +3461,163 @@ parameter count and been wrong.
 ---
 ---
 
+## 36. The same two models on native ONNX Runtime — and whether ggml is the answer
+
+§35.5 measured hFT-Transformer and Onsets & Frames in the **pure-Dart**
+runtime and drew a conclusion about what can ship without a native library.
+It did not put both through **native ONNX Runtime** on the same clip, and it
+left the follow-up question open: CrispASR already has a ggml runtime, so
+would converting either model to ggml be worth doing?
+
+Both answers turn out to depend on something neither model's size shows,
+and getting at it needed a profiler and two corrections.
+
+### 36.1 What native ORT costs
+
+30 s of MusicNet `2191.wav`, hFT on the pruned graph, both models in one
+process, this VPS (4 shared cores, under load):
+
+| threads | hFT | Onsets & Frames |
+| --- | --- | --- |
+| 1 | 2.888× real time | 0.100× |
+| 2 | 1.554× | **0.055×** |
+| 4 | **1.359×** | 0.055× |
+
+Whole-process peak RSS, both models plus librosa: **1.33 GB**.
+
+Set against §35.5's pure-Dart column:
+
+| model | pure Dart | native ORT (4 threads) | factor |
+| --- | --- | --- | --- |
+| Onsets & Frames | ~0.8× (extrapolated) | **0.055×** | ~15× |
+| hFT-Transformer | **killed at 3.63 GB RSS** | 1.359×, inside 1.33 GB | runs at all |
+
+Two things change. **O&F is fifteen times cheaper under ORT**, which turns
+"about real time on a quiet machine" into eighteen times faster than real
+time — the difference between an offline transcriber and one that could keep
+up with a live feed. And **hFT runs at all**, because ORT reuses buffers
+where `onnx_runtime_dart` materialises every intermediate; the 3.63 GB that
+killed the Dart process is a property of that runtime, not of the model.
+
+It is still 1.36× real time on four cores. §35.5's conclusion survives a
+change of runtime: hFT is not a phone model.
+
+### 36.2 Where hFT's time actually goes
+
+Profiling the pruned graph by op (`tool/ort_profile.py`, ORT's own profiler,
+4 threads, 192-frame window):
+
+| op | ms/window | share | nodes |
+| --- | --- | --- | --- |
+| MatMul | 1988 | 66% | 78 |
+| Add | 245 | 9.1% | 89 |
+| FusedMatMul | 173 | 6.4% | 11 |
+| Transpose | 161 | 6.0% | 51 |
+| LayerNormalization | ~110 | 4.1% | 20 |
+| Softmax | ~100 | 3.7% | 11 |
+| Conv | 54 | 1.7% | 1 |
+
+Two thirds in matrix multiply. The question that decides the ggml case is
+not that share but what is *in* those multiplies, and it took two wrong
+answers to get right, both recorded here because the trap is reusable.
+
+**ORT reports only the activation operand's shape when the other operand is
+an initializer.** A weight GEMM therefore arrives in the profile with one
+shape where attention arrives with two. The first version of `ort_profile.py`
+treated a missing second shape as an unreadable node and skipped it — which
+silently discarded **268 of hFT's 356 MatMul nodes and 1562 of its 1988 ms**,
+and reported the survivors as "100% attention, nothing to quantise". That
+conclusion was drafted into this section before the arithmetic was checked
+against the op table and did not survive it. The fix is to read the weight
+shapes out of the model file and match them to nodes by name.
+
+With that done:
+
+| operand shapes | kind | n | GFLOP/window | GFLOP/s |
+| --- | --- | --- | --- | --- |
+| [128, 256, 256] × [256, 256] | weights | 18 | 77.31 | 133.0 |
+| [128, 256, 256] × [256, 512] | weights | 3 | 25.77 | 136.6 |
+| [128, 256, 512] × [512, 256] | weights | 3 | 25.77 | 151.1 |
+| [128, 88, 256] × [256, 256] | weights | 14 | 20.67 | 113.5 |
+| [88, 128, 256] × [256, 256] | weights | 12 | 17.72 | 118.0 |
+| [128, 4, 256, 64] × [128, 4, 64, 256] | attention | 3 | 12.88 | 131.1 |
+| [128, 4, 256, 256] × [128, 4, 256, 64] | attention | 3 | 12.88 | 156.9 |
+
+**248.6 GFLOP of MatMul per window**, and the split is the opposite of the
+first reading: **83.5% weight GEMM** (207.5 GFLOP, the Q/K/V and feed-forward
+projections) against **16.5% attention** (41.1 GFLOP, the Q·Kᵀ and P·V
+products that carry a batch dimension on both operands and so have no weight
+in them at all).
+
+A window is 128 new frames at a 256-sample hop on 16 kHz audio — 2.048 s. So
+**hFT needs about 121 GFLOP/s of matrix multiply to hold real time**, and ORT
+achieves 125 GFLOP/s on this box's four shared cores. That is the whole
+explanation of the 1.36× measured in §36.1: it is not overhead, it is
+arithmetic, and the model is running at the machine's speed.
+
+### 36.3 So: ggml is worth it for both, for different reasons
+
+**Onsets & Frames: yes, and mostly for size.** Its op mix has no attention in
+it at all:
+
+| op | ms/30 s pass | share |
+| --- | --- | --- |
+| Conv | 595 | 46.0% |
+| LSTM | 371 | 28.7% |
+| MatMul | 243 | 18.8% (0% attention) |
+| MaxPool | 36 | 2.8% |
+
+**94% of it is weight-bearing**, every MatMul included, and speed is already
+not the objection — 0.055× real time under ORT, eighteen times faster than
+the audio. The objection to O&F is the one §35 named, **106 MB of download**,
+and that is what quantisation fixes: q8 halves it, q4_0 takes it to roughly
+27 MB. A model in that size class is one an app can ship.
+
+**hFT-Transformer: yes on the arithmetic, and it is closer than §35.5
+implied.** 83.5% of its MatMul is weight GEMM, so int8 kernels apply to the
+dominant cost rather than to a rounding error, and on CPU a good q8 GEMM is
+typically two to three times fp32. That would take 1.36× real time to
+somewhere near 0.5×, and the 22 MB of weights to about 6 MB.
+
+What it does *not* fix is the floor. 121 GFLOP/s at fp32 is a desktop
+number; a phone big core is 20–50 GFLOP/s fp32 and perhaps 100–200 GOPS at
+int8, so hFT at q8 is **borderline on a phone rather than impossible** —
+which is a different claim from §35.5's, and the honest one. §35.5 measured
+a 3.63 GB OOM in `onnx_runtime_dart` and concluded "not a phone model"; that
+was true of that runtime and overstated as a property of the model.
+
+The rule worth keeping out of all this is the one §31.2 got wrong in the
+other direction: **parameter count predicts neither the speed nor the memory
+of a transformer.** §31.2 scaled Kong's cost by parameters and put hFT at
+"near ~19× real time". hFT has one eighth of Kong's parameters and does 249
+GFLOP per 2 s of audio, because its arithmetic is set by sequence length —
+256 frequency tokens per frame — and not by weight count.
+
+**Recommendation, in order:**
+
+1. **O&F to ggml in CrispASR**, as a third arm beside basic-pitch and
+   piano-transcription, at q4_0. That buys 69.1% F1 on solo piano against
+   Basic Pitch's 57.5%, for something like 27 MB, on every platform CrispASR
+   builds for. `src/piano_transcription.cpp` is the template and is not
+   hypothetical: it is Kong's model in exactly this shape — a convolutional
+   stack in a ggml graph with the recurrent layers computed by hand outside
+   it, because ggml has no fused RNN op. O&F is that structure with BiLSTM
+   where Kong has BiGRU.
+2. **O&F under native ORT** wherever one is already linked — 0.055× real
+   time today, with no conversion work at all.
+3. **hFT to ggml second, and measured before it is believed.** The case is
+   real but it is a bet on a 2–3× int8 GEMM speedup against a 121 GFLOP/s
+   floor, and this report has now twice been wrong about this model's cost
+   in both directions. It buys 1.4 points of solo-piano F1 over O&F. Do O&F
+   first; let hFT wait for a measurement rather than an argument.
+
+What would move hFT's floor is a change to the model rather than the
+runtime — a shorter frequency-token sequence, or attention restricted to a
+local window. That is a retraining question and outside what this report can
+settle.
+
+---
+
 *Harness, exact commands and how the copied core is kept in sync:
 [`README.md`](README.md). Raw aggregates:
 `results/*.json`, gitignored — regenerate with `bin/bench.dart`.*
