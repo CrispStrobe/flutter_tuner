@@ -166,7 +166,7 @@ List<Note> _runOnnx(OnnxModel model, Float64List audio44k) {
 /// of the new clock would re-introduce the identical 8.53 ms per window in
 /// the same direction, which is the exact shape of the bug twice over. The
 /// correction was removed when `tool/sync_cometbeat.sh` pulled the fixed
-/// file in; §34.6 records what the refreshed measurement says.
+/// file in; §35.7 records what the refreshed measurement says.
 List<Note> _runCometBeat(OnnxModel model, Float64List audio44k) => [
       for (final n in cb.basicPitchTranscribe(audio44k, model: model))
         (onsetMs: n.onMs, offsetMs: n.offMs, midi: n.midi.toDouble())

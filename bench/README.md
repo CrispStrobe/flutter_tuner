@@ -126,7 +126,7 @@ of the maths measures nothing.
 | `lib/metrics.dart` | RPA, octave and gross error rates, voicing recall and false alarm, and cent-error histograms. |
 | `lib/jams.dart`, `lib/wav.dart` | Just enough of each format. |
 | `lib/mel.dart` | A log-mel front end matching `torchaudio.transforms.MelSpectrogram` — periodic Hann, HTK mel scale, Slaney filter normalisation — plus torchaudio's `sinc_interp_hann` resampler. Two of the exported models take a spectrogram rather than audio, and this is it. Checked against librosa by `bin/mel_check.dart` + `tool/mel_reference.py`. |
-| `lib/hft.dart`, `lib/oaf.dart` | hFT-Transformer and Onsets & Frames: the window arithmetic and each model's own note decoder, ported from its inference code. REPORT.md §34. |
+| `lib/hft.dart`, `lib/oaf.dart` | hFT-Transformer and Onsets & Frames: the window arithmetic and each model's own note decoder, ported from its inference code. REPORT.md §35. |
 | `bin/spectro_timing.dart` | What those two cost in the pure-Dart runtime, with the shipped Basic Pitch co-measured so the number survives a loaded box. |
 | `bin/spectro_eval.dart`, `tool/spectro_activations.py` | Note-level scoring on MusicNet from cached ORT activations — the model runs where it is fast, the decoder and the metric stay here. |
 | `tool/prune_hft.py` | Cuts hFT's graph to the four outputs a transcriber reads. Without it the pure-Dart runtime cannot load the graph on a 7.7 GB box. |
