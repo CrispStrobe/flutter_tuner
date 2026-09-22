@@ -1,0 +1,16 @@
+{
+ "id": "chr1str/crisptuner-cometbeat-cello",
+ "title": "CrispTuner CometBeat cello",
+ "code_file": "cometbeat_eval.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": "true",
+ "enable_gpu": "false",
+ "enable_internet": "true",
+ "competition_sources": [],
+ "dataset_sources": [
+  "chr1str/crisptuner-onnx"
+ ],
+ "kernel_sources": [],
+ "model_sources": []
+}

@@ -3347,7 +3347,7 @@ within-run comparison is safe**; do not difference these against §26.
 | cb-pyin+hmm | 78.20 | 89.25 | 2.01 | 8.74 | 8.70 | 86.05 | 37.13 |
 | cb-pyin+hmm-mask | 78.28 | 89.34 | 2.48 | 8.18 | 3.20 | 86.05 | 37.13 |
 | **cb-fcpe** | **90.80** | **92.57** | **0.41** | **7.02** | 3.35 | 96.81 | 60.61 |
-| cb-rmvpe | *not measurable here — see below* | | | | | | |
+| cb-rmvpe | *not measurable on this box — see below; measured on a 31 GB Kaggle worker in §37.4, and under native ORT in §37.2* | | | | | | |
 
 **MUSERC cello**, 109 takes (RMVPE: the first 55, for the same reason):
 
@@ -3405,10 +3405,20 @@ that reason alone rather than for anything about their accuracy. Chunking
 RMVPE's input would fix it and would no longer be the engine CometBeat
 ships, so it was not done.
 
+**Correction, from §37.2.** "Not measurable here" was too broad: it is not
+measurable *in that runtime*. Under native ONNX Runtime the identical
+un-chunked whole-clip forward costs **0.133× real time on one thread in
+1.2 GB**. The 3.0–3.8 GB and the OOM are properties of `onnx_runtime_dart`,
+exactly as §35.5 found for hFT and §36.1 confirmed for it — three models now,
+not one anecdote. **§37.4 then ran the whole 180-file GuitarSet pass on a
+31 GB Kaggle worker and it finished**: 79.96% RPA, and a peak RSS of
+**16.68 GB** — so the 3.5 GB here was where the kernel killed it, not what it
+needed, and the guitar row below is now filled rather than empty.
+
 | | cost vs real time, 1 core | peak RSS | verdict for a tuner |
 | --- | --- | --- | --- |
 | **FCPE**, 43 MB | **≈0.60×** | 1.2 GB | best pitch here; disqualified on voicing as configured |
-| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB, OOM on guitar | no |
+| **RMVPE**, 361 MB | ≈2.4× | 3.0–3.8 GB on cello; **16.68 GB on guitar** (§37.4), OOM here | no |
 
 (The per-file wall-clock figures behind those ratios were taken on a box at
 load 20–28 that gave the runs 49–79% of one core; the ratios are normalised
@@ -3681,6 +3691,378 @@ accumulation and requires them to agree — written before the fix and watched
 to fail at relative difference 1.0 — and filed as CrispASR issue #453 with
 the reproduction and the options deliberately not taken.
 
+
+---
+
+## 37. The same four models, off the shared box
+
+§35 measured four models and was explicit about what it could not finish.
+Three things were left open, every one of them a property of **this VPS** —
+shared, memory-limited, load-contaminated — rather than of any model:
+
+* **RMVPE on GuitarSet: not measured at all.** One 22-second file reached
+  3.5 GB of resident memory in `onnx_runtime_dart` and was OOM-killed.
+* **GuitarSet FCPE was 40 files of 180, MUSERC RMVPE 55 takes of 109**, both
+  sorted prefixes, with §35.6's own warning that `cb-pyin` moves 82.63 →
+  80.45 between the prefix and the full corpus — so those tables were safe
+  to read only column against column.
+* **hFT and O&F's MusicNet accuracy had been measured once**, by one code
+  path, on this box.
+
+This section is those three, run on Kaggle. Every number below names the
+machine it came from, and where a Kaggle figure disagrees with a VPS figure
+for the same thing, both are given.
+
+`tool/kaggle/build_spectro_kernel.py` generates the kernels the way
+`build_kernel.py` already did: a Kaggle preamble concatenated with the local
+evaluators **verbatim**, because a script kernel uploads only its
+`code_file` and a second copy of an evaluation is a second thing to be
+wrong. The corpora are fetched from Zenodo inside each kernel and none is
+mirrored as a Kaggle dataset — the licence note in CLAUDE.md is that they
+are for local evaluation only.
+
+### 37.1 hFT and O&F, decoded and scored a second way
+
+§35.3's MusicNet table came from `tool/spectro_activations.py` (native ORT)
+feeding `bin/spectro_eval.dart`, whose decoders (`lib/hft.dart`,
+`lib/oaf.dart`) and metric (`lib/note_metrics.dart`) are this repository's
+own. The Kaggle run shares none of that below the model: `tool/spectro_notes.py`
+re-implements both decoders in numpy and scores with **`mir_eval.transcription`
+itself**. An agreement therefore says both ports are sound; a disagreement
+would have localised to the decoder or the metric rather than to the model.
+
+All ten test pieces, 24.7 minutes, 13,589 reference notes:
+
+| | §35.3 — Dart decoder, `note_metrics.dart`, VPS | §37.1 — numpy decoder, `mir_eval`, Kaggle |
+| --- | --- | --- |
+| hFT F1 | 52.2% | **52.2%** |
+| O&F F1 | 49.6% | **49.6%** |
+| hFT, solo piano | 70.5% | **70.5%** |
+| O&F, solo piano | 69.1% | **69.1%** |
+| hFT, everything else | 44.5% | 44.6% |
+| O&F, everything else | 40.4% | **40.4%** |
+| hFT, offsets required | 18.5% | **18.5%** |
+| O&F, offsets required | 13.8% | **13.8%** |
+| hFT onset err p50 | 20.6 ms | **20.6 ms** |
+| O&F onset err p50 | 20.5 ms | **20.5 ms** |
+
+Per piece, the largest disagreement anywhere is **0.1 point** (2106, 2298,
+2556, 2628 for hFT; 2298, 2416 for O&F), which is rounding on a different
+accumulation order. §35.4's threshold sweep reproduces too — hFT flat at
+52.2% across 0.2–0.7, O&F peaking at 0.3 (51.7%), and hFT with the
+`ignore_zero` velocity gate removed climbing 45.1 → 47.1 → 49.9 → 52.1
+against §35.4's 45.1 → 47.0 → 49.8 → 52.1.
+
+**So §35.3 and §35.4 stand, and stand on two independent implementations.**
+That is the strongest form those numbers have been in: the Dart decoders
+are a port of each model's own inference code, the numpy ones are a second
+port, `note_metrics.dart` was checked against `mir_eval` in §32.3 and is now
+checked against it again on real output. §12.1 is this report's record of
+how long a silent front-end or decoder error can survive; this is what it
+costs to rule one out.
+
+The two traps §35.2 found were carried across rather than rediscovered:
+O&F's output names are shifted by one, so the tensor named `velocity` is the
+real frame head, and hFT's `mode_velocity='ignore_zero'` drops any note
+whose velocity head reads zero at the onset frame.
+
+### 37.2 What the four cost under native ONNX Runtime
+
+§36.1 measured hFT and O&F under native ORT with **both models in one
+process**, and reported a single whole-process peak RSS of 1.33 GB. That
+figure belongs to the run rather than to either model, which §36.1 says. This
+is the same measurement taken one model per process, so the memory is
+attributable, and extended to all four.
+
+30 s of MusicNet `2191.wav`, hFT on the pruned graph, `intra_op` swept,
+`inter_op` 1, **this VPS** (4 shared cores, under load):
+
+| model | 1 thread | 2 | 4 | peak RSS, 1 thread | the model's share |
+| --- | --- | --- | --- | --- | --- |
+| hFT-Transformer | 2.803× | 1.461× | 1.603× | 1018 MB | 666 MB |
+| Onsets & Frames | 0.091× | 0.051× | 0.034× | 661 MB | 328 MB |
+| RMVPE | 0.133× | 0.072× | 0.053× | 1227 MB | **1067 MB** |
+| FCPE | 0.056× | 0.031× | 0.026× | 247 MB | 87 MB |
+
+"The model's share" is the RSS after the session and the run minus the RSS
+after the input was built and before the session existed — the front end and
+the interpreter are on both sides of that subtraction, so what is left is the
+graph, the arena and the intermediates.
+
+**These do not replace §36.1's numbers; both stand.** §36.1 has hFT at
+2.888× / 1.554× / 1.359× and O&F at 0.100× / 0.055× / 0.055×; this run has
+2.803× / 1.461× / 1.603× and 0.091× / 0.051× / 0.034×. Same machine, same
+clip, same graph, minutes apart — the spread is what a shared four-core box
+does to a four-thread measurement, and the 4-thread hFT cell (1.359× against
+1.603×) is where a loaded box shows up most, because that is the arm with the
+least headroom. Neither is more correct; the agreement to within load noise
+is the useful part, and it is why §37.2's per-model attribution can be
+trusted rather than treated as a third opinion.
+
+**The new rows are the point.** §35.6 reported RMVPE at "≈2.4× real time on
+one core" and 3.0–3.8 GB, OOM-killed on guitar. Under native ORT the same
+graph, the same un-chunked whole-clip forward, costs **0.133× real time on
+one thread in 1.2 GB.** Nothing about the model changed. That is an
+eighteen-fold difference in throughput and a three-fold one in memory,
+attributable entirely to the runtime.
+
+That makes three models, arrived at independently:
+
+| model | pure Dart (`onnx_runtime_dart`) | native ORT |
+| --- | --- | --- |
+| hFT-Transformer, 22 MB | killed at 3.63 GB (§35.5) | runs, 1018 MB, 2.80× (1 thread) |
+| **RMVPE, 361 MB** | **OOM-killed on GuitarSet (§35.6)**, 3.0–3.8 GB on cello | **runs, 1227 MB, 0.133×** |
+| Onsets & Frames, 106 MB | ~0.8× real time (§35.5) | 661 MB, 0.091× |
+
+§35.5 and §35.6 each called their own case "a property of that runtime, not
+of the model," and each was reasoning from one instance. It is now a pattern
+across three models from three architectures — a transformer, a conv U-Net,
+and a conv+BiLSTM stack — and the shared cause is the one §35.5 named:
+`onnx_runtime_dart` materialises every intermediate tensor with no in-place
+execution and no buffer pooling, so its memory is governed by activations
+where ORT's is governed by the arena's high-water mark.
+
+**§35.6's "not measurable here" should be read as "not measurable in that
+runtime."** It is measurable, and §37.3 measures it.
+
+The two figures for the same thing, side by side:
+
+| model | 1 thread | 2 | 4 | peak RSS (1 thread) | model's share |
+| --- | --- | --- | --- | --- | --- |
+| hFT, **VPS** | 2.803× | 1.461× | 1.603× | 1018 MB | 666 MB |
+| hFT, **Kaggle** | 2.557× | 1.406× | **1.200×** | 862 MB | 545 MB |
+| O&F, **VPS** | 0.091× | 0.051× | 0.034× | 661 MB | 328 MB |
+| O&F, **Kaggle** | 0.083× | 0.042× | 0.037× | 654 MB | 356 MB |
+| RMVPE, **VPS** | 0.133× | 0.072× | 0.053× | 1227 MB | 1067 MB |
+| RMVPE, **Kaggle** | 0.132× | 0.070× | 0.062× | 1522 MB | 1348 MB |
+| FCPE, **VPS** | 0.056× | 0.031× | 0.026× | 247 MB | 87 MB |
+| FCPE, **Kaggle** | 0.052× | 0.026× | 0.023× | 264 MB | 90 MB |
+
+The Kaggle worker is a 4-core CPU-only instance with 31 GB, nothing else
+running; the VPS is 4 shared cores under load. They agree to within a few
+percent everywhere **except hFT at four threads**, where the VPS gives 1.603×
+and Kaggle 1.200× — the one arm with no spare core, and therefore the one
+where a neighbour costs the most. That is the same place §36.1 and §37.2
+disagree on the VPS, for the same reason, and it is the honest width of a
+four-thread number taken on a shared box.
+
+RMVPE's memory goes the other way: 1522 MB on Kaggle against 1227 MB here.
+ORT's arena grows to what it is allowed rather than to what it needs, so a
+roomier machine gives a larger high-water mark for identical work. It is a
+ceiling, not a requirement, and the two figures bracket it.
+
+Over the whole MusicNet test split rather than one clip (Kaggle, 2 threads,
+24.7 minutes of audio): hFT **0.814× real time**, O&F **0.027×**. The
+per-clip figures above include a 15-window hFT extrapolation from one
+invocation; this one is the measured total, and it is the number to quote for
+"what would transcribing a piece cost".
+
+### 37.3 MUSERC cello: the full 109 takes, and what the prefix was hiding
+
+`bin/cometbeat.dart` on a Kaggle CPU worker, CometBeat's own engines through
+`onnx_runtime_dart` — the same runtime, decode and scoring code as §35.6,
+only a different machine. `--subset 55` accumulates the prefix table from the
+same pass, so the two rows below differ **only** in how many takes they
+cover.
+
+First, the reproduction. §35.6's rows come back to the decimal:
+
+| | §35.6 (VPS) | §37.3 (Kaggle) |
+| --- | --- | --- |
+| cb-rmvpe, 55 takes | 77.58 / 98.38 / 0.02 / 1.60 / 5.50 | **77.58 / 98.38 / 0.02 / 1.60 / 5.50** |
+| cb-fcpe, 109 takes | 87.99 / 92.52 / 0.74 / 6.74 / 11.65 | **87.99 / 92.52 / 0.74 / 6.74 / 11.65** |
+
+(RPA / rep / oct / gross / |err| p50.) Identical figures from a different
+machine, a different Dart build and a fresh `pub get` — the pipeline is
+deterministic, and §35.6's cello numbers are not an artefact of this box.
+
+Now the part §35.6 could not see. The full corpus, and the prefix from the
+same run:
+
+| engine | takes | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-rmvpe | first 55 | 77.58 | 98.38 | 0.02 | 1.60 | 5.50 | 78.86 |
+| **cb-rmvpe** | **all 109** | **74.79** | **91.05** | **0.01** | **8.94** | **13.30** | 82.14 |
+| cb-fcpe | first 55 | 94.80 | 99.16 | 0.25 | 0.59 | 4.50 | 95.61 |
+| **cb-fcpe** | **all 109** | **87.99** | **92.52** | **0.74** | **6.74** | **11.65** | 95.10 |
+
+**The prefix was not representative, and §35.6's headline claim for RMVPE
+does not survive it.** §35.6 wrote that RMVPE "reports on 98.38% of the
+frames it answers at with 0.02% octave errors, 1.60% gross and 5.50 cents —
+twice the precision of anything else in that table." On the whole corpus
+that is 91.05%, 8.94% gross and **13.30 cents**: gross errors up 5.6×, the
+cent residual up 2.4×, and no longer twice anyone's precision — it is
+slightly *worse* than FCPE's 11.65.
+
+The cause is visible in the file list. MUSERC's takes sort `amateur_*` before
+`pro_*`, and 55 of 109 is almost exactly the amateur half. **The prefix is
+one player.** Every neural row in §35.6's cello table that was cut at 55 was
+therefore a measurement of the amateur cellist alone, and the professional's
+takes — longer, louder, more vibrato — are where both models lose accuracy.
+FCPE moves the same way over the same boundary (94.80 → 87.99), which is what
+makes it the corpus and not the model.
+
+§35.6 warned that its GuitarSet subset was only safe read column-to-column
+and did not extend that warning to the cello table's RMVPE row. It should
+have. **A sorted prefix of a corpus sorted by performer is a subset of
+performers, not a sample of takes.**
+
+Cost, same run, Dart runtime, Kaggle CPU worker: **cb-rmvpe 8,671 ms per
+take** against a mean take of ~3.7 s (≈2.3× real time, reproducing §35.6's
+≈2.4×), **cb-fcpe 2,349 ms** (≈0.63×, against §35.6's ≈0.60×). Peak RSS for
+the whole 109-take run: **5.38 GB** — higher than §35.6's 3.82 GB because the
+run got further rather than being killed at take 81.
+
+### 37.4 GuitarSet, all 180 solo files
+
+`bin/cometbeat.dart --corpus guitar --subset 40` on Kaggle CPU workers, one
+kernel per engine so an OOM in the expensive one cannot take the cheap one
+with it. Same runtime, decode and scoring as §35.6; only the machine and the
+file count differ.
+
+**FCPE, all 180 solo files** (`chr1str/crisptuner-cometbeat-fcpe-guitarset`,
+Kaggle CPU worker, 50 min):
+
+| engine | files | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-fcpe | first 40 | 90.80 | 92.57 | 0.41 | 7.02 | 3.35 | 96.81 | 60.61 |
+| **cb-fcpe** | **all 180** | **92.04** | **92.89** | **0.31** | **6.80** | **2.95** | **98.69** | **53.88** |
+
+The 40-file prefix row reproduces §35.6 **to the decimal** — 90.80 / 92.57 /
+0.41 / 7.02 / 3.35 / 96.81 / 60.61, every figure — from a different machine
+and a fresh `pub get`, which is the same determinism §37.3 found on cello.
+
+And here the prefix was **pessimistic**, which is the opposite of §37.3's
+cello result and worth noticing: RPA 90.80 → 92.04, octave errors 0.41% →
+0.31%, the cent residual 3.35 → 2.95, and the false-alarm rate 60.61% →
+53.88%. GuitarSet's filenames sort by player *and* style, so a 40-file prefix
+is the first two players' comping-free excerpts; it is a different bias from
+MUSERC's, and it happens to run the other way. **A prefix is not a sample,
+and knowing that does not tell you which direction it is wrong in.**
+
+Two things follow for the tuner.
+
+**§35.6's headline for FCPE survives the full corpus, and grows.** Against
+`cb-pyin`'s 82.63% RPA on the same 180 files (§13, §26), FCPE's 92.04% is
+**+9.4 points**, and its 0.31% octave-error rate against pYIN's 4.59% is a
+**fifteenfold** reduction rather than §35.6's twelvefold. This remains the
+only estimator in this report that answers more often *and* better.
+
+**And the voicing verdict survives too, slightly softened.** 53.88% false
+alarm against the shipped pipeline's 17.07% — better than the prefix's
+60.61%, still more than three times the shipped rate, and still a needle that
+twitches through every rest. §35.6's "a transcription app wants the answer, a
+tuner wants the silence" holds on 180 files as it did on 40.
+
+Cost, same run: **16,293 ms per file** against a mean file of 30.5 s — 0.53×
+real time in the pure-Dart runtime, reproducing §35.6's ≈0.60×. Peak RSS over
+the whole 180-file pass: **1.74 GB**, on files up to 45.7 s.
+
+**RMVPE, all 180 solo files** (`chr1s4/crisptuner-cometbeat-rmvpe-guitarset`,
+Kaggle CPU worker, 2 h 49 min) — **the row §35.6 could not fill at all.** It
+ran, un-chunked, whole-clip, exactly the engine CometBeat ships:
+
+| engine | files | RPA% | rep% | oct% | gross% | \|err\| p50 | VR% | FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cb-rmvpe | first 40 | 63.70 | 86.61 | 0.39 | 13.00 | 5.00 | 68.11 | 44.03 |
+| **cb-rmvpe** | **all 180** | **79.96** | **90.59** | **0.22** | **9.20** | **4.30** | **85.77** | **38.51** |
+
+**Three models, three prefixes, three different biases.** MUSERC's 55-take
+prefix flattered RMVPE (§37.3); GuitarSet's 40-file prefix was mildly
+pessimistic for FCPE; and for RMVPE on the same 40 files it is pessimistic by
+**16.3 points of RPA** — 63.70 against 79.96 — with voicing recall 68.11
+against 85.77. Had this row been filled from its prefix, as it nearly was, it
+would have said RMVPE loses to pYIN by 17 points when the true gap is 3. That
+is now the third worked example, and the rule from §37.3 stands: *a prefix is
+not a sample, and knowing that does not tell you which direction it is wrong
+in.*
+
+**On accuracy, RMVPE is not the win FCPE is.** Against `cb-pyin`'s 82.63% RPA
+on the same 180 files (§13, §26) it is **2.7 points worse**, and against
+FCPE's 92.04% (above) it is 12 points worse. What it does have is the
+cleanest octave column in this report — **0.22%** against pYIN's 4.59% and
+FCPE's 0.31% — and much the best voicing discipline of the three neural
+engines: **38.51%** false alarm against FCPE's 53.88% and pYIN's 53.90%. It
+buys that with recall: it voices only 85.77% of the frames the reference
+calls voiced, where FCPE voices 98.69%. It is the conservative one. For a
+tuner that wants the needle still during a rest, that is the more interesting
+shape — but 38.51% is still more than double the shipped pipeline's 17.07%,
+so it is a better starting point, not an answer.
+
+**And the memory number is the reason this section exists.** Peak RSS for the
+whole pass: **16.68 GB.** The single-file smoke run — one 22.3-second file,
+one process — already peaked at **8.94 GB**. The high-water mark climbed
+file by file to 16.68 GB at file 29, which is `00_SS3-84-Bb` at **45.7 s**,
+the longest in the corpus, and then did not move through the remaining 151
+files — including the five later files of the same 45.7 s length. So this is
+length-driven, not a leak: 16.68 GB is the ceiling a 45.7-second clip pushes
+`onnx_runtime_dart` to, and it stops climbing once the longest file has been
+seen.
+
+That settles the question the VPS could only half-answer. §35.6 recorded
+RMVPE being OOM-killed on GuitarSet at ~3.5 GB; **3.5 GB was where the kernel
+killed it, not what it needed.** It needs five times that. A 31 GB worker has
+the room; nothing this project would ship on does.
+
+**Put beside §37.2, the two numbers make the whole point of this report
+section.** Same model, same 361 MB graph, same un-chunked whole-clip forward,
+same ≈30 s of audio, same Kaggle hardware:
+
+| runtime | wall time | peak RSS |
+| --- | --- | --- |
+| native ONNX Runtime, 1 intra-op thread (§37.2) | **0.132×** real time | **1522 MB** |
+| `onnx_runtime_dart` (this run, mean over 180 files) | **1.83×** real time | **16,680 MB** |
+
+**Fourteen times the time and eleven times the memory, from the runtime
+alone** — and the native column is its *slowest* setting; at 4 intra-op
+threads it is 0.053×, which would make the gap 35-fold. (The Dart side's
+thread count is whatever `onnx_runtime_dart` defaults to and was not pinned,
+so the time ratio is the softer of the two figures; the memory ratio is
+not.) §35.6's "not measurable here" is now corrected twice over: not
+measurable *in that runtime*, on that machine — and the thing that is not
+measurable is not the model.
+
+For completeness on cost: **55,832 ms per file** against a mean file of
+30.5 s, which is 3.4× FCPE's 16,293 ms and 1.83× real time; total wall
+10,127 s for the 180 files.
+
+### 37.5 What still could not be measured, and four failures worth recording
+
+Nothing in §37 was abandoned for lack of a machine. Four things went wrong on
+the way, and each is a fact about the tooling rather than about the models.
+
+1. **The Dart SDK arrived non-executable.** `zipfile.extractall` does not
+   restore Unix permission bits. `dart --version` and `dart pub get` worked
+   (that binary had been chmod'ed by hand) and `dart run` did not: exit 255,
+   with a single `.` standing for the whole run — three times, on three
+   kernels, with the streams separate, then merged by the shell, then
+   redirected to a file. `unzip -q` is the fix and the kernels now use it.
+2. **Kaggle's log collector does not reliably carry a grandchild's file
+   descriptors.** Redirecting the Dart run to a file and printing that file
+   through Python is what made the failure above visible at all. A failure
+   with an empty log is indistinguishable from a failure that never started,
+   which is why this is worth a line.
+3. **Two concurrent GPU sessions per account, and then no GPU quota at all.**
+   The four kernels were split across `chr1s4` and `chr1str`, with the model
+   bundle uploaded as a private dataset under both — a private dataset is
+   per-account (kaggle-usage.md gotcha #13). When `chr1str`'s weekly GPU quota
+   ran out mid-run, the kernels were moved to CPU workers, which is where
+   gotcha #3 turned out to be wrong: **a CPU-only Kaggle worker did get
+   internet**, and pulled both GuitarSet archives from Zenodo. Every kernel
+   here now asks for CPU; none of this work needs a GPU.
+4. **A shadowed name in the generated kernel cost one full run.** Concatenating
+   three modules into one file merges their top-level namespaces, and
+   `onnx_timing`'s `MODELS` tuple lost to a `MODEL_DIR` path assigned by the
+   driver — no syntax error, no import error, a `TypeError` after the MusicNet
+   table had already been computed. The generator now walks the generated AST
+   and refuses to write a file with a duplicate top-level name.
+
+And one thing that is genuinely not measured: **hFT and O&F were not run
+through `onnx_runtime_dart` on Kaggle.** §35.5's pure-Dart figures stand as
+the only ones for that arm, taken on a loaded VPS and normalised by CPU
+seconds. The Dart kernel exists and could do it; it was not spent, because
+§35.5's conclusion (hFT's 3.63 GB is a floor, not a slope) does not change
+with a roomier machine, and §37.2 settles the part that does.
 
 ---
 

@@ -1,0 +1,16 @@
+{
+ "id": "chr1s4/crisptuner-spectro-eval",
+ "title": "CrispTuner spectro eval",
+ "code_file": "spectro_eval.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": "true",
+ "enable_gpu": "false",
+ "enable_internet": "true",
+ "competition_sources": [],
+ "dataset_sources": [
+  "chr1s4/crisptuner-onnx"
+ ],
+ "kernel_sources": [],
+ "model_sources": []
+}
