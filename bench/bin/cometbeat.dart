@@ -254,6 +254,7 @@ void main(List<String> argv) {
   var corpus = 'guitar';
   var data = '/mnt/storage/tuner-bench/datasets';
   var limit = 0;
+  var subset = 0;
   var models = '/mnt/storage/tuner-bench/onnx/cometbeat';
   for (int i = 0; i < argv.length; i++) {
     switch (argv[i]) {
@@ -267,6 +268,14 @@ void main(List<String> argv) {
         engineFilter.addAll(argv[++i].split(','));
       case '--limit':
         limit = int.parse(argv[++i]);
+      // A second table over the first N files of the same run. §35.6 had to
+      // report the neural arms on a 40-file prefix and could not say whether
+      // the prefix was representative, because the full-corpus rows came
+      // from a DIFFERENT run. Accumulating both from one pass answers that
+      // for free: the subset table and the full table see identical audio,
+      // identical models and identical code.
+      case '--subset':
+        subset = int.parse(argv[++i]);
     }
   }
 
@@ -274,8 +283,15 @@ void main(List<String> argv) {
   engineNames.removeWhere((e) => !_wanted(e));
 
   final stats = {for (final e in engineNames) e: MethodStats(e)};
+  final subsetStats = {for (final e in engineNames) e: MethodStats(e)};
   final millis = <String, double>{};
   var scored = 0;
+  final wall = Stopwatch()..start();
+
+  /// Which tables this file's frames count towards: always the full one,
+  /// and the prefix one while we are still inside `--subset`.
+  List<Map<String, MethodStats>> targets(int index) =>
+      subset > 0 && index < subset ? [stats, subsetStats] : [stats];
 
   if (corpus == 'guitar') {
     final files = Directory('$data/audio')
@@ -286,13 +302,15 @@ void main(List<String> argv) {
         .toList()
       ..sort();
     final chosen = files.take(limit == 0 ? files.length : limit).toList();
-    for (final path in chosen) {
+    for (int index = 0; index < chosen.length; index++) {
+      final path = chosen[index];
       final jamsPath = '$data/annotation/'
           '${path.split("/").last.replaceAll("_mic.wav", "")}.jams';
       if (!File(jamsPath).existsSync()) continue;
       final truth = readJams(jamsPath);
       final wav = readWav(path);
       final rate = wav.sampleRate;
+      final secs = wav.samples.length / rate;
       final tracks = runAllEngines(wav.samples, rate, millis);
       scored++;
       for (final name in engineNames) {
@@ -305,22 +323,33 @@ void main(List<String> argv) {
           // Voicing over EVERY frame, mono accuracy over the monophonic
           // ones — the same split lib/evaluate.dart uses, so VR and FA mean
           // here what they mean in §13 rather than coming out as zero.
-          final st = stats[name]!;
-          if (active.isEmpty) {
-            st.refUnvoiced++;
-            if (got > 0) st.refUnvoicedReported++;
-          } else {
-            st.refVoiced++;
-            if (got > 0) st.refVoicedReported++;
-          }
-          if (active.length == 1) {
-            st.scoreMono(got > 0 ? got : null, active.first.frequency);
+          for (final table in targets(index)) {
+            final st = table[name]!;
+            if (active.isEmpty) {
+              st.refUnvoiced++;
+              if (got > 0) st.refUnvoicedReported++;
+            } else {
+              st.refVoiced++;
+              if (got > 0) st.refVoicedReported++;
+            }
+            if (active.length == 1) {
+              st.scoreMono(got > 0 ? got : null, active.first.frequency);
+            }
           }
         }
       }
-      stdout.write('.');
+      // One line per file, not a dot. §35.6's runs were killed by the OOM
+      // killer partway through and the only record of how far they had got
+      // was a row of dots; the peak RSS is printed because for RMVPE it is
+      // the finding, not the diagnostics. `ProcessInfo.maxRss` is a
+      // high-water mark for the whole process, so it only ever rises — it
+      // says what the longest file so far cost, not what this one did.
+      stdout.writeln('[${index + 1}/${chosen.length}] '
+          '${path.split("/").last} ${secs.toStringAsFixed(1)} s  '
+          'elapsed ${(wall.elapsedMilliseconds / 1000).toStringAsFixed(0)} s  '
+          'maxRss ${(ProcessInfo.maxRss / 1e9).toStringAsFixed(2)} GB');
     }
-    stdout.writeln('\n\n${chosen.length} solo files, GuitarSet\n');
+    stdout.writeln('\n${chosen.length} solo files, GuitarSet\n');
   } else {
     // The audio sits at <data>/muserc/MUSERC/SA — the same path bin/cello.dart
     // uses. Accept either the corpus root or that directory directly, so the
@@ -332,31 +361,38 @@ void main(List<String> argv) {
         .where((t) => t.hasReliableNominal)
         .toList();
     final chosen = takes.take(limit == 0 ? takes.length : limit).toList();
-    for (final take in chosen) {
+    for (int index = 0; index < chosen.length; index++) {
+      final take = chosen[index];
       final wav = readWav(take.path);
       final rate = wav.sampleRate;
+      final secs = wav.samples.length / rate;
       final tracks = runAllEngines(wav.samples, rate, millis);
       scored++;
       for (final name in engineNames) {
         // MUSERC is one sustained note per take, so the nominal is the
         // reference for every frame the engine produces.
         final track = tracks[name]!;
-        final st = stats[name]!;
         for (final f in track) {
           final got = _isVoiced(name, f) ? f.f0Hz : 0.0;
           // A MUSERC take is one sustained note throughout, so every frame
           // is a voiced reference frame — there is no unvoiced span to
           // build a false-alarm rate from, and the column is left empty
           // rather than filled with a meaningless zero.
-          st.refVoiced++;
-          if (got > 0) st.refVoicedReported++;
-          st.scoreMono(got > 0 ? got : null, take.nominal,
-              steady: take.steady);
+          for (final table in targets(index)) {
+            final st = table[name]!;
+            st.refVoiced++;
+            if (got > 0) st.refVoicedReported++;
+            st.scoreMono(got > 0 ? got : null, take.nominal,
+                steady: take.steady);
+          }
         }
       }
-      stdout.write('.');
+      stdout.writeln('[${index + 1}/${chosen.length}] '
+          '${take.path.split("/").last} ${secs.toStringAsFixed(1)} s  '
+          'elapsed ${(wall.elapsedMilliseconds / 1000).toStringAsFixed(0)} s  '
+          'maxRss ${(ProcessInfo.maxRss / 1e9).toStringAsFixed(2)} GB');
     }
-    stdout.writeln('\n\n${chosen.length} cello takes, MUSERC '
+    stdout.writeln('\n${chosen.length} cello takes, MUSERC '
         '(tune takes excluded — §11.1)\n');
   }
 
@@ -365,7 +401,21 @@ void main(List<String> argv) {
   for (final name in engineNames) {
     _row(name, stats[name]!);
   }
+  if (subset > 0 && subset < scored) {
+    stdout.writeln('\nThe same run, restricted to the first $subset files — '
+        'the prefix §35.6 had to report, from identical audio and identical '
+        'models, so the two tables ARE comparable line for line:\n');
+    stdout.writeln(
+        '| engine | RPA% | rep% | oct% | gross% | |err| p50 | VR% | FA% |');
+    stdout.writeln('| --- | --- | --- | --- | --- | --- | --- | --- |');
+    for (final name in engineNames) {
+      _row(name, subsetStats[name]!);
+    }
+  }
+
   stdout.writeln('');
+  stdout.writeln('peak RSS for the whole run: '
+      '${(ProcessInfo.maxRss / 1e9).toStringAsFixed(2)} GB');
   for (final name in engineNames) {
     final total = millis[name];
     if (total == null || scored == 0) continue;
