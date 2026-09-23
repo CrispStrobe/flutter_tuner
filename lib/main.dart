@@ -323,8 +323,13 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     await prefs.setInt(_prefTemperamentRoot, _engine.temperamentRoot);
     await prefs.setString(_prefDetector, _engine.detectorKind.name);
     await prefs.setBool(_prefRefinement, _engine.pitchRefinement);
-    await prefs.setString(
-        _prefTranscriptionModel, _transcriptionModel?.id ?? _kDartRuntimeId);
+    // Not written while the environment is in charge: the variable overrides
+    // the setting for this run, and writing it back would silently make that
+    // override the user's stored choice for every run after it.
+    if (!_transcriptionFromEnv) {
+      await prefs.setString(
+          _prefTranscriptionModel, _transcriptionModel?.id ?? _kDartRuntimeId);
+    }
   }
 
   @override
