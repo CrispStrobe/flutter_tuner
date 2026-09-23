@@ -314,19 +314,13 @@
   "@transcriptionModelAboutOnsetsAndFrames": {
     "description": "One line saying what the Onsets and Frames model is good at"
   },
-  "transcriptionModelAboutHft": "Most accurate on piano, and the smallest — but too slow to follow live playing",
+  "transcriptionModelAboutHft": "The smallest of all, and the most accurate on piano",
   "@transcriptionModelAboutHft": {
-    "description": "One line saying what the hFT-Transformer model is good at, including that it cannot keep up in real time"
+    "description": "One line saying what the hFT-Transformer model is good at"
   },
-  "transcriptionModelOfflineOnly": "Too slow to follow live playing on this kind of processor: it needs about {factor}× as long as the music lasts.",
-  "@transcriptionModelOfflineOnly": {
-    "description": "Warning shown when the selected transcription model cannot keep up with live audio",
-    "placeholders": {
-      "factor": {
-        "type": "String",
-        "example": "2.1"
-      }
-    }
+  "transcriptionModelSpeedUnmeasured": "How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.",
+  "@transcriptionModelSpeedUnmeasured": {
+    "description": "Caveat for a model whose speed has only been measured on a loaded shared server, so nothing is known about its speed on the devices the app ships to"
   },
   "transcriptionModelEnvOverride": "Chosen by the CRISPTUNER_TRANSCRIPTION_BACKEND environment variable, which overrides this setting.",
   "@transcriptionModelEnvOverride": {

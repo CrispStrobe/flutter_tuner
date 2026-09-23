@@ -56,10 +56,11 @@ import 'transcription_backend.dart';
 ///   * **Onsets & Frames for piano.** 69.0% solo-piano F1 for 30.8 MiB and
 ///     0.44× real time — CrispASR's recommended piano arm, and the balance
 ///     of the five.
-///   * **hFT-Transformer when size matters more than speed.** The best
-///     solo-piano score here, 70.7%, out of 4.5 MiB of q4_0 weights — and
-///     **2.14× real time on four cores**, which is slower than the audio it
-///     is reading. Offline use only.
+///   * **hFT-Transformer when size matters most.** The best solo-piano score
+///     here, 70.7%, out of 4.5 MiB of q4_0 weights — the most accuracy per
+///     megabyte of the five. **Its speed on the devices this app ships to
+///     is not known**; see [realTimeFactor] for what the 2.14× is and is
+///     not evidence of.
 ///   * **Basic Pitch for comparing runtimes**, which is what it is here for:
 ///     it is the same model the pure-Dart path runs.
 ///
@@ -67,9 +68,10 @@ import 'transcription_backend.dart';
 /// suggests and correctly declines on instruments it was not trained for —
 /// 9 notes emitted for 551 references on solo violin.
 ///
-/// Every cost above is CPU seconds per audio second on a 4-vCPU Linux VPS
-/// under load. **None of it has been measured on a phone**; nothing in this
-/// project has.
+/// Every cost above is CPU seconds per audio second on **four shared vCPUs
+/// of a contended Linux VPS**, CPU only. None of it has been measured on a
+/// phone, a tablet or a Mac; nothing in this project has. Treat the column
+/// as a ranking, not as a latency budget — and see [realTimeFactor].
 enum CrispAsrModel {
   /// 110 KB. The same model the pure-Dart path runs, so it is what to pick
   /// when the question is about the *runtime* rather than the model.
@@ -94,10 +96,10 @@ enum CrispAsrModel {
 
   /// 4.5 MiB at q4_0 (Toyama et al., ISMIR 2023). The best solo-piano score
   /// measured here, **70.7%** (52.2% overall), out of less weight than a
-  /// photograph — and **2.14× real time on four cores**, slower than the
-  /// audio it is reading. Accuracy per megabyte, and offline use only: it
-  /// cannot keep up with a live microphone. Its cost is set by its sequence
-  /// length rather than its parameter count (§36.2).
+  /// photograph: the most accuracy per megabyte of the five. Its cost is set
+  /// by its sequence length rather than its parameter count (§36.2), and
+  /// what that costs on a phone or a Mac is **not known** — see
+  /// [realTimeFactor].
   hftTransformer('hft-transformer', 16000,
       downloadMiB: 4.5, realTimeFactor: 2.14);
 
@@ -113,20 +115,33 @@ enum CrispAsrModel {
   /// is selected, and nothing here is bundled with the app.
   final double downloadMiB;
 
-  /// CPU seconds per second of audio, measured on a 4-vCPU Linux VPS under
-  /// load (`bench/REPORT.md` §36.4, §37). Not a phone measurement — there is
-  /// no device in this loop.
+  /// CPU seconds per second of audio on **four shared vCPUs of a contended
+  /// Linux VPS, CPU only** (`bench/REPORT.md` §36.4, §37).
+  ///
+  /// Read this as a ranking of the five against each other, not as a
+  /// prediction of what any of them costs on a user's device. Two reasons,
+  /// both concrete:
+  ///
+  ///   * the machine. Skylake-SP vCPUs shared with other tenants, measured
+  ///     under load average 3–20. Nothing in this project has run on a
+  ///     phone, a tablet or a Mac.
+  ///   * the build. `onsets_and_frames.cpp` and `hft_transformer.cpp` both
+  ///     call `core_cpu_backend::init()` unconditionally and never read
+  ///     their `use_gpu` parameter, so these two arms are CPU-only today
+  ///     where CrispASR's other backends go through
+  ///     `crispasr_init_gpu_backend()` (CUDA > Metal > Vulkan > CPU). hFT is
+  ///     83.5% dense weight GEMM (§36.2) — exactly the arithmetic a GPU
+  ///     backend exists for — so its number here is a floor on a path that
+  ///     is being changed, not a property of the model.
+  ///
+  /// So no UI string should be derived from this by arithmetic. What the
+  /// picker says about a model's speed is written per model, in one place,
+  /// in `lib/main.dart`, and is to be updated when a measurement on real
+  /// target hardware lands rather than inferred from this number.
   final double realTimeFactor;
 
   const CrispAsrModel(this.id, this.nativeRate,
       {required this.downloadMiB, required this.realTimeFactor});
-
-  /// Whether this model can plausibly keep up with a live microphone.
-  ///
-  /// Anything at or above 1.0 cannot: it spends more CPU time on a window
-  /// than the window lasts, so the readings fall further behind the longer
-  /// it runs. hFT-Transformer is the one that fails this.
-  bool get canRunLive => realTimeFactor < 1.0;
 
   String get displayName => switch (this) {
         CrispAsrModel.basicPitch => 'Basic Pitch',

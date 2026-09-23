@@ -358,12 +358,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get transcriptionModelAboutHft =>
-      'Am genauesten bei Klavier und am kleinsten — aber zu langsam für Live-Spiel';
+      'Das kleinste Modell und bei Klavier das genaueste';
 
   @override
-  String transcriptionModelOfflineOnly(String factor) {
-    return 'Zu langsam, um live mitzulaufen: braucht auf solchen Prozessoren rund das $factor-fache der Spieldauer.';
-  }
+  String get transcriptionModelSpeedUnmeasured =>
+      'Wie schnell dieses Modell auf Telefon, Tablet oder Mac läuft, wurde nicht gemessen. Für Live-Spiel könnte es zu langsam sein.';
 
   @override
   String get transcriptionModelEnvOverride =>

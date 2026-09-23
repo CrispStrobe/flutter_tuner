@@ -356,12 +356,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get transcriptionModelAboutHft =>
-      'Most accurate on piano, and the smallest — but too slow to follow live playing';
+      'The smallest of all, and the most accurate on piano';
 
   @override
-  String transcriptionModelOfflineOnly(String factor) {
-    return 'Too slow to follow live playing on this kind of processor: it needs about $factor× as long as the music lasts.';
-  }
+  String get transcriptionModelSpeedUnmeasured =>
+      'How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.';
 
   @override
   String get transcriptionModelEnvOverride =>
