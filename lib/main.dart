@@ -793,22 +793,41 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// What each transcription model is for, in one line. The measurements
-  /// behind these are in `lib/crispasr_backend_ffi.dart` and
-  /// `bench/REPORT.md` §32, §36.4 and §37 — none of them from a phone.
-  static String transcriptionModelAbout(
+  /// Everything the picker says about a model: what it is good at, and any
+  /// caveat about its speed.
+  ///
+  /// **One place per model, deliberately.** The speed line is a claim about
+  /// hardware this project has never run on — `realTimeFactor` was measured
+  /// on four shared vCPUs of a contended Linux VPS with the two newest arms
+  /// pinned to CPU (see its doc comment) — so it is written per model rather
+  /// than computed from that number, and when a measurement on real target
+  /// hardware arrives this table is the only thing that has to change. Do
+  /// not repeat either line anywhere else in the UI.
+  ///
+  /// The accuracy figures behind `about` are in
+  /// `lib/crispasr_backend_ffi.dart` and `bench/REPORT.md` §32, §36.4, §37.
+  static ({String about, String? speed}) transcriptionModelNotes(
       AppLocalizations l10n, CrispAsrModel model) {
     switch (model) {
       case CrispAsrModel.basicPitch:
-        return l10n.transcriptionModelAboutBasicPitch;
+        return (about: l10n.transcriptionModelAboutBasicPitch, speed: null);
       case CrispAsrModel.pianoTranscription:
-        return l10n.transcriptionModelAboutPiano;
+        return (about: l10n.transcriptionModelAboutPiano, speed: null);
       case CrispAsrModel.mt3:
-        return l10n.transcriptionModelAboutMt3;
+        return (about: l10n.transcriptionModelAboutMt3, speed: null);
       case CrispAsrModel.onsetsAndFrames:
-        return l10n.transcriptionModelAboutOnsetsAndFrames;
+        return (
+          about: l10n.transcriptionModelAboutOnsetsAndFrames,
+          speed: null
+        );
       case CrispAsrModel.hftTransformer:
-        return l10n.transcriptionModelAboutHft;
+        // What is established: it is the smallest and the most accurate on
+        // piano. What is not: how fast it runs on a phone, a tablet or a
+        // Mac. Both said, neither extrapolated.
+        return (
+          about: l10n.transcriptionModelAboutHft,
+          speed: l10n.transcriptionModelSpeedUnmeasured
+        );
     }
   }
 
@@ -1148,10 +1167,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           if (_transcriptionIssue == _TranscriptionIssue.libraryMissing)
             Text(l10n.transcriptionLibraryMissing,
                 style: TextStyle(fontSize: 11, color: palette.accent)),
-          if (_transcriptionModel != null && !_transcriptionModel!.canRunLive)
+          // The selected model's speed caveat, if it has one — the same
+          // string the picker shows, from the same table, never a second
+          // wording of the same claim.
+          if (_transcriptionModel != null &&
+              transcriptionModelNotes(l10n, _transcriptionModel!).speed !=
+                  null)
             Text(
-              l10n.transcriptionModelOfflineOnly(
-                  _transcriptionModel!.realTimeFactor.toStringAsFixed(1)),
+              transcriptionModelNotes(l10n, _transcriptionModel!).speed!,
               style: TextStyle(fontSize: 11, color: palette.accent),
             ),
           if (_transcriptionEnabled) ...[
@@ -1696,7 +1719,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                           model.downloadMiB.toStringAsFixed(1),
                         )}',
                         _availableModels.contains(model)
-                            ? transcriptionModelAbout(l10n, model)
+                            ? transcriptionModelNotes(l10n, model).about
                             : l10n.transcriptionLibraryMissing,
                         dimmed: !_availableModels.contains(model),
                       ),
@@ -1711,11 +1734,11 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             if (_transcriptionFromEnv)
               _settingsNote(palette, l10n.transcriptionModelEnvOverride),
             if (_transcriptionModel != null &&
-                !_transcriptionModel!.canRunLive)
+                transcriptionModelNotes(l10n, _transcriptionModel!).speed !=
+                    null)
               _settingsNote(
                 palette,
-                l10n.transcriptionModelOfflineOnly(
-                    _transcriptionModel!.realTimeFactor.toStringAsFixed(1)),
+                transcriptionModelNotes(l10n, _transcriptionModel!).speed!,
                 warn: true,
               ),
             if (_transcriptionIssue == _TranscriptionIssue.libraryMissing)

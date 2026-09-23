@@ -38,8 +38,6 @@ enum CrispAsrModel {
   const CrispAsrModel(this.id, this.nativeRate,
       {required this.downloadMiB, required this.realTimeFactor});
 
-  bool get canRunLive => realTimeFactor < 1.0;
-
   String get displayName => switch (this) {
         CrispAsrModel.basicPitch => 'Basic Pitch',
         CrispAsrModel.pianoTranscription => 'Piano transcription',

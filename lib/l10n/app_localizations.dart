@@ -710,17 +710,17 @@ abstract class AppLocalizations {
   /// **'Piano, and the best balance of accuracy, size and speed'**
   String get transcriptionModelAboutOnsetsAndFrames;
 
-  /// One line saying what the hFT-Transformer model is good at, including that it cannot keep up in real time
+  /// One line saying what the hFT-Transformer model is good at
   ///
   /// In en, this message translates to:
-  /// **'Most accurate on piano, and the smallest — but too slow to follow live playing'**
+  /// **'The smallest of all, and the most accurate on piano'**
   String get transcriptionModelAboutHft;
 
-  /// Warning shown when the selected transcription model cannot keep up with live audio
+  /// Caveat for a model whose speed has only been measured on a loaded shared server, so nothing is known about its speed on the devices the app ships to
   ///
   /// In en, this message translates to:
-  /// **'Too slow to follow live playing on this kind of processor: it needs about {factor}× as long as the music lasts.'**
-  String transcriptionModelOfflineOnly(String factor);
+  /// **'How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.'**
+  String get transcriptionModelSpeedUnmeasured;
 
   /// Shown under the disabled model picker when the environment has already chosen the backend
   ///
