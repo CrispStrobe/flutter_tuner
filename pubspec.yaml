@@ -1,7 +1,7 @@
 name: flutter_tuner
 description: "CrispTuner — a chromatic instrument tuner with historical temperaments, alternate and custom tunings, live pitch detection and spectrum analysis."
 publish_to: 'none'
-version: 2.3.0+8
+version: 2.4.0+9
 
 environment:
   sdk: '>=3.2.3 <4.0.0'
