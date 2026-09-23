@@ -3625,6 +3625,9 @@ GFLOP per 2 s of audio, because its arithmetic is set by sequence length —
    in both directions. It buys 1.4 points of solo-piano F1 over O&F. Do O&F
    first; let hFT wait for a measurement rather than an argument.
 
+   *That measurement exists now: §36.5. The bet lost, and the reasoning
+   above was wrong about why — a third time.*
+
 What would move hFT's floor is a change to the model rather than the
 runtime — a shorter frequency-token sequence, or attention restricted to a
 local window. That is a retraining question and outside what this report can
@@ -3691,6 +3694,82 @@ accumulation and requires them to agree — written before the fix and watched
 to fail at relative difference 1.0 — and filed as CrispASR issue #453 with
 the reproduction and the options deliberately not taken.
 
+
+---
+
+### 36.5 hFT to ggml: the bet, and how it lost
+
+§36.3 put hFT second and said "measured before it is believed", calling it
+"a bet on a 2–3× int8 GEMM speedup against a 121 GFLOP/s floor". It has now
+been ported and measured. The bet lost — **and not for the reason given**.
+
+**Accuracy is free, at every quantisation.** All ten MusicNet test pieces,
+13,589 notes, `mir_eval`, every arm through the same decoder:
+
+| arm | size | F1 | F1 + offsets | solo piano |
+| --- | --- | --- | --- | --- |
+| ONNX export | 21.8 MiB | 52.21% | 18.49% | 70.52% |
+| ggml f32 | 21.8 MiB | **52.21%** | 18.49% | **70.52%** |
+| ggml q8_0 | 7.0 MiB | 52.23% | 18.50% | 70.51% |
+| ggml q4_0 | **4.5 MiB** | **52.55%** | **18.77%** | **70.71%** |
+
+The ONNX row reproduces §35.3 to the digit before anything else is claimed,
+and the f32 arm is identical to it on every piece and every column —
+head-identical too, at onset max abs 2.5e-06 and **100.0000% of decisions
+identical**, the velocity-gate argmax included.
+
+**That q4_0 row corrects a generalisation §36.4 invited.** §36.4 found q4_0
+costing O&F 0.5 points of F1-with-offsets and concluded "q4_0 where onset
+and pitch matter, q8_0 as the default". That is right for O&F and wrong as a
+rule. The head q4_0 perturbs most in hFT is *velocity* (cosine 0.870), and
+in this model velocity feeds the decoder's `ignore_zero` gate rather than a
+note duration — so its errors change **which notes survive**, not **how long
+they last**. In O&F the damaged head was the *frame* head, which sets
+durations, which is exactly the column that moved. The lesson is not about
+q4_0; it is that the cost of quantisation lands wherever the damaged head
+feeds, and that is model-specific.
+
+**Speed is where it lost.** Same 4-vCPU Skylake-SP VPS, both sides a whole
+process doing the whole job:
+
+| arm | threads | wall × real time | CPU-s per audio-s | peak RSS |
+| --- | --- | --- | --- | --- |
+| ggml f32 | 1 | 4.85× | 4.84 | 237 MiB |
+| ggml q8_0 | 1 | 6.30× | 6.25 | 232 MiB |
+| ggml f32 | 4 | **2.14×** | 7.35 | 237 MiB |
+| native ORT | 4 | **1.28×** | 3.77 | 1004 MiB |
+| O&F ggml (§36.4) | 1 | — | **0.44** | — |
+
+**q8_0 costs 29% more CPU than f32.** The fastest arm is f32, at 2.14× real
+time on four shared cores, against ORT's 1.28× and O&F's 0.44×.
+
+**Why the bet lost is not the floor.** §36.3 predicted the 121 GFLOP/s
+arithmetic floor would dominate any int8 gain. What actually happened is
+that the int8 gain never arrived to be dominated: ggml's repacked int8 GEMM
+is reachable only through the CPU device's *extra* buffer types, and
+`core_gguf::load_weights` requests the default type everywhere, so a
+quantised matmul falls through to a generic path that re-quantises
+activations per GEMM and calls `vec_dot`. The measurement box is also
+Skylake-SP — AVX-512F, **no VNNI** — so there is no int8 dot-product
+instruction to exploit even if the layout were right.
+
+**So the int8 case is untested, not disproved**, and the lever is one file
+(`core/gguf_loader.cpp`) rather than any model. Whether it pays needs both a
+loader change and hardware with VNNI; that is being measured separately and
+is not settled here.
+
+**What did hold.** The gap to native ORT is **1.56× on CPU-seconds and
+1.67× on wall** — nothing like the order of magnitude §36.1's pure-Dart
+figures might have suggested — and memory runs the other way entirely:
+**237 MiB against ORT's 1001 MiB**, with `onnx_runtime_dart` having been
+OOM-killed at 3.63 GB on the same model. Three runtimes, and the ggml one is
+the only one that is both fast enough to use and small enough to ship.
+
+**Verdict: `onsets-and-frames` remains the right default piano arm**, at
+0.44× real time. hFT is the accuracy-per-megabyte choice — **4.5 MiB
+reaching 70.7% on solo piano**, 1.4 points above O&F for roughly five times
+the compute. Both are published and auto-download:
+`cstr/onsets-and-frames-GGUF` and `cstr/hft-transformer-GGUF`.
 
 ---
 
