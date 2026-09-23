@@ -359,8 +359,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'The smallest of all, and the most accurate on piano';
 
   @override
-  String get transcriptionModelSpeedUnmeasured =>
-      'How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.';
+  String get transcriptionModelSpeedAppleSilicon =>
+      'Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.';
 
   @override
   String get transcriptionModelEnvOverride =>

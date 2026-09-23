@@ -716,11 +716,11 @@ abstract class AppLocalizations {
   /// **'The smallest of all, and the most accurate on piano'**
   String get transcriptionModelAboutHft;
 
-  /// Caveat for a model whose speed has only been measured on a loaded shared server, so nothing is known about its speed on the devices the app ships to
+  /// Speed note for a model measured under real time on an Apple Silicon CI runner, but not on a phone or tablet
   ///
   /// In en, this message translates to:
-  /// **'How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.'**
-  String get transcriptionModelSpeedUnmeasured;
+  /// **'Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.'**
+  String get transcriptionModelSpeedAppleSilicon;
 
   /// Shown under the disabled model picker when the environment has already chosen the backend
   ///

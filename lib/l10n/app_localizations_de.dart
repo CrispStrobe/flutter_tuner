@@ -361,8 +361,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Das kleinste Modell und bei Klavier das genaueste';
 
   @override
-  String get transcriptionModelSpeedUnmeasured =>
-      'Wie schnell dieses Modell auf Telefon, Tablet oder Mac läuft, wurde nicht gemessen. Für Live-Spiel könnte es zu langsam sein.';
+  String get transcriptionModelSpeedAppleSilicon =>
+      'Auf einem Apple-Silicon-Mac gemessen: schnell genug für Live-Spiel. Auf Telefon und Tablet nicht gemessen.';
 
   @override
   String get transcriptionModelEnvOverride =>

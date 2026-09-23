@@ -103,7 +103,7 @@
   "transcriptionModelAboutMt3": "Am besten bei echter Musik, und als einziges mit Instrumentenerkennung",
   "transcriptionModelAboutOnsetsAndFrames": "Klavier, mit dem besten Verhältnis aus Genauigkeit, Größe und Tempo",
   "transcriptionModelAboutHft": "Das kleinste Modell und bei Klavier das genaueste",
-  "transcriptionModelSpeedUnmeasured": "Wie schnell dieses Modell auf Telefon, Tablet oder Mac läuft, wurde nicht gemessen. Für Live-Spiel könnte es zu langsam sein.",
+  "transcriptionModelSpeedAppleSilicon": "Auf einem Apple-Silicon-Mac gemessen: schnell genug für Live-Spiel. Auf Telefon und Tablet nicht gemessen.",
   "transcriptionModelEnvOverride": "Durch die Umgebungsvariable CRISPTUNER_TRANSCRIPTION_BACKEND festgelegt; diese Einstellung wird dadurch übergangen.",
   "transcriptionLibraryMissing": "Dieses Modell benötigt die CrispASR-Engine, die in dieser Installation fehlt.",
   "transcriptionModelMissing": "Dieses Modell liegt noch nicht auf dem Gerät und konnte nicht geladen werden. Verbindung prüfen und erneut versuchen.",

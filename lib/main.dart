@@ -826,12 +826,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           speed: null
         );
       case CrispAsrModel.hftTransformer:
-        // What is established: it is the smallest and the most accurate on
-        // piano. What is not: how fast it runs on a phone, a tablet or a
-        // Mac. Both said, neither extrapolated.
+        // Measured on a GitHub macos-14 runner — a virtualised 3-core M1
+        // with no efficiency cores — at 0.93x real time on f32 and 0.56x on
+        // q4_0, CPU only. That slice is a floor, not a typical Mac, so
+        // "keeps up" is the claim and nothing stronger. A phone has not been
+        // measured and is not extrapolated to from this.
         return (
           about: l10n.transcriptionModelAboutHft,
-          speed: l10n.transcriptionModelSpeedUnmeasured
+          speed: l10n.transcriptionModelSpeedAppleSilicon
         );
     }
   }

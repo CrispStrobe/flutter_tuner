@@ -318,9 +318,9 @@
   "@transcriptionModelAboutHft": {
     "description": "One line saying what the hFT-Transformer model is good at"
   },
-  "transcriptionModelSpeedUnmeasured": "How fast this model runs on a phone, tablet or Mac has not been measured. It may not keep up with live playing.",
-  "@transcriptionModelSpeedUnmeasured": {
-    "description": "Caveat for a model whose speed has only been measured on a loaded shared server, so nothing is known about its speed on the devices the app ships to"
+  "transcriptionModelSpeedAppleSilicon": "Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.",
+  "@transcriptionModelSpeedAppleSilicon": {
+    "description": "Speed note for a model measured under real time on an Apple Silicon CI runner, but not on a phone or tablet"
   },
   "transcriptionModelEnvOverride": "Chosen by the CRISPTUNER_TRANSCRIPTION_BACKEND environment variable, which overrides this setting.",
   "@transcriptionModelEnvOverride": {
