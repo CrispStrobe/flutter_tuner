@@ -4145,6 +4145,129 @@ with a roomier machine, and §37.2 settles the part that does.
 
 ---
 
+## 38. StringTune, and the refinement that finally works
+
+[`w1ne/stringtune`](https://github.com/w1ne/stringtune) (MIT) is a web tuner:
+Svelte front end, and a pitch core written in Rust and compiled to WASM
+around the `pitch-detection` crate's McLeod detector, at a 2048-sample
+window. It is the nearest thing to a direct comparison this report has found
+— a different language, a different runtime, the same problem.
+
+The interesting part is that it does not trust its own detector. After
+`McLeodDetector::get_pitch`, it re-scans the lag neighbourhood itself, and
+`tuner-core/src/lib.rs` says why:
+
+> The dependency's finite-window autocorrelation peak is biased toward
+> shorter periods, most visibly on bass notes. Keep its candidate/clarity
+> selection, then refine only the nearby period using correctly normalized
+> overlapping sample pairs. This avoids a fixed cents offset that would
+> depend on phase.
+
+That is a specific, checkable claim with a specific fix, so it was ported to
+Dart (`refineByOverlapCorrelation` in `bench/lib/narrowband.dart`) and run
+through the same harness as everything else. The refinement recomputes, over
+`±1%` of the period,
+
+```
+r(lag) = 2 Σ xᵢ·xᵢ₊ₗ / Σ (xᵢ² + xᵢ₊ₗ²),   i over 0 … N−lag
+```
+
+and parabolically interpolates the peak. Two judgement calls were preserved
+from the original because they are not incidental: the search radius is at
+least two lags, and a maximum landing on either **edge** of the window
+returns the input unchanged rather than guessing — a boundary maximum means
+the candidate needed a wider search, and inventing a fundamental there would
+be worse than declining.
+
+### 38.1 It is the first refinement here that helps on the corpus
+
+GuitarSet, 180 solo files, held-note frames, the same rules as §13. `app` is
+the shipped pipeline; `app+stringtune` is that pipeline with this one extra
+step and **nothing else changed**:
+
+| | RPA% | oct% | gross% | \|err\| p50 | p90 | p99 | >5c% | jitter p90 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| app, as it ships | 80.86 | 0.44 | 0.91 | 2.45 | 7.70 | 16.25 | 22.18 | 3.65 |
+| **app + stringtune** | 80.86 | 0.44 | 0.91 | **2.05** | **6.45** | **14.80** | **16.68** | **2.85** |
+| mpm + stringtune | 81.22 | 0.75 | 1.05 | 2.05 | 6.50 | 14.85 | 16.71 | 2.85 |
+
+**Every precision column improves and nothing regresses.** Raw pitch
+accuracy, the octave rate, the gross-error rate, voicing recall and false
+alarm are *identical to the digit* — which is the internal check that this is
+doing what it claims, since the refinement moves a frequency and touches no
+voicing decision. What moves is the tail: **p90 7.70 → 6.45, >5 cents
+22.18% → 16.68%, and needle jitter p90 3.65 → 2.85 cents.**
+
+That last column is the one a player sees. A 22% reduction in jitter is a
+steadier needle, and §9's whole argument is that frames are not what anyone
+experiences.
+
+**This is the first refinement in this report that does not trade.** §4.3's
+phase vocoder lost. §4.6's Goertzel won the median and lost the tail (p90
+11.95 against 7.70). This wins both, and it is also **the cheapest of the
+three**: 0.548 ms per frame, 2.4% of the budget, against Goertzel's 1.513 ms
+and the phase vocoder's 1.194 ms.
+
+It needs no realignment either, which is why it can be compared against `app`
+directly where §4.6's arms could not: rescanning the lag neighbourhood
+answers about the same instant the detector did.
+
+### 38.2 Why it helps us less than it helps them
+
+On synthetic tones the gain is real but small, and concentrated where the
+signal is poor (168 frames per case):
+
+| estimator | quiet p50/p90/p99 | noisy | stiff (B=10⁻⁴) |
+| --- | --- | --- | --- |
+| YIN, parabolic only | 0.05 / 0.10 / 0.10 | 0.25 / 0.65 / 1.85 | 0.70 / 1.00 / 1.00 |
+| MPM | 0.05 / 0.05 / 0.10 | 0.25 / 0.65 / 1.75 | 0.70 / 0.95 / 1.00 |
+| **+ stringtune refine** | 0.05 / 0.05 / 0.10 | **0.20 / 0.55 / 1.10** | 0.70 / 0.95 / 1.00 |
+
+Bias on the noisy case falls from 0.11 cents to 0.02, and the p99 from 1.85
+to 1.10 — a 40% tail cut on exactly the signal a tuner meets in a room.
+
+**The bug they are fixing is mostly not ours.** `lib/mpm.dart` normalises the
+NSDF over a *fixed* window — `m = squares[w] + (squares[w+τ] − squares[τ])`,
+McLeod's own convention — while their refinement normalises over the *full
+overlap*, whose length shrinks as the lag grows. Ours does not have the
+short-period bias their comment describes, which is why the corpus gain here
+is a tail improvement rather than the removal of a systematic offset.
+
+**And one structural finding worth more than the numbers: after this
+refinement, YIN and MPM give the same answer.** The `app+stringtune` and
+`mpm+stringtune` rows agree to 0.05 cents in every column. Re-scanning the
+neighbourhood properly dominates the choice of detector that proposed the
+candidate — which reframes §4.2's "MPM versus YIN" as a question about
+voicing and cost rather than about pitch.
+
+What it does **not** do is help a stiff string: 0.70 cents, unchanged,
+because it has no inharmonicity model. §4.4's stiffness fit and §4.6's
+Goertzel take that case to 0.05–0.10. The two are complementary rather than
+competing.
+
+### 38.3 Other things worth noting from their build
+
+* **A 2048-sample window against our 4096.** Half the latency — and §5
+  measured what the other half buys. At 2048, low E (82 Hz, period 538
+  samples) gets under four periods in the window.
+* **Rust → WASM rather than pure Dart.** Directly relevant to this app's web
+  build, where §34 measured dart2js at roughly 3× native for the same FFT.
+  Their architecture sidesteps that; ours keeps one language.
+* **Their A4 test asserts `< 1.0 Hz`**, about 3.9 cents at 440. That is
+  looser than the 2.45-cent median this report measures on real audio, so a
+  regression a player would see could pass it. Worth remembering when
+  reading any tuner's test suite as evidence of its precision, this one's
+  included.
+
+### 38.4 Verdict: adopt it
+
+This is the one recommendation in the report that reverses §15's "the
+shipped pipeline is already the right answer". **A 0.548 ms step, no
+realignment, no regression in any column, and the tail and jitter both
+improve by around a fifth.** The credit is theirs; the measurement is ours.
+
+---
+
 *Harness, exact commands and how the copied core is kept in sync:
 [`README.md`](README.md). Raw aggregates:
 `results/*.json`, gitignored — regenerate with `bin/bench.dart`.*

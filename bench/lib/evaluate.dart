@@ -42,6 +42,10 @@ enum Refinement2 {
 
   /// The same sweep, summing the magnitude at eight partials at once.
   goertzelHarmonic,
+
+  /// StringTune's re-scan of the lag neighbourhood with a full-overlap
+  /// normalised correlation. See `refineByOverlapCorrelation`.
+  overlapCorrelation,
 }
 
 /// How the app's running median is managed.
@@ -302,6 +306,17 @@ const List<Variant> defaultVariants = [
       medianPolicy: MedianPolicy.app,
       refine: Refinement2.goertzel,
       referenceOffset: 2048),
+  // StringTune rescans the whole lag neighbourhood, so its answer describes
+  // the same instant YIN's does — the window start, not the end.
+  Variant('app+stringtune',
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.overlapCorrelation),
+  Variant('mpm+stringtune',
+      isMpm: true,
+      probabilityGate: true,
+      medianPolicy: MedianPolicy.app,
+      refine: Refinement2.overlapCorrelation),
   Variant('app+goertzel-h8',
       probabilityGate: true,
       medianPolicy: MedianPolicy.app,
@@ -414,7 +429,9 @@ FileResult evaluateFile({
           value = 0;
         } else {
           value = r.pitch;
-          if (v.refine == Refinement2.goertzel) {
+          if (v.refine == Refinement2.overlapCorrelation) {
+            value = refineByOverlapCorrelation(block, value, rate);
+          } else if (v.refine == Refinement2.goertzel) {
             value = refineByGoertzel(block, value, rate);
           } else if (v.refine == Refinement2.goertzelHarmonic) {
             value = refineByGoertzel(block, value, rate, harmonics: 8);
