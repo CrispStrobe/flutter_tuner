@@ -16,20 +16,36 @@ import 'transcription_backend.dart';
 const String kCrispAsrBackendName = 'basic-pitch';
 const String kModelNameEnv = 'CRISPTUNER_CRISPASR_MODEL';
 
-/// Mirrors the FFI half so callers and tests compile against either.
+/// Mirrors the FFI half so callers and tests compile against either. The two
+/// enums must stay in step member for member — the settings UI is compiled
+/// against whichever half the target platform gets, so a model that exists
+/// on only one side is a model the UI shows on only one platform. See
+/// `crispasr_backend_ffi.dart` for the measurements behind each row.
 enum CrispAsrModel {
-  basicPitch('basic-pitch', 22050),
-  pianoTranscription('piano-transcription', 16000),
-  mt3('mt3', 16000);
+  basicPitch('basic-pitch', 22050, downloadMiB: 0.11, realTimeFactor: 0.08),
+  pianoTranscription('piano-transcription', 16000,
+      downloadMiB: 77, realTimeFactor: 7.77),
+  mt3('mt3', 16000, downloadMiB: 96, realTimeFactor: 0.26),
+  onsetsAndFrames('onsets-and-frames', 16000,
+      downloadMiB: 30.8, realTimeFactor: 0.44),
+  hftTransformer('hft-transformer', 16000,
+      downloadMiB: 4.5, realTimeFactor: 2.14);
 
   final String id;
   final int nativeRate;
-  const CrispAsrModel(this.id, this.nativeRate);
+  final double downloadMiB;
+  final double realTimeFactor;
+  const CrispAsrModel(this.id, this.nativeRate,
+      {required this.downloadMiB, required this.realTimeFactor});
+
+  bool get canRunLive => realTimeFactor < 1.0;
 
   String get displayName => switch (this) {
         CrispAsrModel.basicPitch => 'Basic Pitch',
         CrispAsrModel.pianoTranscription => 'Piano transcription',
         CrispAsrModel.mt3 => 'MT3 (multi-instrument)',
+        CrispAsrModel.onsetsAndFrames => 'Onsets & Frames (piano)',
+        CrispAsrModel.hftTransformer => 'hFT-Transformer (piano)',
       };
 }
 
@@ -41,6 +57,8 @@ CrispAsrModel crispAsrModelFromName(String? name) {
   return switch (n) {
     'piano' || 'kong' => CrispAsrModel.pianoTranscription,
     'mt3' => CrispAsrModel.mt3,
+    'onsets_and_frames' || 'oaf' => CrispAsrModel.onsetsAndFrames,
+    'hft_transformer' || 'hft' => CrispAsrModel.hftTransformer,
     _ => CrispAsrModel.basicPitch,
   };
 }
@@ -49,11 +67,14 @@ const String kLibEnv = 'CRISPTUNER_CRISPASR_LIB';
 const String kModelEnv = 'CRISPTUNER_BASIC_PITCH_GGUF';
 
 class CrispAsrBackend implements TranscriptionBackend {
+  /// Kept so that callers compile against either half; nothing here reads it.
+  final CrispAsrModel model;
+
   CrispAsrBackend(
       {String? libraryPath,
       String? modelPath,
       bool allowDownload = true,
-      CrispAsrModel model = CrispAsrModel.basicPitch});
+      this.model = CrispAsrModel.basicPitch});
 
   /// Always null here: there is no FFI to open a library with, and this
   /// returns null rather than throwing for the same reason the FFI half

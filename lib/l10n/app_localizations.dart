@@ -655,6 +655,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Names notes only — use the meter above to tune'**
   String get transcriptionNotForTuning;
+
+  /// Label for the setting that re-measures each detected pitch for higher precision and a less jittery needle
+  ///
+  /// In en, this message translates to:
+  /// **'Steadier reading'**
+  String get refinementLabel;
+
+  /// One-line explanation of the steadier-reading setting
+  ///
+  /// In en, this message translates to:
+  /// **'Re-measures every reading for a steadier, more precise needle. Costs a little more processing.'**
+  String get refinementDescription;
+
+  /// Label for the setting that chooses which note-transcription model runs
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription model'**
+  String get transcriptionModelLabel;
+
+  /// The default transcription model, which ships with the app and needs no download
+  ///
+  /// In en, this message translates to:
+  /// **'Built-in — no download'**
+  String get transcriptionModelBuiltIn;
+
+  /// How much a transcription model weighs; it is fetched over the network the first time it is used
+  ///
+  /// In en, this message translates to:
+  /// **'{size} MB download'**
+  String transcriptionModelDownloadSize(String size);
+
+  /// One line saying what the Basic Pitch model is good at
+  ///
+  /// In en, this message translates to:
+  /// **'The built-in model, run by the native engine — for comparing the two runtimes'**
+  String get transcriptionModelAboutBasicPitch;
+
+  /// One line saying what the piano-transcription model is good at
+  ///
+  /// In en, this message translates to:
+  /// **'Piano, in detail — the heaviest of the five to run'**
+  String get transcriptionModelAboutPiano;
+
+  /// One line saying what the MT3 model is good at
+  ///
+  /// In en, this message translates to:
+  /// **'Best on real music, and the only one that names the instrument'**
+  String get transcriptionModelAboutMt3;
+
+  /// One line saying what the Onsets and Frames model is good at
+  ///
+  /// In en, this message translates to:
+  /// **'Piano, and the best balance of accuracy, size and speed'**
+  String get transcriptionModelAboutOnsetsAndFrames;
+
+  /// One line saying what the hFT-Transformer model is good at, including that it cannot keep up in real time
+  ///
+  /// In en, this message translates to:
+  /// **'Most accurate on piano, and the smallest — but too slow to follow live playing'**
+  String get transcriptionModelAboutHft;
+
+  /// Warning shown when the selected transcription model cannot keep up with live audio
+  ///
+  /// In en, this message translates to:
+  /// **'Too slow to follow live playing on this kind of processor: it needs about {factor}× as long as the music lasts.'**
+  String transcriptionModelOfflineOnly(String factor);
+
+  /// Shown under the disabled model picker when the environment has already chosen the backend
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen by the CRISPTUNER_TRANSCRIPTION_BACKEND environment variable, which overrides this setting.'**
+  String get transcriptionModelEnvOverride;
+
+  /// Shown when a transcription model cannot be used because the native library is absent
+  ///
+  /// In en, this message translates to:
+  /// **'This model needs the CrispASR engine, which this installation does not have.'**
+  String get transcriptionLibraryMissing;
+
+  /// Shown when the model file is neither cached nor downloadable
+  ///
+  /// In en, this message translates to:
+  /// **'That model is not on this device yet and could not be downloaded. Check the connection and try again.'**
+  String get transcriptionModelMissing;
+
+  /// Honesty note under the model picker: no measurement in this project comes from a phone
+  ///
+  /// In en, this message translates to:
+  /// **'Sizes and speeds measured on a desktop processor, not on a phone.'**
+  String get transcriptionModelMeasurementNote;
 }
 
 class _AppLocalizationsDelegate

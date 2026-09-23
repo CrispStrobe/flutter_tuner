@@ -321,4 +321,63 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get transcriptionNotForTuning =>
       'Nur Tonnamen — zum Stimmen die Anzeige oben verwenden';
+
+  @override
+  String get refinementLabel => 'Ruhigere Anzeige';
+
+  @override
+  String get refinementDescription =>
+      'Misst jede Anzeige nach — ruhiger und genauer, mit etwas mehr Rechenaufwand.';
+
+  @override
+  String get transcriptionModelLabel => 'Erkennungsmodell';
+
+  @override
+  String get transcriptionModelBuiltIn => 'Eingebaut — kein Download';
+
+  @override
+  String transcriptionModelDownloadSize(String size) {
+    return '$size MB Download';
+  }
+
+  @override
+  String get transcriptionModelAboutBasicPitch =>
+      'Das eingebaute Modell auf der nativen Engine — zum Vergleich beider Laufzeiten';
+
+  @override
+  String get transcriptionModelAboutPiano =>
+      'Klavier, sehr genau — das rechenintensivste der fünf';
+
+  @override
+  String get transcriptionModelAboutMt3 =>
+      'Am besten bei echter Musik, und als einziges mit Instrumentenerkennung';
+
+  @override
+  String get transcriptionModelAboutOnsetsAndFrames =>
+      'Klavier, mit dem besten Verhältnis aus Genauigkeit, Größe und Tempo';
+
+  @override
+  String get transcriptionModelAboutHft =>
+      'Am genauesten bei Klavier und am kleinsten — aber zu langsam für Live-Spiel';
+
+  @override
+  String transcriptionModelOfflineOnly(String factor) {
+    return 'Zu langsam, um live mitzulaufen: braucht auf solchen Prozessoren rund das $factor-fache der Spieldauer.';
+  }
+
+  @override
+  String get transcriptionModelEnvOverride =>
+      'Durch die Umgebungsvariable CRISPTUNER_TRANSCRIPTION_BACKEND festgelegt; diese Einstellung wird dadurch übergangen.';
+
+  @override
+  String get transcriptionLibraryMissing =>
+      'Dieses Modell benötigt die CrispASR-Engine, die in dieser Installation fehlt.';
+
+  @override
+  String get transcriptionModelMissing =>
+      'Dieses Modell liegt noch nicht auf dem Gerät und konnte nicht geladen werden. Verbindung prüfen und erneut versuchen.';
+
+  @override
+  String get transcriptionModelMeasurementNote =>
+      'Größen und Geschwindigkeiten auf einem Desktop-Prozessor gemessen, nicht auf einem Telefon.';
 }
