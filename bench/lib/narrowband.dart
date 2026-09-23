@@ -213,3 +213,74 @@ double refineByPll(
   if (counted == 0) return coarseF0;
   return sum / counted;
 }
+
+/// StringTune's period refinement, ported for comparison.
+///
+/// `w1ne/stringtune` (MIT) is a Rust/WASM tuner built on the `pitch-detection`
+/// crate's McLeod detector. It does not trust that detector's period directly;
+/// it re-scans the lag neighbourhood itself, and its comment says why:
+///
+/// > The dependency's finite-window autocorrelation peak is biased toward
+/// > shorter periods, most visibly on bass notes. Keep its candidate/clarity
+/// > selection, then refine only the nearby period using correctly normalized
+/// > overlapping sample pairs. This avoids a fixed cents offset that would
+/// > depend on phase.
+///
+/// That is a specific, checkable claim about a specific bug, and the fix is a
+/// normalisation choice worth measuring against ours. The difference is the
+/// window convention: `lib/mpm.dart` normalises over a FIXED window `w` —
+/// `m = squares[w] + (squares[w+tau] - squares[tau])`, McLeod's own — while
+/// this rescans the FULL overlap, whose length shrinks as the lag grows:
+///
+///   r(lag) = 2 Σ x[i]·x[i+lag] / Σ (x[i]² + x[i+lag]²),  i over 0..N-lag
+///
+/// Then a parabola through the best lag and its two neighbours.
+///
+/// Two details are deliberately preserved from the original because they are
+/// judgement calls rather than incidental: the search radius is ±1% of the
+/// period (at least two lags), and a maximum that lands on either EDGE of that
+/// window returns the input unchanged rather than guessing — the original's
+/// comment is that a boundary maximum means the candidate needs a wider
+/// search, and inventing a new fundamental there would be worse than
+/// declining.
+double refineByOverlapCorrelation(
+    List<double> signal, double coarseF0, double sampleRate) {
+  if (coarseF0 <= 0 || signal.isEmpty) return coarseF0;
+  final period = sampleRate / coarseF0;
+  if (!period.isFinite || period < 2 || period > signal.length / 2) {
+    return coarseF0;
+  }
+
+  double correlation(int lag) {
+    double cross = 0, energy = 0;
+    for (int i = 0; i < signal.length - lag; i++) {
+      final a = signal[i], b = signal[i + lag];
+      cross += a * b;
+      energy += a * a + b * b;
+    }
+    return energy > 0 ? 2 * cross / energy : 0;
+  }
+
+  final centre = period.round();
+  final radius = math.max(2, (period * 0.01).ceil());
+  final start = math.max(1, centre - radius);
+  final end = math.min(centre + radius, signal.length ~/ 2);
+  if (start >= end) return coarseF0;
+
+  int best = centre;
+  double peak = double.negativeInfinity;
+  for (int lag = start; lag <= end; lag++) {
+    final v = correlation(lag);
+    if (v > peak) {
+      peak = v;
+      best = lag;
+    }
+  }
+  if (best == start || best == end) return coarseF0;
+
+  final left = correlation(best - 1), right = correlation(best + 1);
+  final curvature = left - 2 * peak + right;
+  final offset =
+      curvature.abs() > 1e-300 ? (0.5 * (left - right) / curvature).clamp(-0.5, 0.5) : 0.0;
+  return sampleRate / (best + offset);
+}

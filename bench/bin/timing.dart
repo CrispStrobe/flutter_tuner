@@ -114,6 +114,10 @@ Future<void> main(List<String> args) async {
     ms: measure((b) => refineByGoertzel(b, 196.0, rate, harmonics: 8), reps: 5)
   ));
   rows.add((
+    name: 'stringtune overlap-correlation refinement',
+    ms: measure((b) => refineByOverlapCorrelation(b, 196.0, rate), reps: 5)
+  ));
+  rows.add((
     name: 'PLL refinement',
     ms: measure((b) => refineByPll(b, 196.0, rate), reps: 5)
   ));

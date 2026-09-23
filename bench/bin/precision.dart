@@ -85,6 +85,8 @@ void main(List<String> args) {
       'yin + goertzel (f0 only)': CentHistogram(),
       'yin + goertzel (8 harmonics)': CentHistogram(),
       'yin + PLL': CentHistogram(),
+      'mpm + stringtune refine': CentHistogram(),
+      'yin + stringtune refine': CentHistogram(),
     };
     final rng = math.Random(11);
     int frames = 0;
@@ -145,7 +147,18 @@ void main(List<String> args) {
           if (step6.pitched) {
             results['yin + step6']!.add(cents(step6.pitch, f0));
           }
-          if (m.pitched) results['mpm']!.add(cents(m.pitch, f0));
+          if (m.pitched) {
+            results['mpm']!.add(cents(m.pitch, f0));
+            // StringTune applies this to its McLeod detector's answer, so the
+            // MPM arm is the faithful comparison; the YIN arm asks whether the
+            // refinement is worth anything on top of what this app ships.
+            results['mpm + stringtune refine']!.add(cents(
+                refineByOverlapCorrelation(block, m.pitch, rate * 1.0), f0));
+          }
+          if (plain.pitched) {
+            results['yin + stringtune refine']!.add(cents(
+                refineByOverlapCorrelation(block, plain.pitch, rate * 1.0), f0));
+          }
         }
       }
     }
