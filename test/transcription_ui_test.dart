@@ -12,6 +12,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
+  /// The transcription switch specifically. There is more than one Switch on
+  /// the page now — the settings card carries the pitch-refinement toggle —
+  /// so this is found by its semantics label rather than by position.
+  Finder transcriptionSwitch() => find.descendant(
+        of: find.bySemanticsLabel('Detect chords'),
+        matching: find.byType(Switch),
+      );
+
   Future<void> pump(WidgetTester tester) async {
     tester.view.physicalSize = const Size(412, 915);
     tester.view.devicePixelRatio = 1.0;
@@ -29,7 +37,7 @@ void main() {
         findsNothing);
     expect(find.text('Listening for notes…'), findsNothing);
 
-    final toggle = tester.widget<Switch>(find.byType(Switch).last);
+    final toggle = tester.widget<Switch>(transcriptionSwitch());
     expect(toggle.value, isFalse);
   });
 
@@ -46,7 +54,7 @@ void main() {
   testWidgets('turning it on shows the warning that it is not for tuning',
       (tester) async {
     await pump(tester);
-    await tester.tap(find.byType(Switch).last);
+    await tester.tap(transcriptionSwitch());
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 

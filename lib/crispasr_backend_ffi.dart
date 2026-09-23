@@ -30,35 +30,78 @@ import 'transcription_backend.dart';
 
 /// The note-event models CrispASR can run, all through one C entry point.
 ///
-/// `crispasr_session_piano` serves basic-pitch, piano-transcription and MT3
-/// alike — the parameter is still named `pcm_16k` after the first of them —
-/// so supporting all three is a *choice of model*, not three code paths.
+/// `crispasr_session_piano` serves all five alike — the parameter is still
+/// named `pcm_16k` after the first of them — so supporting another model is
+/// a *choice of model*, not another code path.
 ///
 /// Measured on MusicNet's test split, note-level F1 by
-/// `mir_eval.transcription`'s rules (`bench/REPORT.md` §32):
+/// `mir_eval.transcription`'s rules (`bench/REPORT.md` §32, §36.4, §37):
 ///
-/// | model | F1 | onset err p50 | cost per second of audio | size |
+/// | model | F1 | solo piano F1 | cost per second of audio | download |
 /// | --- | --- | --- | --- | --- |
-/// | `basic-pitch` | 44.2% | 21.4 ms | 0.08× | 110 KB |
-/// | `piano-transcription` | 47.7% (**71.2% on solo piano**) | 19.1 ms | 7.77× | 77 MB |
-/// | `mt3` | **76.5%** | **16.8 ms** | 0.26× | 96 MB |
+/// | `basic-pitch` | 44.2% | — | 0.08× | 110 KB |
+/// | `piano-transcription` | 47.7% | **71.2%** | 7.77× | 77 MB |
+/// | `mt3` | **76.5%** | — | 0.26× | 96 MB |
+/// | `onsets-and-frames` | 49.6% | 69.0% | 0.44× | **30.8 MiB** |
+/// | `hft-transformer` | 52.2% | **70.7%** | 2.14× | **4.5 MiB** |
 ///
-/// MT3 is the one to reach for on real music: it finds three quarters of the
-/// notes where Basic Pitch finds under half, it is the only multi-instrument
-/// model of the three, and it still runs at a quarter of real time. Kong's
-/// piano-transcription is stronger *on piano* than its aggregate suggests
-/// and correctly declines on instruments it was not trained for — 9 notes
-/// emitted for 551 references on solo violin.
+/// Onset error p50, where it was measured: 21.4 ms for basic-pitch, 19.1 ms
+/// for piano-transcription, 16.8 ms for MT3.
+///
+/// Which to reach for:
+///
+///   * **MT3 for real music.** 76.5% F1, the only multi-instrument model
+///     here, and still a quarter of real time. It finds three quarters of
+///     the notes where Basic Pitch finds under half.
+///   * **Onsets & Frames for piano.** 69.0% solo-piano F1 for 30.8 MiB and
+///     0.44× real time — CrispASR's recommended piano arm, and the balance
+///     of the five.
+///   * **hFT-Transformer when size matters most.** The best solo-piano score
+///     here, 70.7%, out of 4.5 MiB of q4_0 weights — the most accuracy per
+///     megabyte of the five. **Its speed on the devices this app ships to
+///     is not known**; see [realTimeFactor] for what the 2.14× is and is
+///     not evidence of.
+///   * **Basic Pitch for comparing runtimes**, which is what it is here for:
+///     it is the same model the pure-Dart path runs.
+///
+/// Kong's piano-transcription is stronger *on piano* than its aggregate
+/// suggests and correctly declines on instruments it was not trained for —
+/// 9 notes emitted for 551 references on solo violin.
+///
+/// Every cost above is CPU seconds per audio second on **four shared vCPUs
+/// of a contended Linux VPS**, CPU only. None of it has been measured on a
+/// phone, a tablet or a Mac; nothing in this project has. Treat the column
+/// as a ranking, not as a latency budget — and see [realTimeFactor].
 enum CrispAsrModel {
-  /// 110 KB. The same model the pure-Dart path runs, for comparing runtimes.
-  basicPitch('basic-pitch', 22050),
+  /// 110 KB. The same model the pure-Dart path runs, so it is what to pick
+  /// when the question is about the *runtime* rather than the model.
+  basicPitch('basic-pitch', 22050, downloadMiB: 0.11, realTimeFactor: 0.08),
 
-  /// 77 MB. Kong / ByteDance high-resolution piano transcription.
-  pianoTranscription('piano-transcription', 16000),
+  /// 77 MB. Kong / ByteDance high-resolution piano transcription: 71.2% F1
+  /// on solo piano, and 7.77× real time — the most expensive of the five.
+  pianoTranscription('piano-transcription', 16000,
+      downloadMiB: 77, realTimeFactor: 7.77),
 
   /// 96 MB, 46.9M parameters. Multi-instrument, and the best score in this
-  /// benchmark by a wide margin.
-  mt3('mt3', 16000);
+  /// benchmark by a wide margin: 76.5% F1 at 0.26× real time. For real
+  /// music rather than for piano alone.
+  mt3('mt3', 16000, downloadMiB: 96, realTimeFactor: 0.26),
+
+  /// 30.8 MiB at q8_0 (Hawthorne et al. 2018). 49.6% F1 overall, **69.0% on
+  /// solo piano**, 0.44× real time — CrispASR's recommended piano arm, and
+  /// the one that balances the three. q8_0 is F1-identical to fp32 on every
+  /// column (`bench/REPORT.md` §36.4).
+  onsetsAndFrames('onsets-and-frames', 16000,
+      downloadMiB: 30.8, realTimeFactor: 0.44),
+
+  /// 4.5 MiB at q4_0 (Toyama et al., ISMIR 2023). The best solo-piano score
+  /// measured here, **70.7%** (52.2% overall), out of less weight than a
+  /// photograph: the most accuracy per megabyte of the five. Its cost is set
+  /// by its sequence length rather than its parameter count (§36.2), and
+  /// what that costs on a phone or a Mac is **not known** — see
+  /// [realTimeFactor].
+  hftTransformer('hft-transformer', 16000,
+      downloadMiB: 4.5, realTimeFactor: 2.14);
 
   /// The name CrispASR's registry and `CrispasrSession.open` both use.
   final String id;
@@ -67,12 +110,45 @@ enum CrispAsrModel {
   /// — this is only the default for sizing the capture window.
   final int nativeRate;
 
-  const CrispAsrModel(this.id, this.nativeRate);
+  /// How much the GGUF weighs, in MiB. It is a **download**: CrispASR
+  /// fetches it from HuggingFace into its own cache the first time the model
+  /// is selected, and nothing here is bundled with the app.
+  final double downloadMiB;
+
+  /// CPU seconds per second of audio on **four shared vCPUs of a contended
+  /// Linux VPS, CPU only** (`bench/REPORT.md` §36.4, §37).
+  ///
+  /// Read this as a ranking of the five against each other, not as a
+  /// prediction of what any of them costs on a user's device. Two reasons,
+  /// both concrete:
+  ///
+  ///   * the machine. Skylake-SP vCPUs shared with other tenants, measured
+  ///     under load average 3–20. Nothing in this project has run on a
+  ///     phone, a tablet or a Mac.
+  ///   * the build. `onsets_and_frames.cpp` and `hft_transformer.cpp` both
+  ///     call `core_cpu_backend::init()` unconditionally and never read
+  ///     their `use_gpu` parameter, so these two arms are CPU-only today
+  ///     where CrispASR's other backends go through
+  ///     `crispasr_init_gpu_backend()` (CUDA > Metal > Vulkan > CPU). hFT is
+  ///     83.5% dense weight GEMM (§36.2) — exactly the arithmetic a GPU
+  ///     backend exists for — so its number here is a floor on a path that
+  ///     is being changed, not a property of the model.
+  ///
+  /// So no UI string should be derived from this by arithmetic. What the
+  /// picker says about a model's speed is written per model, in one place,
+  /// in `lib/main.dart`, and is to be updated when a measurement on real
+  /// target hardware lands rather than inferred from this number.
+  final double realTimeFactor;
+
+  const CrispAsrModel(this.id, this.nativeRate,
+      {required this.downloadMiB, required this.realTimeFactor});
 
   String get displayName => switch (this) {
         CrispAsrModel.basicPitch => 'Basic Pitch',
         CrispAsrModel.pianoTranscription => 'Piano transcription',
         CrispAsrModel.mt3 => 'MT3 (multi-instrument)',
+        CrispAsrModel.onsetsAndFrames => 'Onsets & Frames (piano)',
+        CrispAsrModel.hftTransformer => 'hFT-Transformer (piano)',
       };
 }
 
@@ -93,9 +169,14 @@ const String kBackendEnv = 'CRISPTUNER_TRANSCRIPTION_BACKEND';
 const String kLibEnv = 'CRISPTUNER_CRISPASR_LIB';
 const String kModelEnv = 'CRISPTUNER_BASIC_PITCH_GGUF';
 
-/// Which model the CrispASR backend should run: `basic-pitch`,
-/// `piano-transcription` or `mt3`. Unset or unrecognised means basic-pitch,
-/// the one that needs no download.
+/// Which model the CrispASR backend should run, by registry id:
+/// `basic-pitch`, `piano-transcription`, `mt3`, `onsets-and-frames` or
+/// `hft-transformer`. Unset or unrecognised means basic-pitch, the smallest.
+///
+/// This variable and [kBackendEnv] together **override the setting the user
+/// picked in the app** — that precedence is deliberate and is how CI and
+/// `bench/` select a backend without touching stored preferences. See
+/// `lib/main.dart`, where it is applied.
 const String kModelNameEnv = 'CRISPTUNER_CRISPASR_MODEL';
 
 /// Parse [kModelNameEnv], tolerantly. An unknown name falls back rather than
@@ -109,6 +190,8 @@ CrispAsrModel crispAsrModelFromName(String? name) {
   return switch (n) {
     'piano' || 'kong' => CrispAsrModel.pianoTranscription,
     'mt3' => CrispAsrModel.mt3,
+    'onsets_and_frames' || 'oaf' => CrispAsrModel.onsetsAndFrames,
+    'hft_transformer' || 'hft' => CrispAsrModel.hftTransformer,
     _ => CrispAsrModel.basicPitch,
   };
 }

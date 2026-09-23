@@ -319,4 +319,62 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get transcriptionNotForTuning =>
       'Names notes only — use the meter above to tune';
+
+  @override
+  String get refinementLabel => 'Steadier reading';
+
+  @override
+  String get refinementDescription =>
+      'Re-measures every reading for a steadier, more precise needle. Costs a little more processing.';
+
+  @override
+  String get transcriptionModelLabel => 'Transcription model';
+
+  @override
+  String get transcriptionModelBuiltIn => 'Built-in — no download';
+
+  @override
+  String transcriptionModelDownloadSize(String size) {
+    return '$size MB download';
+  }
+
+  @override
+  String get transcriptionModelAboutBasicPitch =>
+      'The built-in model, run by the native engine — for comparing the two runtimes';
+
+  @override
+  String get transcriptionModelAboutPiano =>
+      'Piano, in detail — the heaviest of the five to run';
+
+  @override
+  String get transcriptionModelAboutMt3 =>
+      'Best on real music, and the only one that names the instrument';
+
+  @override
+  String get transcriptionModelAboutOnsetsAndFrames =>
+      'Piano, and the best balance of accuracy, size and speed';
+
+  @override
+  String get transcriptionModelAboutHft =>
+      'The smallest of all, and the most accurate on piano';
+
+  @override
+  String get transcriptionModelSpeedAppleSilicon =>
+      'Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.';
+
+  @override
+  String get transcriptionModelEnvOverride =>
+      'Chosen by the CRISPTUNER_TRANSCRIPTION_BACKEND environment variable, which overrides this setting.';
+
+  @override
+  String get transcriptionLibraryMissing =>
+      'This model needs the CrispASR engine, which this installation does not have.';
+
+  @override
+  String get transcriptionModelMissing =>
+      'That model is not on this device yet and could not be downloaded. Check the connection and try again.';
+
+  @override
+  String get transcriptionModelMeasurementNote =>
+      'Sizes and speeds measured on a desktop processor, not on a phone.';
 }

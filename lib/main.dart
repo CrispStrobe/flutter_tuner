@@ -30,6 +30,25 @@ void main() {
 /// which silently stops matching the moment the text is translated.
 enum TunerStatus { idle, listening, inTune, sharp, flat, playing, permissionDenied }
 
+/// The id stored for "the pure-Dart runtime, no CrispASR model". Not a
+/// [CrispAsrModel] value, so it needs a name of its own in preferences.
+const String _kDartRuntimeId = 'built-in';
+
+/// Why transcription is not running, when it is not.
+///
+/// The models are **downloads** — CrispASR fetches the GGUF from HuggingFace
+/// into its own cache the first time one is selected — so "not here yet" is
+/// an ordinary state and has to be a visible one.
+enum _TranscriptionIssue {
+  none,
+
+  /// This build has no libcrispasr, or the library has no arm for the model.
+  libraryMissing,
+
+  /// The model file is not cached and could not be fetched.
+  modelMissing,
+}
+
 class TunerApp extends StatelessWidget {
   /// Audio capture and tone output. Left null in the shipping app, which
   /// creates the platform implementations; supplied by tests and by the
@@ -110,10 +129,40 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   // for the same model: pure Dart ONNX, which ships everywhere, and
   // CrispASR's ggml over FFI, which is 1.8x faster and recalls 8 points more
   // notes but needs a native library nobody's install has by default
-  // (bench/REPORT.md §17, lib/crispasr_backend.dart). Prefer ggml when the
-  // host has actually been configured for it; otherwise the shipped path.
-  final TranscriptionBackend _transcription =
-      CrispAsrBackend.fromEnvironment() ?? TranscriptionService();
+  // (bench/REPORT.md §17, lib/crispasr_backend.dart).
+  //
+  // Which one runs, and which model it runs, is decided in this order —
+  // highest first, and the order is the point:
+  //
+  //   1. the ENVIRONMENT. `CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr`, with
+  //      `CRISPTUNER_CRISPASR_MODEL` naming the model, overrides everything
+  //      and disables the picker. This is how CI and `bench/` select a
+  //      backend, and it must not be silently overridden by whatever is in
+  //      a developer's stored preferences.
+  //   2. the SETTING the user picked, persisted under
+  //      `_prefTranscriptionModel`.
+  //   3. otherwise the pure-Dart ONNX path, which needs no native library
+  //      and no download.
+  //
+  // Reassigned when the user picks a different model, so not final.
+  TranscriptionBackend _transcription = TranscriptionService();
+
+  /// Which CrispASR model is selected, or null for the pure-Dart runtime.
+  CrispAsrModel? _transcriptionModel;
+
+  /// True when the environment chose, in which case the picker is shown but
+  /// disabled: a setting that silently does nothing is worse than a setting
+  /// that says why it cannot.
+  bool _transcriptionFromEnv = false;
+
+  /// Which CrispASR models this build can actually reach. Probed once, at
+  /// startup: each probe opens the native library, and the answer cannot
+  /// change within a run.
+  List<CrispAsrModel> _availableModels = const [];
+
+  /// Why the transcription mode last refused, if it did. Kept as a case
+  /// rather than a message so the reason can be said in the user's language.
+  _TranscriptionIssue _transcriptionIssue = _TranscriptionIssue.none;
   final Halfband _decimator = Halfband();
   final RollingWindow _transcriptionWindow =
       RollingWindow(BasicPitchGeometry.windowSamples);
@@ -150,6 +199,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   static const _prefTemperament = 'temperament';
   static const _prefTemperamentRoot = 'temperament_root';
   static const _prefDetector = 'detector';
+  static const _prefRefinement = 'pitch_refinement';
+  static const _prefTranscriptionModel = 'transcription_model';
 
   /// Pre-2.2 builds stored the instrument as an index into the enum, under a
   /// key that now holds a string. Two things follow, and skipping either one
@@ -175,6 +226,19 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _audioService.init().then((_) => _refreshInputDevices());
     _toneGenerator.init();
+    // Step 1 of the precedence above. Done before preferences are read, so
+    // that `_applyTranscriptionModelPreference` can decline rather than
+    // undo.
+    final fromEnv = CrispAsrBackend.fromEnvironment();
+    if (fromEnv != null) {
+      _transcription = fromEnv;
+      _transcriptionModel = fromEnv.model;
+      _transcriptionFromEnv = true;
+    }
+    _availableModels = [
+      for (final model in CrispAsrModel.values)
+        if (CrispAsrBackend(model: model).isAvailable) model,
+    ];
     _loadPreferences();
   }
 
@@ -216,6 +280,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         DetectorKind.values.firstWhereOrNull((d) => d.name == detectorName);
     if (detector != null) _selectDetector(detector);
 
+    // Absent means "never chosen", which is the default — on. Only an
+    // explicit false turns it off, so an upgrading install gets the
+    // refinement the same way a fresh one does.
+    final refinement = prefs.getBool(_prefRefinement);
+    if (refinement != null) _engine.pitchRefinement = refinement;
+
+    final modelName = prefs.getString(_prefTranscriptionModel);
+    if (modelName != null) _applyTranscriptionModelPreference(modelName);
+
     final root = prefs.getInt(_prefTemperamentRoot);
     if (root != null) _engine.temperamentRoot = root;
   }
@@ -249,6 +322,14 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     await prefs.setString(_prefTemperament, _engine.temperament.name);
     await prefs.setInt(_prefTemperamentRoot, _engine.temperamentRoot);
     await prefs.setString(_prefDetector, _engine.detectorKind.name);
+    await prefs.setBool(_prefRefinement, _engine.pitchRefinement);
+    // Not written while the environment is in charge: the variable overrides
+    // the setting for this run, and writing it back would silently make that
+    // override the user's stored choice for every run after it.
+    if (!_transcriptionFromEnv) {
+      await prefs.setString(
+          _prefTranscriptionModel, _transcriptionModel?.id ?? _kDartRuntimeId);
+    }
   }
 
   @override
@@ -335,6 +416,50 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
+  /// Apply the stored model preference — step 2 of the precedence at the
+  /// top of this class. Declines when the environment has already chosen.
+  void _applyTranscriptionModelPreference(String stored) {
+    if (_transcriptionFromEnv) return;
+    if (stored == _kDartRuntimeId) return;
+    final model = CrispAsrModel.values.firstWhereOrNull((m) => m.id == stored);
+    if (model == null || !_availableModels.contains(model)) return;
+    _selectTranscriptionModel(model, persist: false);
+  }
+
+  /// Switch transcription model, or back to the pure-Dart runtime for null.
+  ///
+  /// Never on the audio path: this runs from settings. The mode is stopped
+  /// first — a backend holds an isolate and a native session, and two of
+  /// them at once would be two models transcribing the same microphone.
+  Future<void> _selectTranscriptionModel(CrispAsrModel? model,
+      {bool persist = true}) async {
+    if (_transcriptionFromEnv || model == _transcriptionModel) return;
+    if (model != null && !_availableModels.contains(model)) {
+      // Say so rather than switching to something that cannot start.
+      if (mounted) {
+        setState(
+            () => _transcriptionIssue = _TranscriptionIssue.libraryMissing);
+      }
+      return;
+    }
+    final wasEnabled = _transcriptionEnabled;
+    if (wasEnabled) await _setTranscriptionEnabled(false);
+    await _transcription.stop();
+    final next =
+        model == null ? TranscriptionService() : CrispAsrBackend(model: model);
+    if (!mounted) return;
+    setState(() {
+      _transcription = next;
+      _transcriptionModel = model;
+      _transcriptionIssue = _TranscriptionIssue.none;
+    });
+    if (persist) await _savePreferences();
+    // Only resume automatically if it was already running: starting a model
+    // the user has not asked to run would begin a download they did not ask
+    // for either.
+    if (wasEnabled) await _setTranscriptionEnabled(true);
+  }
+
   /// Decimate to the model's 22.05 kHz and run a window when one is due.
   void _feedTranscription(Float64List samples) {
     final decimated = _decimator.process(samples);
@@ -391,7 +516,18 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       try {
         await _transcription.start();
       } catch (_) {
-        return; // unsupported platform; the toggle is hidden there anyway
+        // The usual reason is a model that is not on the device and could
+        // not be fetched — the GGUFs are downloads, not bundled assets, and
+        // the backend returns that as a failed start rather than a throw on
+        // the audio path. Say so: the toggle flipping back with no
+        // explanation is the stall this is here to avoid.
+        if (mounted) {
+          setState(() {
+            _transcriptionIssue = _TranscriptionIssue.modelMissing;
+            _transcriptionEnabled = false;
+          });
+        }
+        return;
       }
       _decimator.reset();
       _transcriptionWindow.clear();
@@ -404,6 +540,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       _transcriptionEnabled = enabled;
       _transcriptionResult = TranscriptionResult.empty;
       _transcriptionUnchanged = 0;
+      if (enabled) _transcriptionIssue = _TranscriptionIssue.none;
     });
   }
 
@@ -448,14 +585,22 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     // package's API was asynchronous; the work was always synchronous, and
     // by FFT it now costs a fraction of one callback (bench/REPORT.md §3.3),
     // so there is nothing left to defer.
-    final result = _pitchEngine.analyse(_pitchWindow.lastN(pitchWindowSize));
+    final window = _pitchWindow.lastN(pitchWindowSize);
+    final result = _pitchEngine.analyse(window);
+    // Then re-scan the lag neighbourhood around what the detector chose,
+    // before anything smooths or displays it. 0.548 ms, 2.4% of the frame
+    // budget, and on GuitarSet it takes the median error from 2.45 to 2.05
+    // cents and the needle's jitter down by a fifth without moving a single
+    // voicing or octave decision (bench/REPORT.md §38.1). On by default;
+    // `refinePitch` returns its input untouched when the setting is off.
+    final refined = _engine.refinePitch(window, result.frequency, 44100);
     // The gate and the median live together in the engine: a rejected frame
     // has to clear the smoothing window, or the window goes on averaging
     // over pitches from before the gap.
     final smoothed = _engine.acceptFrame(
       pitched: result.pitched,
       probability: result.probability,
-      pitch: result.frequency,
+      pitch: refined,
     );
     if (smoothed != null) {
       final detection = _engine.detectNote(smoothed);
@@ -650,6 +795,46 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         return l10n.detectorMpm;
       case DetectorKind.swipe:
         return l10n.detectorSwipe;
+    }
+  }
+
+  /// Everything the picker says about a model: what it is good at, and any
+  /// caveat about its speed.
+  ///
+  /// **One place per model, deliberately.** The speed line is a claim about
+  /// hardware this project has never run on — `realTimeFactor` was measured
+  /// on four shared vCPUs of a contended Linux VPS with the two newest arms
+  /// pinned to CPU (see its doc comment) — so it is written per model rather
+  /// than computed from that number, and when a measurement on real target
+  /// hardware arrives this table is the only thing that has to change. Do
+  /// not repeat either line anywhere else in the UI.
+  ///
+  /// The accuracy figures behind `about` are in
+  /// `lib/crispasr_backend_ffi.dart` and `bench/REPORT.md` §32, §36.4, §37.
+  static ({String about, String? speed}) transcriptionModelNotes(
+      AppLocalizations l10n, CrispAsrModel model) {
+    switch (model) {
+      case CrispAsrModel.basicPitch:
+        return (about: l10n.transcriptionModelAboutBasicPitch, speed: null);
+      case CrispAsrModel.pianoTranscription:
+        return (about: l10n.transcriptionModelAboutPiano, speed: null);
+      case CrispAsrModel.mt3:
+        return (about: l10n.transcriptionModelAboutMt3, speed: null);
+      case CrispAsrModel.onsetsAndFrames:
+        return (
+          about: l10n.transcriptionModelAboutOnsetsAndFrames,
+          speed: null
+        );
+      case CrispAsrModel.hftTransformer:
+        // Measured on a GitHub macos-14 runner — a virtualised 3-core M1
+        // with no efficiency cores — at 0.93x real time on f32 and 0.56x on
+        // q4_0, CPU only. That slice is a floor, not a typical Mac, so
+        // "keeps up" is the claim and nothing stronger. A phone has not been
+        // measured and is not extrapolated to from this.
+        return (
+          about: l10n.transcriptionModelAboutHft,
+          speed: l10n.transcriptionModelSpeedAppleSilicon
+        );
     }
   }
 
@@ -980,6 +1165,25 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               ),
             ],
           ),
+          // A model that is not on the device is an ordinary state — the
+          // GGUFs are downloads — so the mode failing to start says so here,
+          // next to the switch that just flipped back.
+          if (_transcriptionIssue == _TranscriptionIssue.modelMissing)
+            Text(l10n.transcriptionModelMissing,
+                style: TextStyle(fontSize: 11, color: palette.accent)),
+          if (_transcriptionIssue == _TranscriptionIssue.libraryMissing)
+            Text(l10n.transcriptionLibraryMissing,
+                style: TextStyle(fontSize: 11, color: palette.accent)),
+          // The selected model's speed caveat, if it has one — the same
+          // string the picker shows, from the same table, never a second
+          // wording of the same claim.
+          if (_transcriptionModel != null &&
+              transcriptionModelNotes(l10n, _transcriptionModel!).speed !=
+                  null)
+            Text(
+              transcriptionModelNotes(l10n, _transcriptionModel!).speed!,
+              style: TextStyle(fontSize: 11, color: palette.accent),
+            ),
           if (_transcriptionEnabled) ...[
             // Said plainly and next to the notes, not buried in a help page:
             // the model's pitch resolution is 33 cents (bench/REPORT.md §10),
@@ -1435,6 +1639,124 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             ),
           ),
 
+          const SizedBox(height: 8),
+
+          // The one refinement in bench/REPORT.md that improves the tuner
+          // without a trade (§38): re-scanning the lag neighbourhood around
+          // what the detector chose. Labelled for what a player notices — a
+          // steadier, more precise needle — rather than by algorithm.
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(l10n.refinementLabel,
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: palette.textSecondary)),
+                    Text(l10n.refinementDescription,
+                        style:
+                            TextStyle(fontSize: 11, color: palette.textFaint)),
+                  ],
+                ),
+              ),
+              Semantics(
+                label: l10n.refinementLabel,
+                child: Switch(
+                  value: _engine.pitchRefinement,
+                  onChanged: isActionDisabled
+                      ? null
+                      : (value) {
+                          setState(() => _engine.pitchRefinement = value);
+                          _savePreferences();
+                        },
+                ),
+              ),
+            ],
+          ),
+
+          // Which model the note-transcription mode runs. Selection used to
+          // be by environment variable only; the variable still wins (see
+          // the precedence comment at the top of this class), and when it
+          // has been set this picker says so rather than pretending.
+          if (TranscriptionService.isSupported) ...[
+            const SizedBox(height: 8),
+            Semantics(
+              label: l10n.transcriptionModelLabel,
+              child: DropdownButtonFormField<CrispAsrModel?>(
+                initialValue: _transcriptionModel,
+                isDense: true,
+                isExpanded: true,
+                itemHeight: 64,
+                decoration: _fieldDecoration(
+                  palette,
+                  prefixIcon: Icon(Icons.piano,
+                      size: 16, color: palette.textFaint),
+                ),
+                dropdownColor: palette.surfaceStrong,
+                selectedItemBuilder: (context) => [
+                  Text(l10n.transcriptionModelBuiltIn,
+                      style: textStyle, overflow: TextOverflow.ellipsis),
+                  for (final model in CrispAsrModel.values)
+                    Text(model.displayName,
+                        style: textStyle, overflow: TextOverflow.ellipsis),
+                ],
+                onChanged: (isActionDisabled || _transcriptionFromEnv)
+                    ? null
+                    : (CrispAsrModel? model) =>
+                        _selectTranscriptionModel(model),
+                items: [
+                  DropdownMenuItem<CrispAsrModel?>(
+                    value: null,
+                    child: _modelMenuEntry(
+                      palette,
+                      l10n.transcriptionModelBuiltIn,
+                      l10n.transcriptionModelAboutBasicPitch,
+                    ),
+                  ),
+                  for (final model in CrispAsrModel.values)
+                    DropdownMenuItem<CrispAsrModel?>(
+                      value: model,
+                      child: _modelMenuEntry(
+                        palette,
+                        '${model.displayName} · '
+                        '${l10n.transcriptionModelDownloadSize(
+                          model.downloadMiB.toStringAsFixed(1),
+                        )}',
+                        _availableModels.contains(model)
+                            ? transcriptionModelNotes(l10n, model).about
+                            : l10n.transcriptionLibraryMissing,
+                        dimmed: !_availableModels.contains(model),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            // Everything worth saying under the picker, in the order it
+            // becomes true. The sizes are downloads and the speeds were
+            // measured on a desktop CPU; both are said rather than implied.
+            const SizedBox(height: 4),
+            if (_transcriptionFromEnv)
+              _settingsNote(palette, l10n.transcriptionModelEnvOverride),
+            if (_transcriptionModel != null &&
+                transcriptionModelNotes(l10n, _transcriptionModel!).speed !=
+                    null)
+              _settingsNote(
+                palette,
+                transcriptionModelNotes(l10n, _transcriptionModel!).speed!,
+                warn: true,
+              ),
+            if (_transcriptionIssue == _TranscriptionIssue.libraryMissing)
+              _settingsNote(palette, l10n.transcriptionLibraryMissing,
+                  warn: true),
+            if (_transcriptionIssue == _TranscriptionIssue.modelMissing)
+              _settingsNote(palette, l10n.transcriptionModelMissing,
+                  warn: true),
+            _settingsNote(palette, l10n.transcriptionModelMeasurementNote),
+          ],
+
           if (_inputDevices.length > 1) ...[
             const SizedBox(height: 8),
             Semantics(
@@ -1475,6 +1797,48 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// One row of the transcription-model menu: what it is on top, what it is
+  /// good at underneath. [dimmed] marks a model this installation cannot
+  /// reach, whose second line says why instead.
+  Widget _modelMenuEntry(TunerPalette palette, String title, String subtitle,
+      {bool dimmed = false}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 12,
+            color: dimmed ? palette.textFaint : palette.textPrimary,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          subtitle,
+          style: TextStyle(fontSize: 10, color: palette.textFaint),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
+  /// A small line of explanation under a setting.
+  Widget _settingsNote(TunerPalette palette, String text,
+      {bool warn = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          color: warn ? palette.accent : palette.textFaint,
+        ),
       ),
     );
   }

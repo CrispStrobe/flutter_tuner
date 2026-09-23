@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'detectors.dart';
 import 'fft_real.dart';
+import 'refinement.dart';
 import 'temperament.dart';
 import 'tuner_core.dart';
 // Also imported under a prefix: the class below deliberately re-exposes
@@ -16,6 +17,7 @@ import 'tunings.dart';
 
 export 'detectors.dart'
     show DetectorKind, PitchEngine, PitchEstimate, YinEngine, MpmEngine;
+export 'refinement.dart';
 export 'temperament.dart';
 export 'tuner_core.dart'
     show
@@ -76,6 +78,8 @@ class TunerEngine extends ChangeNotifier {
   final PitchSmoother _smoother = PitchSmoother();
 
   DetectorKind _detectorKind = DetectorKind.yin;
+
+  bool _pitchRefinement = true;
 
   NoteDetectionResult? _lastResult;
 
@@ -269,6 +273,38 @@ class TunerEngine extends ChangeNotifier {
     _detectorKind = value;
     _smoother.clear();
     notifyListeners();
+  }
+
+  /// Whether the detector's period is re-scanned before the reading is
+  /// shown — `refineByOverlapCorrelation`, ported from StringTune.
+  ///
+  /// On by default, because on GuitarSet's 180 solo files it improves every
+  /// precision column and changes none of the others: the median absolute
+  /// error falls 2.45 → 2.05 cents, the p90 7.70 → 6.45, frames worse than
+  /// five cents 22.18% → 16.68%, and needle jitter p90 3.65 → 2.85, while
+  /// raw pitch accuracy, the octave rate, the gross-error rate and both
+  /// voicing rates are identical to the digit (`bench/REPORT.md` §38.1).
+  /// It costs 0.548 ms a frame, 2.4% of the budget. Offered as a setting
+  /// all the same, because it is arithmetic on the reading and a player who
+  /// wants the detector's own answer should be able to have it.
+  bool get pitchRefinement => _pitchRefinement;
+  set pitchRefinement(bool value) {
+    if (_pitchRefinement == value) return;
+    _pitchRefinement = value;
+    // The two settings differ by a couple of cents on the same audio, which
+    // is more than a five-sample median should ever average across.
+    _smoother.clear();
+    notifyListeners();
+  }
+
+  /// Improve one detected pitch using the window it came from.
+  ///
+  /// Returns [pitch] unchanged when the refinement is switched off, when the
+  /// frame was not pitched, or when the refinement itself declines — see
+  /// `refinement.dart` for the two cases where declining is deliberate.
+  double refinePitch(List<double> window, double pitch, double sampleRate) {
+    if (!_pitchRefinement || pitch <= 0) return pitch;
+    return refineByOverlapCorrelation(window, pitch, sampleRate);
   }
 
   /// Apply the median filter to smooth an already-accepted pitch.
