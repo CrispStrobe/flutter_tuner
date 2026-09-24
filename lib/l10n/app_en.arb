@@ -320,7 +320,7 @@
   },
   "transcriptionModelSpeedAppleSilicon": "Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.",
   "@transcriptionModelSpeedAppleSilicon": {
-    "description": "Speed note for a model measured under real time on an Apple Silicon CI runner, but not on a phone or tablet"
+    "description": "Speed note for a model measured under real time on an Apple Silicon Mac (CPU and Metal), but not on a phone or tablet"
   },
   "transcriptionModelEnvOverride": "Chosen by the CRISPTUNER_TRANSCRIPTION_BACKEND environment variable, which overrides this setting.",
   "@transcriptionModelEnvOverride": {

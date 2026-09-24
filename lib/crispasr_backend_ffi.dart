@@ -58,9 +58,10 @@ import 'transcription_backend.dart';
 ///     of the five.
 ///   * **hFT-Transformer when size matters most.** The best solo-piano score
 ///     here, 70.7%, out of 4.5 MiB of q4_0 weights — the most accuracy per
-///     megabyte of the five. **Its speed on the devices this app ships to
-///     is not known**; see [realTimeFactor] for what the 2.14× is and is
-///     not evidence of.
+///     megabyte of the five. On a physical M1 it runs at 0.30× real time on
+///     Metal and 0.76× on the CPU at this app's two threads (CrispASR
+///     `PIANO_METAL_AB.md` §8); **on a phone or tablet it is not known**.
+///     See [realTimeFactor] for what the 2.14× is and is not evidence of.
 ///   * **Basic Pitch for comparing runtimes**, which is what it is here for:
 ///     it is the same model the pure-Dart path runs.
 ///
@@ -97,8 +98,9 @@ enum CrispAsrModel {
   /// 4.5 MiB at q4_0 (Toyama et al., ISMIR 2023). The best solo-piano score
   /// measured here, **70.7%** (52.2% overall), out of less weight than a
   /// photograph: the most accuracy per megabyte of the five. Its cost is set
-  /// by its sequence length rather than its parameter count (§36.2), and
-  /// what that costs on a phone or a Mac is **not known** — see
+  /// by its sequence length rather than its parameter count (§36.2). On a
+  /// physical M1 that is 0.30× real time on Metal and 0.76× on two CPU
+  /// threads; on a phone or tablet it is **not known** — see
   /// [realTimeFactor].
   hftTransformer('hft-transformer', 16000,
       downloadMiB: 4.5, realTimeFactor: 2.14);
@@ -123,16 +125,17 @@ enum CrispAsrModel {
   /// both concrete:
   ///
   ///   * the machine. Skylake-SP vCPUs shared with other tenants, measured
-  ///     under load average 3–20. Nothing in this project has run on a
-  ///     phone, a tablet or a Mac.
-  ///   * the build. `onsets_and_frames.cpp` and `hft_transformer.cpp` both
-  ///     call `core_cpu_backend::init()` unconditionally and never read
-  ///     their `use_gpu` parameter, so these two arms are CPU-only today
-  ///     where CrispASR's other backends go through
-  ///     `crispasr_init_gpu_backend()` (CUDA > Metal > Vulkan > CPU). hFT is
-  ///     83.5% dense weight GEMM (§36.2) — exactly the arithmetic a GPU
-  ///     backend exists for — so its number here is a floor on a path that
-  ///     is being changed, not a property of the model.
+  ///     under load average 3–20. The only other measurements are on Apple
+  ///     Silicon Macs (CrispASR `PIANO_METAL_AB.md` §4, §8); nothing has
+  ///     run on a phone or a tablet.
+  ///   * the build. When these were measured, `onsets_and_frames.cpp` and
+  ///     `hft_transformer.cpp` were CPU-only. CrispASR has since wired both
+  ///     through `crispasr_init_gpu_backend()`, and a session opens with
+  ///     `use_gpu` on, so a Metal-built libcrispasr that contains that
+  ///     change runs them on the GPU with no change here. On a physical M1
+  ///     that made hFT 2.4–4.4× faster than two CPU threads and O&F about
+  ///     1.45× (CrispASR `PIANO_METAL_AB.md` §8), so a CPU figure is a
+  ///     floor on Apple Silicon, not a property of the model.
   ///
   /// So no UI string should be derived from this by arithmetic. What the
   /// picker says about a model's speed is written per model, in one place,
