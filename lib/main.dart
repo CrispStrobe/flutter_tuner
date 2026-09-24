@@ -826,11 +826,12 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           speed: null
         );
       case CrispAsrModel.hftTransformer:
-        // Measured on a GitHub macos-14 runner — a virtualised 3-core M1
-        // with no efficiency cores — at 0.93x real time on f32 and 0.56x on
-        // q4_0, CPU only. That slice is a floor, not a typical Mac, so
-        // "keeps up" is the claim and nothing stronger. A phone has not been
-        // measured and is not extrapolated to from this.
+        // Measured on a physical M1 at the q4_0 and two threads this app
+        // uses: 0.76x real time on the CPU, 0.30x on Metal (CrispASR
+        // PIANO_METAL_AB.md §8; on a GitHub macos-14 slice, CPU only, 0.56x).
+        // Both are under real time, so "keeps up" holds whichever backend
+        // the host library has, and nothing stronger is claimed. A phone has
+        // not been measured and is not extrapolated to from this.
         return (
           about: l10n.transcriptionModelAboutHft,
           speed: l10n.transcriptionModelSpeedAppleSilicon

@@ -716,7 +716,7 @@ abstract class AppLocalizations {
   /// **'The smallest of all, and the most accurate on piano'**
   String get transcriptionModelAboutHft;
 
-  /// Speed note for a model measured under real time on an Apple Silicon CI runner, but not on a phone or tablet
+  /// Speed note for a model measured under real time on an Apple Silicon Mac (CPU and Metal), but not on a phone or tablet
   ///
   /// In en, this message translates to:
   /// **'Measured on an Apple Silicon Mac: keeps up with live playing. Speed on phones and tablets has not been measured.'**
