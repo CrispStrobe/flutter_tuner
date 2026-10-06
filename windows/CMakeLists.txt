@@ -87,6 +87,17 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# CrispASR, for the optional transcription models (lib/crispasr_backend.dart):
+# crispasr.dll and its ggml DLLs next to the executable. Present only after
+# `tool/crispasr/build.sh windows`; without it the models report themselves
+# unavailable.
+file(GLOB CRISPASR_DLLS "${CMAKE_CURRENT_SOURCE_DIR}/../tool/crispasr/windows/bin/*.dll")
+if(CRISPASR_DLLS)
+  install(FILES ${CRISPASR_DLLS}
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

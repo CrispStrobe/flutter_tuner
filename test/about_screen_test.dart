@@ -10,7 +10,7 @@ const _surface = Size(412, 915);
 /// The About screen is a long lazy [ListView]; a phone-sized viewport never
 /// builds the lower cards, so assertions on them would fail for layout reasons
 /// rather than real ones. Give these tests a tall viewport instead.
-const _tallSurface = Size(500, 3200);
+const _tallSurface = Size(500, 4200);
 
 Future<void> _pumpAbout(WidgetTester tester, {Locale? locale}) async {
   tester.view.physicalSize = _tallSurface;
@@ -60,9 +60,16 @@ void main() {
       // here or its Apache-2.0 attribution appears nowhere.
       expect(find.text('Basic Pitch (model weights)'), findsOneWidget);
       expect(find.text('onnx_runtime_dart'), findsOneWidget);
-      // Licence names shown next to the components. Two components are
-      // Apache-2.0 now: fftea and the model weights.
-      expect(find.text('Apache-2.0'), findsNWidgets(2));
+      // The CrispASR engine, and the four models it can download. None is a
+      // pub package, so each has to be listed by hand.
+      expect(find.text('CrispASR and ggml'), findsOneWidget);
+      expect(find.text('MT3 (model weights)'), findsOneWidget);
+      expect(find.text('Piano transcription (model weights)'), findsOneWidget);
+      expect(find.text('Onsets & Frames (model weights)'), findsOneWidget);
+      expect(find.text('hFT-Transformer (model weights)'), findsOneWidget);
+      // Licence names shown next to the components. Apache-2.0: fftea, Basic
+      // Pitch, MT3 and the piano-transcription weights.
+      expect(find.text('Apache-2.0'), findsNWidgets(4));
       expect(find.text('Unlicense'), findsOneWidget);
       expect(find.text('BSD 3-Clause'), findsWidgets);
     });

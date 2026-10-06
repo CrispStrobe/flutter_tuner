@@ -146,7 +146,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aboutPrivacyBody =>
-      'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.';
+      'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The only time the app connects to the internet is when you choose an optional transcription model and confirm the download: the file comes from Hugging Face (huggingface.co), once, and stays on your device. Nothing is sent with that request but the request itself.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.';
 
   @override
   String get aboutPrivacyPolicyLink => 'Read the full privacy policy';
@@ -337,6 +337,34 @@ class AppLocalizationsEn extends AppLocalizations {
   String transcriptionModelDownloadSize(String size) {
     return '$size MB download';
   }
+
+  @override
+  String transcriptionModelDownloadTitle(String model) {
+    return 'Download $model?';
+  }
+
+  @override
+  String transcriptionModelDownloadBody(String size) {
+    return '$size MB from Hugging Face (huggingface.co). It is downloaded once and kept on this device. The request for the file is the only thing sent; no audio or settings leave the device.';
+  }
+
+  @override
+  String get transcriptionModelDownloadConfirm => 'Download';
+
+  @override
+  String get transcriptionModelDownloadCancel => 'Cancel';
+
+  @override
+  String transcriptionModelDownloading(
+      String model, String received, String total) {
+    return 'Downloading $model: $received of $total MB';
+  }
+
+  @override
+  String get transcriptionModelOnDevice => 'on this device';
+
+  @override
+  String get transcriptionModelRemove => 'Remove downloaded model';
 
   @override
   String get transcriptionModelAboutBasicPitch =>

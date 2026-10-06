@@ -48,9 +48,11 @@ linear search hands that whole band to the lower note.
 ## Privacy
 
 The app collects nothing. Audio is analysed on-device in real time and is never
-recorded, stored or transmitted; there are no accounts, analytics, ads, tracking
-or network requests. Only your settings — concert pitch, instrument, tuning,
-custom tuning and temperament — are saved, locally.
+recorded, stored or transmitted; there are no accounts, analytics, ads or
+tracking. Only your settings — concert pitch, instrument, tuning, custom tuning
+and temperament — are saved, locally. The one network request the app can make
+is downloading an optional transcription model from Hugging Face, after you
+choose one and confirm.
 
 Policy: [`web/privacy.html`](web/privacy.html) → https://crisptuner.vercel.app/privacy.html
 
@@ -97,6 +99,28 @@ a Ruby version manager is shadowing Homebrew's Ruby. Clear them:
 ```bash
 env -u GEM_HOME -u GEM_PATH -u RUBYOPT flutter run -d macos
 ```
+
+### The CrispASR transcription models
+
+The four extra transcription models (MT3, piano transcription, Onsets & Frames,
+hFT-Transformer) run on CrispASR, a native library that is not in the
+repository. A plain `flutter run` works without it — the models show as
+unavailable. To include it, run once per platform before building:
+
+```bash
+tool/crispasr/build.sh apple     # iOS + macOS (downloads the release xcframework)
+tool/crispasr/build.sh android   # needs ANDROID_NDK_HOME (r27+)
+tool/crispasr/build.sh linux
+tool/crispasr/build.sh windows   # from Git Bash, with Visual Studio's C++ tools
+tool/crispasr/build.sh wasm      # needs emsdk; then build web with
+                                 #   --dart-define=CRISPTUNER_CRISPASR_WASM=true
+```
+
+The release workflows do this through `.github/actions/crispasr`. The CrispASR
+version is pinned in `tool/crispasr/version.env`. The models themselves are
+never bundled: each is downloaded from Hugging Face the first time it is
+chosen, after the app asks, and checked against a pinned SHA-256
+(`lib/crispasr_model.dart`).
 
 ## Headless probe
 

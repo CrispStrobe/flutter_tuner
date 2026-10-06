@@ -1,5 +1,6 @@
-/// A second transcription runtime: the same Basic Pitch model through
-/// CrispASR's ggml, over FFI.
+/// A second transcription runtime: CrispASR's ggml, over FFI on native
+/// platforms and as WebAssembly in the browser — and with it four models
+/// the pure-Dart path cannot run.
 ///
 /// `transcription_backend.dart` predicted what this would cost and what it
 /// would buy; `bench/bin/runtime_compare.dart` measured both on GuitarSet's
@@ -18,23 +19,34 @@
 /// segmented note events rather than per-frame activations and a note event
 /// bridges the frames where activation dips below threshold.
 ///
-/// **It is still not the default.** The `crispasr` package is pure Dart FFI
-/// and does not bundle the native library: shipping this means a ~23 MB
-/// `libcrispasr` on five platforms and no web build, to speed up a mode that
-/// already runs in 159 ms on Apple Silicon (§19) and updates twice a second.
-/// §18 then removed the rest of its case by porting the decoder advantage
-/// into pure Dart.
+/// **It is still not the default**, and the reason is unchanged: §18 ported
+/// the decoder advantage into pure Dart, and the built-in path needs neither
+/// a native library nor a download. What CrispASR adds is the *other four
+/// models* — MT3 above all — and those are a choice the user makes in
+/// settings, with the download size in front of them.
 ///
-/// What changed in §25 is *availability*, not preference. The backend used
-/// to demand an environment variable pointing at a GGUF the user had to find
-/// for themselves, which meant it could not be reached at all; it now
-/// resolves the model through CrispASR's own registry and cache and looks
-/// for the library where a shipped app would keep it. So it is **selectable
-/// rather than theoretical** — and selection stays explicit
-/// (`CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr`), because availability must
-/// not become preference. The door this leaves open is MT3: 96 MB and 46.9M
-/// parameters, where speed decides whether the mode runs at all.
+/// How the library reaches each platform (`tool/crispasr/`, and the release
+/// workflows that call it):
+///
+///   * iOS and macOS embed `crispasr.framework` from CrispASR's release
+///     xcframework, through a local CocoaPods pod.
+///   * Android, Linux and Windows build `libcrispasr` from the same pinned
+///     CrispASR release, because its release archives carry no shared
+///     library for desktop and a 4 KB-aligned one for Android, which Google
+///     Play no longer accepts.
+///   * The web build compiles CrispASR to single-threaded WebAssembly with
+///     one added binding, `sessionPianoNotes`
+///     (`tool/crispasr/wasm-piano-notes.patch`), and runs it in a worker.
+///
+/// A build made without that step — a plain `flutter run` — still works:
+/// the backend reports itself unavailable and the picker says so.
+///
+/// Selection by environment variable
+/// (`CRISPTUNER_TRANSCRIPTION_BACKEND=crispasr`) still overrides the
+/// setting; that is how CI and `bench/` pick a backend without touching
+/// stored preferences.
 library;
 
-export 'crispasr_backend_stub.dart'
+export 'crispasr_model.dart';
+export 'crispasr_backend_web.dart'
     if (dart.library.ffi) 'crispasr_backend_ffi.dart';

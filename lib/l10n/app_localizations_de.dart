@@ -147,7 +147,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aboutPrivacyBody =>
-      'Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking, und die App stellt überhaupt keine Netzwerkverbindungen her.\n\nNur Ihre Einstellungen – Kammerton, Instrument, gewählte Stimmung, Ihre eigene Stimmung sowie Temperatur und deren Tonart – werden lokal gespeichert, damit sie beim nächsten Start wieder bereitstehen. Beim Deinstallieren werden sie entfernt.';
+      'Kurz gesagt: CrispTuner erfasst nichts über Sie.\n\nDas Mikrofonsignal wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking. Ins Internet geht die App nur, wenn Sie ein optionales Erkennungsmodell wählen und den Download bestätigen: Die Datei kommt einmalig von Hugging Face (huggingface.co) und bleibt auf Ihrem Gerät. Mit dieser Anfrage wird nichts außer der Anfrage selbst gesendet.\n\nNur Ihre Einstellungen – Kammerton, Instrument, gewählte Stimmung, Ihre eigene Stimmung sowie Temperatur und deren Tonart – werden lokal gespeichert, damit sie beim nächsten Start wieder bereitstehen. Beim Deinstallieren werden sie entfernt.';
 
   @override
   String get aboutPrivacyPolicyLink =>
@@ -339,6 +339,34 @@ class AppLocalizationsDe extends AppLocalizations {
   String transcriptionModelDownloadSize(String size) {
     return '$size MB Download';
   }
+
+  @override
+  String transcriptionModelDownloadTitle(String model) {
+    return '$model herunterladen?';
+  }
+
+  @override
+  String transcriptionModelDownloadBody(String size) {
+    return '$size MB von Hugging Face (huggingface.co). Das Modell wird einmal geladen und bleibt auf diesem Gerät. Gesendet wird nur die Anfrage nach der Datei; weder Audio noch Einstellungen verlassen das Gerät.';
+  }
+
+  @override
+  String get transcriptionModelDownloadConfirm => 'Herunterladen';
+
+  @override
+  String get transcriptionModelDownloadCancel => 'Abbrechen';
+
+  @override
+  String transcriptionModelDownloading(
+      String model, String received, String total) {
+    return '$model wird geladen: $received von $total MB';
+  }
+
+  @override
+  String get transcriptionModelOnDevice => 'auf dem Gerät';
+
+  @override
+  String get transcriptionModelRemove => 'Geladenes Modell entfernen';
 
   @override
   String get transcriptionModelAboutBasicPitch =>

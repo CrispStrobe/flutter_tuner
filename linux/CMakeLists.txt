@@ -106,6 +106,18 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
+# CrispASR, for the optional transcription models (lib/crispasr_backend.dart).
+# Present only after `tool/crispasr/build.sh linux`; without it the models
+# report themselves unavailable. USE_SOURCE_PERMISSIONS and the directory
+# form keep the libcrispasr.so symlink a symlink.
+set(CRISPASR_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tool/crispasr/linux/lib")
+if(EXISTS "${CRISPASR_LIB_DIR}")
+  install(DIRECTORY "${CRISPASR_LIB_DIR}/"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    USE_SOURCE_PERMISSIONS
+    COMPONENT Runtime)
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

@@ -1,0 +1,18 @@
+CrispTuner 2.5.0 — die zusätzlichen Erkennungsmodelle funktionieren jetzt.
+
+Das Stimmen selbst ist unverändert. Neu: Die vier zusätzlichen Modelle im Modellmenü (MT3, Piano transcription, Onsets & Frames, hFT-Transformer) waren bisher aufgeführt, liefen aber nicht. Dieser Build enthält die nötige Engine.
+
+Bitte ausprobieren:
+
+1. Zuerst das Zuhören beenden (das Menü ist ausgegraut, solange das Mikrofon läuft). In den Einstellungen das Menü mit dem Klavier-Symbol öffnen und ein Modell wählen. Am besten mit hFT-Transformer anfangen: das kleinste (4,5 MB).
+2. Die App fragt vor dem Herunterladen und nennt die Dateigröße. „Herunterladen“ tippen und den Fortschrittsbalken beobachten. Auch einmal „Abbrechen“ ausprobieren.
+3. Zuhören starten, unter Akkorderkennung „Akkorde erkennen“ einschalten und einen Akkord oder eine kurze Phrase spielen. Die Noten sollten erscheinen.
+4. MT3 (96 MB) ist bei echter Musik am genauesten und erkennt das Instrument. Am besten im WLAN ausprobieren.
+5. „Geladenes Modell entfernen“ unter dem Menü sollte es löschen und zum eingebauten Modell zurückkehren.
+
+Was uns am meisten interessiert:
+• Ob die Noten mit dem Spiel mithalten, und auf welchem Gerät. Mit diesem Build laufen die Modelle zum ersten Mal auf einem Telefon, Tablet oder Mac; wie schnell sie dort sind, ist noch offen.
+• Alles, was beim Herunterladen oder Erkennen hängen zu bleiben scheint.
+• Auf einem Mac älter als macOS 13.3 sollten die zusätzlichen Modelle als nicht verfügbar erscheinen und alles andere wie bisher funktionieren.
+
+Datenschutz: Ein Modell herunterzuladen ist das Einzige, wofür die App das Internet nutzt. Die Datei kommt einmalig von huggingface.co und bleibt auf dem Gerät. Weder Audio noch Einstellungen werden gesendet.

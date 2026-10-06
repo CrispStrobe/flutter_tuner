@@ -28,7 +28,7 @@ MEASUREMENT
 
 PRIVATE BY DESIGN
 
-CrispTuner collects nothing. Audio is analysed on your device, in real time, and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The app makes no network requests at all.
+CrispTuner collects nothing. Audio is analysed on your device, in real time, and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The only network request the app ever makes is downloading an optional transcription model, when you choose one and confirm.
 
 Your settings are saved locally so they are there next time you open the app.
 

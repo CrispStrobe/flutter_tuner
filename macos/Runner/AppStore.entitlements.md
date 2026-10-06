@@ -46,13 +46,14 @@ the same as the entitlement being signed into the binary.
 |---|---|
 | `com.apple.security.app-sandbox` | Mandatory for the Mac App Store. If `-exportArchive` re-signs from its default entitlement set this silently disappears, which is an automatic rejection — hence the explicit `codesign` step. |
 | `com.apple.security.device.audio-input` | The app's entire purpose: capturing from the microphone. |
+| `com.apple.security.network.client` | Outgoing connections only, for one thing: downloading a transcription model from Hugging Face when the user picks one and confirms the download (`lib/model_store_io.dart`). Without it the sandbox blocks the request and the CrispASR models can never be used. Nothing else in the app opens a connection. |
 | `com.apple.application-identifier` | `<TEAM>.<bundle id>`. Without it `altool` reports warning 90886 ("the signature … is missing an application identifier but has one in the provisioning profile"). |
 | `com.apple.developer.team-identifier` | Pairs with the above. |
 
 ## Deliberately absent
 
 - `com.apple.security.cs.allow-jit` — release builds are AOT compiled.
-- `com.apple.security.network.*` — the app makes no network requests.
+- `com.apple.security.network.server` — the app accepts no connections.
 - `com.apple.security.files.*` — the app reads and writes no user files.
 
 Every entitlement is something App Review can ask about; claim only what the app

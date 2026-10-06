@@ -25,6 +25,18 @@ const _components = <_Component>[
       'Pure-Dart model inference for the transcription mode'),
   _Component('Basic Pitch (model weights)', 'Apache-2.0',
       'Polyphonic note transcription, after Gfeller et al. (Spotify, ICASSP 2022)'),
+  _Component('CrispASR and ggml', 'MIT',
+      'Native and WebAssembly engine for the optional transcription models'),
+  // The four below are downloaded only when chosen in settings; the licence
+  // is each Hugging Face repository's own (cstr/<model>-GGUF).
+  _Component('MT3 (model weights)', 'Apache-2.0',
+      'Multi-instrument transcription, after Gardner et al. (Magenta, ICLR 2022)'),
+  _Component('Piano transcription (model weights)', 'Apache-2.0',
+      'High-resolution piano transcription, after Kong et al. (ByteDance, 2021)'),
+  _Component('Onsets & Frames (model weights)', 'MIT',
+      'Piano transcription, after Hawthorne et al. (ISMIR 2018)'),
+  _Component('hFT-Transformer (model weights)', 'MIT',
+      'Piano transcription, after Toyama et al. (Sony, ISMIR 2023)'),
   _Component('record', 'BSD 3-Clause', 'Microphone capture on mobile and desktop'),
   _Component('flutter_pcm_sound', 'Unlicense', 'Low-latency PCM playback for reference tones'),
   _Component('shared_preferences', 'BSD 3-Clause', 'Stores your concert pitch and instrument'),

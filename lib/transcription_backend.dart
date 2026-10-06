@@ -1,11 +1,11 @@
-/// The seam a second transcription runtime would slot into.
+/// The seam the transcription runtimes slot into.
 ///
-/// There is one backend today — Basic Pitch through `onnx_runtime_dart`, pure
-/// Dart, no FFI — and the measurements say that is enough: 324 ms for a
-/// two-second window on Apple Silicon (`bench/REPORT.md` §14), against a mode
-/// that updates twice a second. Speed is not the open question.
+/// The default is Basic Pitch through `onnx_runtime_dart` — pure Dart, no
+/// FFI — and for that one model the measurements say it is enough: 324 ms
+/// for a two-second window on Apple Silicon (`bench/REPORT.md` §14),
+/// against a mode that updates twice a second.
 ///
-/// The interface exists anyway, because the *choice* is live. CrisperWeaver,
+/// The interface exists because the *choice* is live. CrisperWeaver,
 /// the sibling project, runs its transcription through CrispASR's ggml
 /// runtime over FFI, and does it behind exactly this shape: a
 /// `TranscriptionEngine` interface, an `EngineType` enum carrying the
@@ -13,17 +13,11 @@
 /// platform. That structure is why adding a cloud engine there did not touch
 /// its UI.
 ///
-/// The reason this app does *not* use CrispASR today is not quality, it is
-/// packaging. From the `crispasr` package's own README: it "is pure Dart FFI
-/// and does not bundle the native library. Install `libcrispasr` separately
-/// or ship it with your app." For CrisperWeaver that is the product — 43 ASR
-/// backends and 48 TTS engines. For a tuner it would mean shipping a native
-/// library to five platforms, and losing the web build entirely, in order to
-/// run one 225 KB model that already runs fast enough in Dart.
-///
-/// If that changes — MT3 is 96 MB and 46.9M parameters, and would need real
-/// speed — a `CrispAsrBackend` implements this interface and nothing above it
-/// moves.
+/// The same shape serves here. `CrispAsrBackend` (`crispasr_backend.dart`)
+/// implements this interface for the four models the pure-Dart path cannot
+/// run — MT3 above all — over FFI on native platforms and as WebAssembly in
+/// the browser, and nothing above the interface had to move. The built-in
+/// path stays the default: it needs no native library and no download.
 library;
 
 import 'dart:typed_data';

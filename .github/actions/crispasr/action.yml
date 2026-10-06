@@ -1,0 +1,62 @@
+name: CrispASR native library
+description: >
+  Put CrispASR's library where the Flutter build for one platform picks it up
+  (tool/crispasr/build.sh), from cache when the pinned release, the build
+  script and the wasm patch are all unchanged.
+
+inputs:
+  target:
+    description: apple | android | linux | windows | wasm
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Where the output goes
+      id: paths
+      shell: bash
+      run: |
+        case "${{ inputs.target }}" in
+          apple)   echo "path=tool/crispasr/apple" >> "$GITHUB_OUTPUT" ;;
+          android) echo "path=android/app/src/main/jniLibs" >> "$GITHUB_OUTPUT" ;;
+          linux)   echo "path=tool/crispasr/linux" >> "$GITHUB_OUTPUT" ;;
+          windows) echo "path=tool/crispasr/windows" >> "$GITHUB_OUTPUT" ;;
+          wasm)    echo "path=web/crispasr/libwhisper.*" >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::unknown CrispASR target ${{ inputs.target }}"; exit 1 ;;
+        esac
+
+    - name: Restore
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.path }}
+        key: crispasr-${{ inputs.target }}-${{ hashFiles('tool/crispasr/version.env', 'tool/crispasr/build.sh', 'tool/crispasr/wasm-piano-notes.patch') }}
+
+    - name: Emscripten
+      if: inputs.target == 'wasm' && steps.cache.outputs.cache-hit != 'true'
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        # CrispASR's own pin: 6.0.3 regressed wasm instruction selection.
+        version: 6.0.2
+
+    - name: Build
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        # The runner images ship an NDK; the newest is r27+, which is what the
+        # 16 KB page-size link flag needs.
+        ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+      run: tool/crispasr/build.sh "${{ inputs.target }}"
+
+    - name: Check
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.target }}" in
+          apple)   test -f tool/crispasr/apple/crispasr.xcframework/ios-arm64/crispasr.framework/crispasr ;;
+          android) test -f android/app/src/main/jniLibs/arm64-v8a/libcrispasr.so ;;
+          linux)   test -e tool/crispasr/linux/lib/libcrispasr.so ;;
+          windows) test -f tool/crispasr/windows/bin/crispasr.dll ;;
+          wasm)    test -f web/crispasr/libwhisper.wasm && grep -aq sessionPianoNotes web/crispasr/libwhisper.wasm ;;
+        esac
+        echo "CrispASR ${{ inputs.target }} in place (cache hit: ${{ steps.cache.outputs.cache-hit }})"

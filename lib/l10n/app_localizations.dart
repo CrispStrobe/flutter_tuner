@@ -335,7 +335,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutPrivacyBody.
   ///
   /// In en, this message translates to:
-  /// **'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking, and the app makes no network requests at all.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.'**
+  /// **'Short version: CrispTuner collects nothing about you.\n\nMicrophone audio is analysed in real time on your device and is never recorded, stored or transmitted. There are no accounts, no analytics, no advertising and no tracking. The only time the app connects to the internet is when you choose an optional transcription model and confirm the download: the file comes from Hugging Face (huggingface.co), once, and stays on your device. Nothing is sent with that request but the request itself.\n\nOnly your settings — concert pitch, instrument, selected tuning, your custom tuning, and your temperament and its key — are saved, locally, so they persist between launches. They are removed when you uninstall the app.'**
   String get aboutPrivacyBody;
 
   /// No description provided for @aboutPrivacyPolicyLink.
@@ -685,6 +685,49 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{size} MB download'**
   String transcriptionModelDownloadSize(String size);
+
+  /// Title of the dialog that asks before downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'Download {model}?'**
+  String transcriptionModelDownloadTitle(String model);
+
+  /// Body of the dialog that asks before downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'{size} MB from Hugging Face (huggingface.co). It is downloaded once and kept on this device. The request for the file is the only thing sent; no audio or settings leave the device.'**
+  String transcriptionModelDownloadBody(String size);
+
+  /// Button that starts downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get transcriptionModelDownloadConfirm;
+
+  /// Button that dismisses the download dialog, or stops a download in progress
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get transcriptionModelDownloadCancel;
+
+  /// Progress of a transcription model download
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading {model}: {received} of {total} MB'**
+  String transcriptionModelDownloading(
+      String model, String received, String total);
+
+  /// Shown instead of the download size once a transcription model has been downloaded
+  ///
+  /// In en, this message translates to:
+  /// **'on this device'**
+  String get transcriptionModelOnDevice;
+
+  /// Button that deletes the selected downloaded transcription model from the device
+  ///
+  /// In en, this message translates to:
+  /// **'Remove downloaded model'**
+  String get transcriptionModelRemove;
 
   /// One line saying what the Basic Pitch model is good at
   ///

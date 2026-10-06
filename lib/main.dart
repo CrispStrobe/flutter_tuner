@@ -9,6 +9,7 @@ import 'crispasr_backend.dart';
 import 'audio_service.dart';
 import 'audio_service_stub.dart' as audio;
 import 'l10n/app_localizations.dart';
+import 'model_store.dart';
 import 'theme.dart';
 import 'transcription.dart';
 import 'transcription_backend.dart';
@@ -160,6 +161,28 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   /// change within a run.
   List<CrispAsrModel> _availableModels = const [];
 
+  /// Where downloaded models live. Created on first use, not here: on a
+  /// native platform it asks path_provider for a directory, and nothing
+  /// should touch the file system until a model is actually chosen.
+  ModelStore? _modelStoreOrNull;
+  ModelStore get _modelStore => _modelStoreOrNull ??= createModelStore();
+
+  /// Which models are already on the device, so the picker can say "on this
+  /// device" instead of a download size. Filled in after startup.
+  final Set<CrispAsrModel> _downloadedModels = {};
+
+  /// The model being downloaded right now, and how far it has got (0–1), or
+  /// null for both when nothing is.
+  CrispAsrModel? _downloadingModel;
+
+  /// Bumped after every attempt to change model, so the picker is rebuilt
+  /// from [_transcriptionModel]. A dropdown keeps its own selection; without
+  /// this, declining a download would leave it showing a model that is not
+  /// the one running.
+  int _modelPickerGeneration = 0;
+  int _downloadReceived = 0;
+  bool _downloadCancelled = false;
+
   /// Why the transcription mode last refused, if it did. Kept as a case
   /// rather than a message so the reason can be said in the user's language.
   _TranscriptionIssue _transcriptionIssue = _TranscriptionIssue.none;
@@ -240,6 +263,24 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         if (CrispAsrBackend(model: model).isAvailable) model,
     ];
     _loadPreferences();
+    _refreshDownloadedModels();
+  }
+
+  Future<void> _refreshDownloadedModels() async {
+    if (_availableModels.isEmpty) return;
+    final here = <CrispAsrModel>{};
+    for (final model in _availableModels) {
+      try {
+        if (await _modelStore.location(model) != null) here.add(model);
+      } catch (_) {
+        // No storage to ask (a widget test, a locked-down browser): the
+        // picker shows sizes, which is the conservative answer.
+      }
+    }
+    if (!mounted) return;
+    setState(() => _downloadedModels
+      ..clear()
+      ..addAll(here));
   }
 
   Future<void> _loadPreferences() async {
@@ -418,12 +459,24 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   /// Apply the stored model preference — step 2 of the precedence at the
   /// top of this class. Declines when the environment has already chosen.
-  void _applyTranscriptionModelPreference(String stored) {
+  ///
+  /// Only a model that is already on the device is restored. A launch never
+  /// starts a download: if the file has gone — deleted, or the stored
+  /// setting came from another device through a backup — the built-in model
+  /// runs, and choosing the model again asks first, as it did the first time.
+  Future<void> _applyTranscriptionModelPreference(String stored) async {
     if (_transcriptionFromEnv) return;
     if (stored == _kDartRuntimeId) return;
     final model = CrispAsrModel.values.firstWhereOrNull((m) => m.id == stored);
     if (model == null || !_availableModels.contains(model)) return;
-    _selectTranscriptionModel(model, persist: false);
+    final String? location;
+    try {
+      location = await _modelStore.location(model);
+    } catch (_) {
+      return;
+    }
+    if (location == null || !mounted) return;
+    await _selectTranscriptionModel(model, persist: false);
   }
 
   /// Switch transcription model, or back to the pure-Dart runtime for null.
@@ -433,6 +486,15 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   /// them at once would be two models transcribing the same microphone.
   Future<void> _selectTranscriptionModel(CrispAsrModel? model,
       {bool persist = true}) async {
+    try {
+      await _switchTranscriptionModel(model, persist: persist);
+    } finally {
+      if (mounted) setState(() => _modelPickerGeneration++);
+    }
+  }
+
+  Future<void> _switchTranscriptionModel(CrispAsrModel? model,
+      {required bool persist}) async {
     if (_transcriptionFromEnv || model == _transcriptionModel) return;
     if (model != null && !_availableModels.contains(model)) {
       // Say so rather than switching to something that cannot start.
@@ -442,11 +504,19 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       }
       return;
     }
+    if (_downloadingModel != null) return; // one download at a time
+    String? location;
+    if (model != null) {
+      location = await _ensureModelDownloaded(model, ask: persist);
+      if (location == null || !mounted) return;
+    }
     final wasEnabled = _transcriptionEnabled;
     if (wasEnabled) await _setTranscriptionEnabled(false);
     await _transcription.stop();
-    final next =
-        model == null ? TranscriptionService() : CrispAsrBackend(model: model);
+    final next = model == null
+        ? TranscriptionService()
+        : CrispAsrBackend(
+            model: model, modelPath: location, allowDownload: false);
     if (!mounted) return;
     setState(() {
       _transcription = next;
@@ -454,11 +524,129 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       _transcriptionIssue = _TranscriptionIssue.none;
     });
     if (persist) await _savePreferences();
-    // Only resume automatically if it was already running: starting a model
-    // the user has not asked to run would begin a download they did not ask
-    // for either.
+    // Only resume automatically if it was already running: switching model
+    // in settings is not a request to start listening for notes.
     if (wasEnabled) await _setTranscriptionEnabled(true);
   }
+
+  /// The model's location on this device, downloading it first — after
+  /// asking, when [ask] — if it is not here yet. Null when the user declined
+  /// or cancelled, or the download failed; the last of those is said next
+  /// to the picker.
+  Future<String?> _ensureModelDownloaded(CrispAsrModel model,
+      {required bool ask}) async {
+    try {
+      final here = await _modelStore.location(model);
+      if (here != null) return here;
+    } catch (_) {
+      // Fall through to the download, which reports what is wrong.
+    }
+    if (ask && !await _confirmDownload(model)) return null;
+    if (!mounted) return null;
+    setState(() {
+      _downloadingModel = model;
+      _downloadReceived = 0;
+      _downloadCancelled = false;
+      _transcriptionIssue = _TranscriptionIssue.none;
+    });
+    var lastPaint = DateTime.fromMillisecondsSinceEpoch(0);
+    try {
+      final location = await _modelStore.download(
+        model,
+        cancelled: () => _downloadCancelled,
+        onProgress: (received, total) {
+          _downloadReceived = received;
+          // Repaint a few times a second, not once per network chunk.
+          final now = DateTime.now();
+          if (mounted && now.difference(lastPaint).inMilliseconds > 150) {
+            lastPaint = now;
+            setState(() {});
+          }
+        },
+      );
+      if (mounted) setState(() => _downloadedModels.add(model));
+      return location;
+    } on ModelDownloadException catch (e) {
+      if (mounted && !e.wasCancelled) {
+        setState(() => _transcriptionIssue = _TranscriptionIssue.modelMissing);
+      }
+      return null;
+    } finally {
+      if (mounted) setState(() => _downloadingModel = null);
+    }
+  }
+
+  Future<bool> _confirmDownload(CrispAsrModel model) async {
+    final l10n = AppLocalizations.of(context);
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n.transcriptionModelDownloadTitle(model.displayName)),
+        content: Text(l10n.transcriptionModelDownloadBody(
+            _mebibytes(model.file.bytes))),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(l10n.transcriptionModelDownloadCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(l10n.transcriptionModelDownloadConfirm),
+          ),
+        ],
+      ),
+    );
+    return answer ?? false;
+  }
+
+  /// Delete the selected model's file and fall back to the built-in model.
+  Future<void> _removeSelectedModel() async {
+    final model = _transcriptionModel;
+    if (model == null || _transcriptionFromEnv) return;
+    await _selectTranscriptionModel(null);
+    try {
+      await _modelStore.remove(model);
+    } catch (_) {
+      // Already gone is the same as removed.
+    }
+    if (mounted) setState(() => _downloadedModels.remove(model));
+  }
+
+  Widget _buildDownloadProgress(AppLocalizations l10n, TunerPalette palette) {
+    final model = _downloadingModel!;
+    final total = model.file.bytes;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.transcriptionModelDownloading(model.displayName,
+                      _mebibytes(_downloadReceived), _mebibytes(total)),
+                  style: TextStyle(fontSize: 11, color: palette.textSecondary),
+                ),
+                const SizedBox(height: 4),
+                LinearProgressIndicator(
+                  value: total == 0 ? null : _downloadReceived / total,
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _downloadCancelled = true),
+            child: Text(l10n.transcriptionModelDownloadCancel,
+                style: const TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _mebibytes(int bytes) =>
+      (bytes / (1024 * 1024)).toStringAsFixed(1);
 
   /// Decimate to the model's 22.05 kHz and run a window when one is due.
   void _feedTranscription(Float64List samples) {
@@ -1686,6 +1874,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             Semantics(
               label: l10n.transcriptionModelLabel,
               child: DropdownButtonFormField<CrispAsrModel?>(
+                key: ValueKey(_modelPickerGeneration),
                 initialValue: _transcriptionModel,
                 isDense: true,
                 isExpanded: true,
@@ -1703,7 +1892,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                     Text(model.displayName,
                         style: textStyle, overflow: TextOverflow.ellipsis),
                 ],
-                onChanged: (isActionDisabled || _transcriptionFromEnv)
+                onChanged: (isActionDisabled ||
+                        _transcriptionFromEnv ||
+                        _downloadingModel != null)
                     ? null
                     : (CrispAsrModel? model) =>
                         _selectTranscriptionModel(model),
@@ -1722,9 +1913,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                       child: _modelMenuEntry(
                         palette,
                         '${model.displayName} · '
-                        '${l10n.transcriptionModelDownloadSize(
-                          model.downloadMiB.toStringAsFixed(1),
-                        )}',
+                        '${_downloadedModels.contains(model) ? l10n.transcriptionModelOnDevice : l10n.transcriptionModelDownloadSize(
+                            model.downloadMiB.toStringAsFixed(1),
+                          )}',
                         _availableModels.contains(model)
                             ? transcriptionModelNotes(l10n, model).about
                             : l10n.transcriptionLibraryMissing,
@@ -1738,6 +1929,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
             // becomes true. The sizes are downloads and the speeds were
             // measured on a desktop CPU; both are said rather than implied.
             const SizedBox(height: 4),
+            if (_downloadingModel != null) _buildDownloadProgress(l10n, palette),
             if (_transcriptionFromEnv)
               _settingsNote(palette, l10n.transcriptionModelEnvOverride),
             if (_transcriptionModel != null &&
@@ -1755,6 +1947,18 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
               _settingsNote(palette, l10n.transcriptionModelMissing,
                   warn: true),
             _settingsNote(palette, l10n.transcriptionModelMeasurementNote),
+            if (_transcriptionModel != null &&
+                !_transcriptionFromEnv &&
+                _downloadedModels.contains(_transcriptionModel))
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: isActionDisabled ? null : _removeSelectedModel,
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: Text(l10n.transcriptionModelRemove,
+                      style: const TextStyle(fontSize: 12)),
+                ),
+              ),
           ],
 
           if (_inputDevices.length > 1) ...[

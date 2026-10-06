@@ -1,7 +1,7 @@
 name: flutter_tuner
 description: "CrispTuner — a chromatic instrument tuner with historical temperaments, alternate and custom tunings, live pitch detection and spectrum analysis."
 publish_to: 'none'
-version: 2.4.0+9
+version: 2.5.0+10
 
 environment:
   sdk: '>=3.2.3 <4.0.0'
@@ -37,6 +37,10 @@ dependencies:
   collection: ^1.18.0
   intl: any
   package_info_plus: ^8.0.0
+  # The CrispASR models are downloads (lib/model_store_io.dart): where they
+  # are kept, and the SHA-256 each one is checked against before it is.
+  path_provider: ^2.1.0
+  crypto: ^3.0.0
   shared_preferences: ^2.2.2
   # Web support
   web: ^1.1.0
@@ -51,6 +55,9 @@ dev_dependencies:
   pitch_detector_dart: ^0.0.7
   integration_test:
     sdk: flutter
+  # test/crispasr_native_test.dart points path_provider at a temp directory.
+  path_provider_platform_interface: ^2.1.0
+  plugin_platform_interface: ^2.1.0
   flutter_lints: ^3.0.1
   flutter_launcher_icons: ^0.13.1
 
