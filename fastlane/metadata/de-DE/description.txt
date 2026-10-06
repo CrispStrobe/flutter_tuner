@@ -28,7 +28,7 @@ MESSUNG
 
 VON GRUND AUF PRIVAT
 
-CrispTuner erfasst nichts. Audio wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking. Die App stellt überhaupt keine Netzwerkverbindungen her.
+CrispTuner erfasst nichts. Audio wird in Echtzeit auf Ihrem Gerät ausgewertet und niemals aufgezeichnet, gespeichert oder übertragen. Es gibt keine Konten, keine Analyse, keine Werbung und kein Tracking. Die einzige Netzwerkverbindung der App ist das Herunterladen eines optionalen Transkriptionsmodells, wenn Sie eines auswählen und bestätigen.
 
 Ihre Einstellungen werden lokal gespeichert und stehen beim nächsten Start wieder bereit.
 

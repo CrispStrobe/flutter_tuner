@@ -686,6 +686,49 @@ abstract class AppLocalizations {
   /// **'{size} MB download'**
   String transcriptionModelDownloadSize(String size);
 
+  /// Title of the dialog that asks before downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'Download {model}?'**
+  String transcriptionModelDownloadTitle(String model);
+
+  /// Body of the dialog that asks before downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'{size} MB from Hugging Face (huggingface.co). It is downloaded once and kept on this device. The request for the file is the only thing sent; no audio or settings leave the device.'**
+  String transcriptionModelDownloadBody(String size);
+
+  /// Button that starts downloading a transcription model
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get transcriptionModelDownloadConfirm;
+
+  /// Button that dismisses the download dialog, or stops a download in progress
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get transcriptionModelDownloadCancel;
+
+  /// Progress of a transcription model download
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading {model}: {received} of {total} MB'**
+  String transcriptionModelDownloading(
+      String model, String received, String total);
+
+  /// Shown instead of the download size once a transcription model has been downloaded
+  ///
+  /// In en, this message translates to:
+  /// **'on this device'**
+  String get transcriptionModelOnDevice;
+
+  /// Button that deletes the selected downloaded transcription model from the device
+  ///
+  /// In en, this message translates to:
+  /// **'Remove downloaded model'**
+  String get transcriptionModelRemove;
+
   /// One line saying what the Basic Pitch model is good at
   ///
   /// In en, this message translates to:

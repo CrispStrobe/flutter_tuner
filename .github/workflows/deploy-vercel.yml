@@ -24,7 +24,16 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter build web --release --base-href=/
+
+      - name: CrispASR (wasm)
+        uses: ./.github/actions/crispasr
+        with:
+          target: wasm
+
+      # The define tells the app the engine is there; without it the CrispASR
+      # models say "unavailable" rather than offering a download that cannot
+      # run (lib/crispasr_backend_web.dart).
+      - run: flutter build web --release --base-href=/ --dart-define=CRISPTUNER_CRISPASR_WASM=true
 
       - name: Stage vercel.json into the deploy root
         # `vercel deploy build/web` treats build/web as the project root, and
@@ -42,6 +51,10 @@ jobs:
           # The App Store listing points at this page; if it 404s, App Review
           # rejects the submission.
           test -f build/web/privacy.html
+          # The transcription worker and the engine it loads.
+          test -f build/web/crispasr/worker.js
+          test -f build/web/crispasr/libwhisper.js
+          test -f build/web/crispasr/libwhisper.wasm
           echo "Web build OK — $(du -sh build/web | cut -f1)"
 
       - name: Install Vercel CLI
@@ -58,7 +71,7 @@ jobs:
       - name: Verify the live site
         run: |
           set -euo pipefail
-          for path in "" "privacy.html"; do
+          for path in "" "privacy.html" "crispasr/worker.js" "crispasr/libwhisper.wasm"; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 30 "https://crisptuner.vercel.app/$path")
             echo "  $code  https://crisptuner.vercel.app/$path"
             [ "$code" = "200" ] || { echo "::error::https://crisptuner.vercel.app/$path returned $code"; exit 1; }

@@ -86,6 +86,13 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      # crispasr.framework for the optional transcription models; embedded by
+      # the "Embed CrispASR" build phase (tool/crispasr/embed_apple.sh).
+      - name: CrispASR (apple)
+        uses: ./.github/actions/crispasr
+        with:
+          target: apple
+
       - name: Validate the entitlements actually parse
         # `plutil -lint` is NOT sufficient: AMFI's parser is far simpler than the
         # generic plist parser and fails on angle brackets inside an XML comment,
@@ -200,6 +207,14 @@ jobs:
             || { echo "::error::application-identifier missing from the signed .app (altool warning 90886)"; exit 1; }
           grep -q "com.apple.security.device.audio-input" <<<"$ENTS" \
             || { echo "::error::audio-input missing — the tuner could not use the microphone"; exit 1; }
+          grep -q "com.apple.security.network.client" <<<"$ENTS" \
+            || { echo "::error::network.client missing — the sandbox would block every model download"; exit 1; }
+          # The transcription engine, embedded and signed with this Team ID —
+          # library validation refuses to dlopen it otherwise.
+          test -f "$APP/Contents/Frameworks/crispasr.framework/Versions/A/crispasr" \
+            || { echo "::error::crispasr.framework not embedded — the CrispASR models would be unavailable"; exit 1; }
+          codesign --verify --strict "$APP/Contents/Frameworks/crispasr.framework" \
+            || { echo "::error::crispasr.framework is not validly signed"; exit 1; }
           test -f "$APP/Contents/Resources/PrivacyInfo.xcprivacy" \
             || echo "::warning::PrivacyInfo.xcprivacy not found in Resources"
           codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -3

@@ -70,3 +70,12 @@ test/goldens/preview/
 # Rendered App Store screenshots — regenerate with
 #   flutter test -t store --update-goldens test/store_screenshots_test.dart
 test/store_screenshots/
+
+# CrispASR native libraries and WebAssembly — produced by
+#   tool/crispasr/build.sh apple|android|linux|windows|wasm
+# never committed (tens of MB per platform, rebuilt from a pinned release).
+tool/crispasr/apple/
+tool/crispasr/linux/
+tool/crispasr/windows/
+android/app/src/main/jniLibs/
+web/crispasr/libwhisper.*

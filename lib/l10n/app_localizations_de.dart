@@ -341,6 +341,34 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String transcriptionModelDownloadTitle(String model) {
+    return '$model herunterladen?';
+  }
+
+  @override
+  String transcriptionModelDownloadBody(String size) {
+    return '$size MB von Hugging Face (huggingface.co). Das Modell wird einmal geladen und bleibt auf diesem Gerät. Gesendet wird nur die Anfrage nach der Datei; weder Audio noch Einstellungen verlassen das Gerät.';
+  }
+
+  @override
+  String get transcriptionModelDownloadConfirm => 'Herunterladen';
+
+  @override
+  String get transcriptionModelDownloadCancel => 'Abbrechen';
+
+  @override
+  String transcriptionModelDownloading(
+      String model, String received, String total) {
+    return '$model wird geladen: $received von $total MB';
+  }
+
+  @override
+  String get transcriptionModelOnDevice => 'auf dem Gerät';
+
+  @override
+  String get transcriptionModelRemove => 'Geladenes Modell entfernen';
+
+  @override
   String get transcriptionModelAboutBasicPitch =>
       'Das eingebaute Modell auf der nativen Engine — zum Vergleich beider Laufzeiten';
 

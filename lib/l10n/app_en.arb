@@ -298,6 +298,60 @@
       }
     }
   },
+  "transcriptionModelDownloadTitle": "Download {model}?",
+  "@transcriptionModelDownloadTitle": {
+    "description": "Title of the dialog that asks before downloading a transcription model",
+    "placeholders": {
+      "model": {
+        "type": "String",
+        "example": "MT3 (multi-instrument)"
+      }
+    }
+  },
+  "transcriptionModelDownloadBody": "{size} MB from Hugging Face (huggingface.co). It is downloaded once and kept on this device. The request for the file is the only thing sent; no audio or settings leave the device.",
+  "@transcriptionModelDownloadBody": {
+    "description": "Body of the dialog that asks before downloading a transcription model",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "96.0"
+      }
+    }
+  },
+  "transcriptionModelDownloadConfirm": "Download",
+  "@transcriptionModelDownloadConfirm": {
+    "description": "Button that starts downloading a transcription model"
+  },
+  "transcriptionModelDownloadCancel": "Cancel",
+  "@transcriptionModelDownloadCancel": {
+    "description": "Button that dismisses the download dialog, or stops a download in progress"
+  },
+  "transcriptionModelDownloading": "Downloading {model}: {received} of {total} MB",
+  "@transcriptionModelDownloading": {
+    "description": "Progress of a transcription model download",
+    "placeholders": {
+      "model": {
+        "type": "String",
+        "example": "MT3"
+      },
+      "received": {
+        "type": "String",
+        "example": "12.5"
+      },
+      "total": {
+        "type": "String",
+        "example": "96.0"
+      }
+    }
+  },
+  "transcriptionModelOnDevice": "on this device",
+  "@transcriptionModelOnDevice": {
+    "description": "Shown instead of the download size once a transcription model has been downloaded"
+  },
+  "transcriptionModelRemove": "Remove downloaded model",
+  "@transcriptionModelRemove": {
+    "description": "Button that deletes the selected downloaded transcription model from the device"
+  },
   "transcriptionModelAboutBasicPitch": "The built-in model, run by the native engine — for comparing the two runtimes",
   "@transcriptionModelAboutBasicPitch": {
     "description": "One line saying what the Basic Pitch model is good at"

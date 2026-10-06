@@ -87,6 +87,13 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      # crispasr.framework for the optional transcription models; embedded by
+      # the "Embed CrispASR" build phase (tool/crispasr/embed_apple.sh).
+      - name: CrispASR (apple)
+        uses: ./.github/actions/crispasr
+        with:
+          target: apple
+
       - name: Import signing certificate into a temp keychain
         env:
           P12_B64: ${{ secrets.DIST_CERT_P12_BASE64 }}

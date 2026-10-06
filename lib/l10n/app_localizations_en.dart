@@ -339,6 +339,34 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String transcriptionModelDownloadTitle(String model) {
+    return 'Download $model?';
+  }
+
+  @override
+  String transcriptionModelDownloadBody(String size) {
+    return '$size MB from Hugging Face (huggingface.co). It is downloaded once and kept on this device. The request for the file is the only thing sent; no audio or settings leave the device.';
+  }
+
+  @override
+  String get transcriptionModelDownloadConfirm => 'Download';
+
+  @override
+  String get transcriptionModelDownloadCancel => 'Cancel';
+
+  @override
+  String transcriptionModelDownloading(
+      String model, String received, String total) {
+    return 'Downloading $model: $received of $total MB';
+  }
+
+  @override
+  String get transcriptionModelOnDevice => 'on this device';
+
+  @override
+  String get transcriptionModelRemove => 'Remove downloaded model';
+
+  @override
   String get transcriptionModelAboutBasicPitch =>
       'The built-in model, run by the native engine — for comparing the two runtimes';
 
