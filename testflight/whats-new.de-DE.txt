@@ -1,18 +1,27 @@
-CrispTuner 2.5.0 — die zusätzlichen Erkennungsmodelle funktionieren jetzt.
+2.5.0 (Build 10)
 
-Das Stimmen selbst ist unverändert. Neu: Die vier zusätzlichen Modelle im Modellmenü (MT3, Piano transcription, Onsets & Frames, hFT-Transformer) waren bisher aufgeführt, liefen aber nicht. Dieser Build enthält die nötige Engine.
+Die vier zusätzlichen Erkennungsmodelle laufen jetzt tatsächlich.
 
-Bitte ausprobieren:
+WAS SICH GEÄNDERT HAT
 
-1. Zuerst das Zuhören beenden (das Menü ist ausgegraut, solange das Mikrofon läuft). In den Einstellungen das Menü mit dem Klavier-Symbol öffnen und ein Modell wählen. Am besten mit hFT-Transformer anfangen: das kleinste (4,5 MB).
-2. Die App fragt vor dem Herunterladen und nennt die Dateigröße. „Herunterladen“ tippen und den Fortschrittsbalken beobachten. Auch einmal „Abbrechen“ ausprobieren.
-3. Zuhören starten, unter Akkorderkennung „Akkorde erkennen“ einschalten und einen Akkord oder eine kurze Phrase spielen. Die Noten sollten erscheinen.
-4. MT3 (96 MB) ist bei echter Musik am genauesten und erkennt das Instrument. Am besten im WLAN ausprobieren.
-5. „Geladenes Modell entfernen“ unter dem Menü sollte es löschen und zum eingebauten Modell zurückkehren.
+• MT3, Piano transcription, Onsets & Frames und hFT-Transformer standen in 2.4.0 schon in der Modellauswahl, meldeten aber auf jedem Gerät, dass ihnen die Engine fehlt. Dieser Build bringt die Engine (CrispASR) in der App mit, damit sie laufen – auf iPhone, iPad und Mac.
 
-Was uns am meisten interessiert:
-• Ob die Noten mit dem Spiel mithalten, und auf welchem Gerät. Mit diesem Build laufen die Modelle zum ersten Mal auf einem Telefon, Tablet oder Mac; wie schnell sie dort sind, ist noch offen.
-• Alles, was beim Herunterladen oder Erkennen hängen zu bleiben scheint.
-• Auf einem Mac älter als macOS 13.3 sollten die zusätzlichen Modelle als nicht verfügbar erscheinen und alles andere wie bisher funktionieren.
+• Bei der Auswahl fragt die App zuerst und nennt die Downloadgröße, lädt dann mit Fortschrittsbalken und „Abbrechen“-Knopf. Jede Datei wird vor dem Speichern gegen einen festen Fingerabdruck geprüft. Geladene Modelle zeigen „auf dem Gerät“, und „Geladenes Modell entfernen“ löscht sie wieder.
 
-Datenschutz: Ein Modell herunterzuladen ist das Einzige, wofür die App das Internet nutzt. Die Datei kommt einmalig von huggingface.co und bleibt auf dem Gerät. Weder Audio noch Einstellungen werden gesendet.
+• Das Stimmen ist unverändert. Das eingebaute Modell bleibt Standard und braucht keinen Download.
+
+WAS TESTEN
+
+• Zuerst das Zuhören beenden – die Auswahl ist ausgegraut, solange das Mikrofon läuft. Dann die Auswahl (Klavier-Symbol) öffnen und hFT-Transformer wählen: das kleinste, 4,5 MB.
+• Den Download: bestätigen, den Fortschritt beobachten, einen mittendrin abbrechen, es ohne Netz versuchen.
+• Zuhören starten, unter Akkorderkennung „Akkorde erkennen“ einschalten und einen Akkord oder eine kurze Phrase spielen.
+• MT3 (96 MB) ist bei echter Musik am genauesten und erkennt das Instrument. Am besten im WLAN.
+• „Geladenes Modell entfernen“, dann dasselbe Modell erneut wählen: Die App sollte wieder fragen.
+
+BEKANNTE GRENZEN – BITTE LESEN
+
+Diese Modelle sind vor diesem Build nie auf einem Telefon, Tablet oder Mac gelaufen. Durchgängig getestet wurden sie nur unter Linux. Wie schnell sie auf Ihrem Gerät sind, können wir nicht sehen – und genau das brauchen wir am dringendsten: ob die Noten mit dem Spiel mithalten, und auf welchem Gerät.
+
+Auf einem Mac älter als macOS 13.3 sollten die zusätzlichen Modelle als nicht verfügbar erscheinen; alles andere sollte wie bisher funktionieren.
+
+Ein Modell herunterzuladen ist das Einzige, wofür die App das Internet nutzt. Die Datei kommt einmalig von huggingface.co und bleibt auf dem Gerät. Weder Audio noch Einstellungen werden gesendet.
