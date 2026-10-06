@@ -46,14 +46,18 @@ command -v ninja >/dev/null && GENERATOR=(-G Ninja)
 log() { printf '\033[1m[crispasr]\033[0m %s\n' "$*"; }
 die() { printf '\033[31m[crispasr] %s\033[0m\n' "$*" >&2; exit 1; }
 
-# A shallow checkout of the pinned release, with ggml. Reused across targets.
+# A shallow checkout of the pinned release and its submodules. Reused
+# across targets.
 checkout() {
   local src="$WORK/src"
   if [ ! -d "$src/.git" ]; then
     log "cloning CrispASR $CRISPASR_REF"
     git clone --quiet --depth 1 --branch "$CRISPASR_REF" \
       https://github.com/CrispStrobe/CrispASR "$src"
-    git -C "$src" submodule update --quiet --init --depth 1 ggml
+    # ggml, and c2pa-audio: src/CMakeLists.txt always compiles its signer
+    # into the library (CRISPASR_NO_C2PA_NATIVE would drop it, but the C ABI
+    # then loses symbols other bindings expect).
+    git -C "$src" submodule update --quiet --init --depth 1
   fi
   SRC="$src"
 }
