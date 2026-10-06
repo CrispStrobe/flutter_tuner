@@ -54,9 +54,9 @@ checkout() {
     log "cloning CrispASR $CRISPASR_REF"
     git clone --quiet --depth 1 --branch "$CRISPASR_REF" \
       https://github.com/CrispStrobe/CrispASR "$src"
-    # ggml, and c2pa-audio: src/CMakeLists.txt always compiles its signer
-    # into the library (CRISPASR_NO_C2PA_NATIVE would drop it, but the C ABI
-    # then loses symbols other bindings expect).
+    # ggml, and c2pa-audio: src/CMakeLists.txt compiles its WAV signer into
+    # the library unless CRISPASR_NO_C2PA_NATIVE is set, and the configure
+    # step fails without the sources.
     git -C "$src" submodule update --quiet --init --depth 1
   fi
   SRC="$src"
