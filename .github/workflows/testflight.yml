@@ -1,0 +1,63 @@
+name: TestFlight
+
+# Put an uploaded build on TestFlight: "What to Test" notes from
+# testflight/whats-new.<locale>.txt, every beta group, Beta App Review.
+#
+# Run it after ios-release.yml / macos-release.yml have uploaded the build.
+# apply=false (the default) changes nothing: it prints the notes the previous
+# build carried, the notes this one would get, and the groups it would join.
+#
+# Never submits for App Store review — that stays a deliberate, separate step.
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Which builds'
+        type: choice
+        options: [both, ios, macos]
+        default: both
+      build:
+        description: 'Build number (CFBundleVersion); empty = the one in pubspec.yaml'
+        type: string
+        default: ''
+      wait_minutes:
+        description: 'How long to wait for Apple to finish processing'
+        type: number
+        default: 60
+      apply:
+        description: 'Actually change App Store Connect'
+        type: boolean
+        default: false
+
+jobs:
+  testflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [IOS, MAC_OS]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip the platform not asked for
+        id: want
+        run: |
+          case "${{ inputs.platforms }}:${{ matrix.platform }}" in
+            both:*|ios:IOS|macos:MAC_OS) echo "run=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "run=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - if: steps.want.outputs.run == 'true'
+        run: pip install --quiet cryptography
+      - if: steps.want.outputs.run == 'true'
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+        run: |
+          set -euo pipefail
+          BUILD="${{ inputs.build }}"
+          [ -n "$BUILD" ] || BUILD=$(grep '^version:' pubspec.yaml | sed 's/.*+//')
+          python3 tool/testflight.py --platform "${{ matrix.platform }}" --build "$BUILD" \
+            --wait-minutes "${{ inputs.wait_minutes }}" \
+            ${{ inputs.apply && '--apply' || '' }}
