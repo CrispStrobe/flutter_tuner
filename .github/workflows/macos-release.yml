@@ -199,8 +199,12 @@ jobs:
       - name: Sign the .app with the App Store entitlements
         run: |
           set -euo pipefail
-          IDENT=$(security find-identity -v "$KC" | grep -oE 'Apple Distribution: [^"]+' | head -1)
-          echo "signing identity: $IDENT"
+          # Sign by SHA-1, not by name: on the xcode-27 image codesign decodes a
+          # non-ASCII identity name ("Ströbele") as MacRoman and reports
+          # "no identity found".
+          IDENT=$(security find-identity -v -p codesigning "$KC" | awk '/Apple Distribution/ {print $2; exit}')
+          test -n "$IDENT" || { echo "::error::no Apple Distribution identity in $KC"; exit 1; }
+          echo "signing identity SHA-1: $IDENT"
           # A Mac App Store binary must carry embedded.provisionprofile.
           cp "$RUNNER_TEMP/app.provisionprofile" "$APP/Contents/embedded.provisionprofile"
           # Sign inside-out: nested Mach-O first, then the bundle. Library
@@ -240,9 +244,11 @@ jobs:
       - name: Build the signed .pkg
         run: |
           set -euo pipefail
-          INST=$(security find-identity -v "$KC" \
-            | grep -oE '3rd Party Mac Developer Installer: [^"]+' | head -1)
-          echo "installer identity: $INST"
+          # ASCII prefix instead of the full (non-ASCII) name, for the same
+          # MacRoman reason as the codesign step; the temp keychain holds
+          # exactly one installer identity.
+          INST="3rd Party Mac Developer Installer"
+          security find-identity -v "$KC" | grep "$INST"
           PKG="$RUNNER_TEMP/${APP_NAME}-${VER}-${BUILD}.pkg"
           productbuild --component "$APP" /Applications --keychain "$KC" --sign "$INST" "$PKG"
           echo "PKG=$PKG" >> "$GITHUB_ENV"
