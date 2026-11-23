@@ -100,7 +100,8 @@ jobs:
 
   build-android:
     name: Build Android
-    runs-on: ubuntu-latest
+    # On 26.04, CMake scans the host GCC 15 std modules during the NDK build.
+    runs-on: ubuntu-24.04
     needs: [analyze, test]
     steps:
       - uses: actions/checkout@v4
