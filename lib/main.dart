@@ -990,16 +990,12 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   /// Everything the picker says about a model: what it is good at, and any
   /// caveat about its speed.
   ///
-  /// **One place per model, deliberately.** The speed line is a claim about
-  /// hardware this project has never run on — `realTimeFactor` was measured
-  /// on four shared vCPUs of a contended Linux VPS with the two newest arms
-  /// pinned to CPU (see its doc comment) — so it is written per model rather
-  /// than computed from that number, and when a measurement on real target
-  /// hardware arrives this table is the only thing that has to change. Do
-  /// not repeat either line anywhere else in the UI.
+  /// The shared VPS figures in [CrispAsrModel.realTimeFactor] describe a
+  /// different environment from the devices running the app. Use direct
+  /// measurements for the speed text shown to users.
   ///
-  /// The accuracy figures behind `about` are in
-  /// `lib/crispasr_backend_ffi.dart` and `bench/REPORT.md` §32, §36.4, §37.
+  /// The accuracy figures are in `lib/crispasr_model.dart` and
+  /// `bench/REPORT.md` §32, §36.4, §37.
   static ({String about, String? speed}) transcriptionModelNotes(
       AppLocalizations l10n, CrispAsrModel model) {
     switch (model) {
