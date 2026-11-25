@@ -70,41 +70,16 @@ jobs:
               'musicnet/test_data/*' 'musicnet/test_labels/*'
           echo "audio: $(ls corpus/musicnet/musicnet/test_data | wc -l), labels: $(ls corpus/musicnet/musicnet/test_labels | wc -l)"
 
-      # libcrispasr is not bundled by the `crispasr` package, so the ggml arms
-      # need it built. Absent, those arms report themselves unavailable and
-      # the pure-Dart arm still runs — which is the designed behaviour, not a
-      # failure, so this step does not gate the job.
-      # --recurse-submodules is not optional: CrispASR vendors ggml as a
-      # submodule and its CMakeLists refuses to configure without it. The
-      # first run of this workflow cloned without it, the build failed, and
-      # `continue-on-error` reported the step as SUCCESS — so the ggml arms
-      # silently did not run and the summary showed only the pure-Dart one.
-      # Same shape as the gate-default bug in §20.2a: a green tick over a
-      # measurement that did not happen.
+      # Use the same pinned CrispASR build as the Linux app. A failed
+      # native build still allows the pure-Dart benchmark to run.
       - name: Build libcrispasr (for the ggml arms)
         id: crispasr
         continue-on-error: true
         run: |
-          git clone -q --depth 1 --recurse-submodules --shallow-submodules \
-            https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr
-          cmake -S /tmp/crispasr -B /tmp/crispasr/build \
-            -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF > /dev/null
-          # The CMake target is `crispasr-lib`; `crispasr` is not a target and
-          # gmake exits 2 with "No rule to make target". The previous run of
-          # this step failed on exactly that — correctly reported as a
-          # failure this time, rather than passing silently as it did before
-          # the existence check was added.
-          cmake --build /tmp/crispasr/build --target crispasr-lib -j"$(nproc)"
-
-          # Bundle the ggml dependencies alongside the library for the loader.
-          mkdir -p "$HOME/.cache/crispasr"
-          find /tmp/crispasr/build -name 'libggml*.so*' \
-            -exec cp -P {} "$HOME/.cache/crispasr/" \;
-          find /tmp/crispasr/build -name 'libcrispasr.so*' -type f \
-            -exec cp {} "$HOME/.cache/crispasr/libcrispasr.so" \;
-          test -f "$HOME/.cache/crispasr/libcrispasr.so" \
-            || { echo "::error::libcrispasr was not produced"; exit 1; }
-          deps=$(LD_LIBRARY_PATH="$HOME/.cache/crispasr" ldd "$HOME/.cache/crispasr/libcrispasr.so")
+          tool/crispasr/build.sh linux
+          lib=tool/crispasr/linux/lib/libcrispasr.so
+          test -f "$lib"
+          deps=$(ldd "$lib")
           printf '%s\n' "$deps"
           if grep -qi 'not found' <<< "$deps"; then
             echo "::error::unresolved libcrispasr dependencies"
@@ -137,8 +112,7 @@ jobs:
       - name: Transcribe and score
         working-directory: bench
         env:
-          # So the loader finds libggml*.so next to libcrispasr.so.
-          LD_LIBRARY_PATH: /home/runner/.cache/crispasr
+          CRISPTUNER_CRISPASR_LIB: ${{ github.workspace }}/tool/crispasr/linux/lib/libcrispasr.so
         run: |
           dart run bin/transcribe_eval.dart \
             --data ../corpus/musicnet \
