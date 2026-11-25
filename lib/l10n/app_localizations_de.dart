@@ -109,6 +109,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get stopTuningButton => 'Stimmen stoppen';
 
   @override
+  String get settings => 'Einstellungen';
+
+  @override
   String get about => 'Über';
 
   @override

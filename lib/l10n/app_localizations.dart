@@ -266,6 +266,12 @@ abstract class AppLocalizations {
   /// **'Stop tuning'**
   String get stopTuningButton;
 
+  /// No description provided for @settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settings;
+
   /// Tooltip and title for the About screen
   ///
   /// In en, this message translates to:

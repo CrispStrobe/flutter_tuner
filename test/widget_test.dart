@@ -77,6 +77,47 @@ void main() {
   group('TunerPage widget', () {
     Widget buildApp() => const TunerApp();
 
+    testWidgets('phone settings shortcut keeps the microphone within reach',
+        (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(buildApp());
+      await tester.pumpAndSettle();
+
+      final mic = find.byTooltip('Start tuning');
+      final micPosition = tester.getTopRight(mic);
+      expect(micPosition.dx, greaterThan(350));
+      expect(micPosition.dy, lessThan(56));
+
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Slider).hitTestable(), findsOneWidget);
+      expect(tester.getTopRight(mic), micPosition);
+      expect(mic.hitTestable(), findsOneWidget);
+    });
+
+    for (final size in [const Size(820, 1180), const Size(1180, 820)]) {
+      testWidgets('iPad settings fit in the right column at $size',
+          (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(buildApp());
+        await tester.pumpAndSettle();
+
+        final heading = tester.getTopLeft(find.text('Settings'));
+        expect(heading.dx, greaterThan(size.width / 2));
+        expect(heading.dy, lessThan(100));
+        expect(find.byType(Slider).hitTestable(), findsOneWidget);
+        expect(find.text('Steadier reading').hitTestable(), findsOneWidget);
+        expect(find.text('Chord transcription').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('shows Start Tuning status initially', (tester) async {
       await _setUpTestSize(tester);
       await tester.pumpWidget(buildApp());

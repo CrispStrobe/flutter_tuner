@@ -198,6 +198,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   int _transcriptionUnchanged = 0;
   static const _pacing = TranscriptionPacing();
   final _engine = TunerEngine();
+  final _settingsHeadingKey = GlobalKey();
 
   TunerStatus _status = TunerStatus.idle;
   bool _isListening = false;
@@ -1039,6 +1040,18 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
+  void _showSettings() {
+    final heading = _settingsHeadingKey.currentContext;
+    if (heading == null) return;
+    Scrollable.ensureVisible(
+      heading,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
   Widget _buildScaffold(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final palette = TunerPalette.of(context);
@@ -1059,15 +1072,24 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
-        toolbarHeight: 48,
+        leading: IconButton(
+          icon: const Icon(Icons.info_outline, size: 20),
+          color: palette.textSecondary,
+          tooltip: l10n.about,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const AboutScreen()),
+          ),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.info_outline, size: 20),
+            icon: const Icon(Icons.settings_outlined),
             color: palette.textSecondary,
-            tooltip: l10n.about,
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const AboutScreen()),
-            ),
+            tooltip: l10n.settings,
+            onPressed: _showSettings,
+          ),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 12),
+            child: _buildMicButton(l10n, palette),
           ),
         ],
       ),
@@ -1086,38 +1108,58 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              const maxContentWidth = 900.0;
-              final isWide = constraints.maxWidth >= 600;
-              // Derive the meter from the width the content will actually get,
-              // not the raw viewport — otherwise it overflows the cap on a wide
-              // desktop window.
-              final contentWidth =
-                  math.min(constraints.maxWidth, maxContentWidth);
-              final meterWidth =
-                  isWide ? contentWidth * 0.6 : contentWidth * 0.85;
-
+              final isWide = constraints.maxWidth >= 720 &&
+                  constraints.maxHeight >= 550;
               final padding = isWide ? 24.0 : 12.0;
+
               return SingleChildScrollView(
                 padding: EdgeInsets.all(padding),
-                // Centre the content when it is shorter than the viewport —
-                // otherwise on a tall tablet everything crowds into the top
-                // half and leaves a large empty band underneath. Still scrolls
-                // normally once the content outgrows the screen.
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - padding * 2,
-                  ),
-                  child: Center(
-                    child: ConstrainedBox(
-                      // Keep the two-column layout readable instead of letting
-                      // it stretch the full width of a large display.
-                      constraints: const BoxConstraints(maxWidth: maxContentWidth),
-                      child: isWide
-                          ? _buildWideLayout(
-                              l10n, palette, displayNote, pitch, cents, note, meterWidth)
-                          : _buildNarrowLayout(
-                              l10n, palette, displayNote, pitch, cents, note, meterWidth),
-                    ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1050),
+                    child: LayoutBuilder(builder: (context, content) {
+                      const columnGap = 24.0;
+                      final tunerWidth = isWide
+                          ? (content.maxWidth - columnGap) * 0.55
+                          : content.maxWidth;
+                      final tuner = Column(
+                        children: [
+                          _buildNoteDisplay(l10n, palette, displayNote,
+                              scaleFactor: isWide ? 1.2 : 1),
+                          const SizedBox(height: 12),
+                          _buildTuningMeter(
+                              l10n, palette, tunerWidth * 0.9, cents),
+                          const SizedBox(height: 4),
+                          _buildReadout(l10n, palette, pitch, note),
+                          const SizedBox(height: 12),
+                          _buildStringIndicators(l10n, palette, note),
+                          const SizedBox(height: 16),
+                          _buildVisualizations(l10n, palette,
+                              stacked: isWide),
+                          _buildTranscription(l10n, palette),
+                        ],
+                      );
+                      final settings = _buildSettings(l10n, palette);
+
+                      if (isWide) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(width: tunerWidth, child: tuner),
+                            const SizedBox(width: columnGap),
+                            Expanded(child: settings),
+                          ],
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          tuner,
+                          const SizedBox(height: 16),
+                          settings,
+                        ],
+                      );
+                    }),
                   ),
                 ),
               );
@@ -1125,96 +1167,6 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           ),
         ),
       ),
-    );
-  }
-
-  /// Phone layout — single column, compact.
-  Widget _buildNarrowLayout(
-    AppLocalizations l10n, TunerPalette palette,
-    String displayNote, double pitch, double cents, String note, double meterWidth,
-  ) {
-    return Column(
-      children: [
-        _buildNoteDisplay(l10n, palette, displayNote),
-        const SizedBox(height: 12),
-        _buildTuningMeter(l10n, palette, meterWidth, cents),
-        const SizedBox(height: 4),
-        _buildReadout(l10n, palette, pitch, note),
-        const SizedBox(height: 12),
-        _buildStringIndicators(l10n, palette, note),
-        const SizedBox(height: 12),
-        _buildVisualizationRow(l10n, palette),
-        _buildTranscription(l10n, palette),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(child: _buildSettings(l10n, palette)),
-            const SizedBox(width: 12),
-            _buildMicButton(l10n, palette),
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// Tablet / desktop layout — two-column with larger visualizations.
-  Widget _buildWideLayout(
-    AppLocalizations l10n, TunerPalette palette,
-    String displayNote, double pitch, double cents, String note,
-    double meterWidth,
-  ) {
-    return Column(
-      children: [
-        _buildNoteDisplay(l10n, palette, displayNote, scaleFactor: 1.3),
-        const SizedBox(height: 16),
-        _buildTuningMeter(l10n, palette, meterWidth, cents),
-        const SizedBox(height: 4),
-        _buildReadout(l10n, palette, pitch, note),
-        const SizedBox(height: 16),
-        _buildStringIndicators(l10n, palette, note),
-        const SizedBox(height: 16),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Left: visualizations stacked vertically
-            Expanded(
-              flex: 3,
-              child: Column(
-                children: [
-                  _buildVisualizationCard(
-                    l10n.pitchHistory,
-                    PitchHistoryPainter(_engine.pitchHistory, palette.accent,
-                        baselineColor: palette.outline),
-                    l10n,
-                    palette,
-                    height: 140,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildVisualizationCard(
-                    l10n.frequencySpectrum,
-                    FFTPainter(_engine.fftMagnitudes, palette.spectrum),
-                    l10n,
-                    palette,
-                    height: 140,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 24),
-            // Right: settings + mic
-            Expanded(
-              flex: 2,
-              child: Column(
-                children: [
-                  _buildSettings(l10n, palette),
-                  const SizedBox(height: 16),
-                  _buildMicButton(l10n, palette),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 
@@ -1287,27 +1239,34 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildVisualizationRow(AppLocalizations l10n, TunerPalette palette) {
+  Widget _buildVisualizations(AppLocalizations l10n, TunerPalette palette,
+      {required bool stacked}) {
+    final history = _buildVisualizationCard(
+      l10n.pitchHistory,
+      PitchHistoryPainter(_engine.pitchHistory, palette.accent,
+          baselineColor: palette.outline),
+      l10n,
+      palette,
+      height: stacked ? 120 : 88,
+    );
+    final spectrum = _buildVisualizationCard(
+      l10n.frequencySpectrum,
+      FFTPainter(_engine.fftMagnitudes, palette.spectrum),
+      l10n,
+      palette,
+      height: stacked ? 120 : 88,
+    );
+    if (stacked) {
+      return Column(
+        children: [history, const SizedBox(height: 12), spectrum],
+      );
+    }
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Expanded(
-          child: _buildVisualizationCard(
-            l10n.pitchHistory,
-            PitchHistoryPainter(_engine.pitchHistory, palette.accent,
-                        baselineColor: palette.outline),
-            l10n,
-            palette,
-          ),
-        ),
+        Expanded(child: history),
         const SizedBox(width: 12),
-        Expanded(
-          child: _buildVisualizationCard(
-            l10n.frequencySpectrum,
-            FFTPainter(_engine.fftMagnitudes, palette.spectrum),
-            l10n,
-            palette,
-          ),
-        ),
+        Expanded(child: spectrum),
       ],
     );
   }
@@ -1430,7 +1389,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   Widget _buildVisualizationCard(String label, CustomPainter painter,
       AppLocalizations l10n, TunerPalette palette,
-      {double height = 100}) {
+      {required double height}) {
     return Semantics(
       label: l10n.visualizationLabel(label),
       excludeSemantics: true,
@@ -1523,9 +1482,9 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     final strings = _engine.currentTuningStrings;
     return Wrap(
       alignment: WrapAlignment.center,
-      spacing: 10,
+      spacing: 6,
       runSpacing: 8,
-      children: strings.mapIndexed((index, stringNote) {
+      children: strings.map((stringNote) {
         final bool isCurrentNote = currentNote == stringNote;
         final bool isInTune = isCurrentNote && _status == TunerStatus.inTune;
         final bool isPlayingThisTone = _currentlyPlayingNote == stringNote;
@@ -1575,14 +1534,13 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                     size: 24),
                 color: isPlayingThisTone ? palette.tone : palette.textSecondary,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+                constraints: const BoxConstraints.tightFor(width: 44, height: 44),
                 // Two strings of a tuning can carry the same note (open C on a
                 // banjo, the octave pairs a 12-string implies) — keying the
                 // tone by name alone would light both.
                 onPressed: () => _toggleToneGenerator(stringNote),
               ),
             ),
-            if (index < 0) const SizedBox.shrink(),
           ],
         );
       }).toList(),
@@ -1591,6 +1549,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
 
   InputDecoration _fieldDecoration(TunerPalette palette, {Widget? prefixIcon}) {
     return InputDecoration(
+      constraints: const BoxConstraints(minHeight: 48),
       filled: true,
       fillColor: palette.surface,
       border: OutlineInputBorder(
@@ -1623,7 +1582,21 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Semantics(
+            key: _settingsHeadingKey,
+            header: true,
+            child: Text(
+              l10n.settings,
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           Semantics(
             label: l10n.a4ReferenceFrequency,
             value: l10n.hertzValue(_engine.a4Frequency.toStringAsFixed(1)),
@@ -1724,8 +1697,6 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
                 style: TextButton.styleFrom(
                   foregroundColor: palette.accent,
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
             ),
@@ -2063,21 +2034,22 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildMicButton(AppLocalizations l10n, TunerPalette palette) {
-    return Semantics(
-      button: true,
-      label: _isListening ? l10n.stopTuningButton : l10n.startTuningButton,
+    return Tooltip(
+      message: _isListening ? l10n.stopTuningButton : l10n.startTuningButton,
       child: ElevatedButton(
         onPressed: _toggleListening,
         style: ElevatedButton.styleFrom(
           backgroundColor: _isListening ? palette.offPitch : palette.accent,
           foregroundColor: Colors.white,
           shape: const CircleBorder(),
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.zero,
+          minimumSize: const Size.square(44),
+          tapTargetSize: MaterialTapTargetSize.padded,
           elevation: 2,
         ),
         child: Icon(
           _isListening ? Icons.mic_off : Icons.mic,
-          size: 32,
+          size: 24,
           color: Colors.white,
         ),
       ),
