@@ -1,10 +1,10 @@
-2.5.0 (build 11)
+2.5.0 (build 12)
 
-The microphone control now stays in the top-right corner. On iPad, settings sit below it in the right column. On iPhone, tap the gear to jump directly to settings.
+A new pitch detector to try: "pYIN + note model". It holds a sustained note steadier than the default YIN: on recorded guitar, 89% of held-note readings were right against 81%. The first reading after a pluck comes about 30 ms later, and between strummed chords it shows a reading more often. YIN stays the default.
 
 What to test
 
-• Start and stop tuning from the top-right microphone button, including after scrolling down.
-• On iPad, rotate between portrait and landscape and check that the settings and tuner are easy to reach.
-• On iPhone, use the gear to jump to settings. Change the instrument, tuning or A4 reference pitch, then start tuning again.
-• On iPad, enable chord transcription and check that detected notes appear underneath the charts.
+• In settings, switch the pitch detector to "pYIN + note model" and tune a few strings. Does the needle stay calmer while you turn a peg?
+• Pluck a string and watch how quickly the first reading appears, compared with YIN.
+• Strum a chord, then let it ring out. Does the tuner show readings you would not expect?
+• Switch back to YIN and check that tuning works as before.

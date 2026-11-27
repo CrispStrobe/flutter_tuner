@@ -16,7 +16,7 @@ Everything an agent can do is done. What remains is listed at the bottom.
 | iOS `appStoreVersion` | `79c81d1a-3303-427a-88f3-aed40f78e8e6` — 2.1.0, `PREPARE_FOR_SUBMISSION` |
 | macOS `appStoreVersion` | `4d1bb892-14a2-47fe-83d2-ee71d27d3c1f` — 2.1.0, `PREPARE_FOR_SUBMISSION` |
 | Public site | https://crisptuner.vercel.app (Vercel project `crisptuner`) |
-| Mirror | https://crispstrobe.github.io/flutter_tuner/ (Pages, publishes on next push) |
+| Mirror | https://crispstrobe.github.io/CrispTuner/ (Pages, publishes on next push) |
 
 Both platform versions were auto-created at `1.0` and have been PATCHed to
 **2.1.0** to match the binary's `CFBundleShortVersionString`. They must stay in
@@ -148,8 +148,8 @@ submitted. Push the repo, then run each release workflow **with `dry_run=true`
 first** to validate signing without uploading:
 
 ```bash
-gh workflow run ios-release.yml   --repo CrispStrobe/flutter_tuner -f dry_run=true
-gh workflow run macos-release.yml --repo CrispStrobe/flutter_tuner -f dry_run=true
+gh workflow run ios-release.yml   --repo CrispStrobe/CrispTuner -f dry_run=true
+gh workflow run macos-release.yml --repo CrispStrobe/CrispTuner -f dry_run=true
 ```
 
 When those are green, tag for a real upload (`v2.1.0` for iOS, `macos-v2.1.0` for

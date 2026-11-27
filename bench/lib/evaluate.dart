@@ -21,6 +21,7 @@ import 'cometbeat/contracts.dart' as cb;
 import 'cometbeat/note_hmm.dart' as cb;
 import 'pyin.dart';
 import 'refine.dart';
+import 'note_state_hmm.dart';
 import 'voicing_hmm.dart';
 import 'wav.dart';
 import 'yin.dart';
@@ -71,6 +72,37 @@ enum MedianPolicy {
   resetOnGapOrJump,
 }
 
+/// What the note-state HMM does with a frame whose pYIN pitch is not near
+/// the note it holds (REPORT.md §39.8).
+enum NoteGate {
+  /// Show pYIN's pitch whenever the model says voiced.
+  none,
+
+  /// Show it only within a semitone of the held note.
+  agree,
+
+  /// Move a reading one or two octaves off back into the held note's
+  /// octave; drop anything else more than a semitone away.
+  fold,
+}
+
+/// How the note-state HMM borrows YIN's octave (REPORT.md §39.9). §39.8
+/// found the wrong octave is chosen when a note starts, and the shipped YIN
+/// path makes fewer octave errors from the same difference function.
+enum YinOctave {
+  none,
+
+  /// Every frame: when YIN is confident (the app's gate: pitched,
+  /// probability > 0.9) and pYIN's reading is one or two octaves from it,
+  /// move the reading into YIN's octave.
+  frame,
+
+  /// Once per note: at the note's first frame where YIN is confident, take
+  /// the octave offset (0 if not octave-related) and apply it until the note
+  /// changes. Frames before that are shown as they are.
+  run,
+}
+
 /// One pipeline under test.
 class Variant {
   final String name;
@@ -96,6 +128,12 @@ class Variant {
   /// rather than reproducing them here — so what is scored is the shipped
   /// class, not a benchmark's idea of it.
   final bool coreSmoother;
+
+  /// For an [appEngine] variant: run the app's period refinement
+  /// (`refineByOverlapCorrelation`, on by default since §38) on the
+  /// engine's answer before the smoother, in `main.dart`'s order. With
+  /// [coreSmoother] this is the whole release pipeline.
+  final bool appRefine;
 
   /// Non-YIN detectors.
   final bool isMpm;
@@ -133,6 +171,27 @@ class Variant {
   /// Cost model for [voicingLag], swept because the defaults were a guess.
   final double? voicingSwitch;
   final double? voicingEvidence;
+
+  /// Mask voicing with the streaming note-state HMM (`note_state_hmm.dart`)
+  /// at this lookahead in frames — §27.3's proposed design: note states for
+  /// the decision, pYIN's frequency for the answer, bounded lag.
+  final int? noteLag;
+
+  /// Minimum confirmed run for [noteLag]; `segmentNotes` uses 5.
+  final int noteMinFrames;
+
+  /// See [StreamingNoteHmm.resumeGap].
+  final int noteResumeGap;
+
+  /// See [StreamingNoteHmm.octaveJumpCost].
+  final double noteOctaveJump;
+
+  /// See [StreamingNoteHmm.octaveEmission].
+  final double? noteOctaveEmission;
+
+  final NoteGate noteGate;
+
+  final YinOctave noteYinOctave;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -156,6 +215,7 @@ class Variant {
     this.probabilityGate = false,
     this.medianPolicy = MedianPolicy.none,
     this.coreSmoother = false,
+    this.appRefine = false,
     this.appEngine,
     this.refine = Refinement2.none,
     this.isMpm = false,
@@ -165,6 +225,13 @@ class Variant {
     this.voicingLag,
     this.voicingSwitch,
     this.voicingEvidence,
+    this.noteLag,
+    this.noteMinFrames = 5,
+    this.noteResumeGap = 0,
+    this.noteOctaveJump = 0,
+    this.noteOctaveEmission,
+    this.noteGate = NoteGate.none,
+    this.noteYinOctave = YinOctave.none,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -332,7 +399,11 @@ class FileResult {
   /// summarised per file: median B and how many frames supported it.
   final double? medianB;
   final int bFrames;
-  const FileResult(this.file, this.stats, this.medianB, this.bFrames);
+
+  /// Per-variant reading per frame (0 = nothing shown), when asked for.
+  final Map<String, List<double>>? tracks;
+  const FileResult(this.file, this.stats, this.medianB, this.bFrames,
+      {this.tracks});
 }
 
 /// Score every variant on one (wav, jams) pair.
@@ -342,6 +413,7 @@ FileResult evaluateFile({
   int window = pitchWindowSize,
   int hop = 1024,
   List<Variant> variants = defaultVariants,
+  bool keepTracks = false,
 }) {
   final wav = readWav(wavPath);
   final truth = readJams(jamsPath);
@@ -375,6 +447,9 @@ FileResult evaluateFile({
             sampleRate: rate, windowSize: window)
   };
   final pyinFrames = <PyinFrame>[];
+  // YIN's own answer per frame, from the difference function pYIN reads,
+  // gated as the app gates it (0 = not confident).
+  final yinConfident = <double>[];
   final bValues = <double>[];
 
   for (int start = 0; start + window <= wav.samples.length; start += hop) {
@@ -387,6 +462,8 @@ FileResult evaluateFile({
 
     yin.cmndf(block);
     pyinFrames.add(pyin.observe(yin));
+    final yr = yin.resultFromCmndf(0.20);
+    yinConfident.add(yr.pitched && yr.probability > 0.9 ? yr.pitch : 0);
 
     YinResult? mpmResult;
 
@@ -396,10 +473,22 @@ FileResult evaluateFile({
         // The app's detector and the app's smoother, with nothing of the
         // benchmark's own in between.
         final e = engines[v.name]!.analyse(block);
-        final smoothed = smoothers[v.name]!.accept(
+        // main.dart refines before it gates and smooths; refinement leaves
+        // a non-positive pitch alone, so an unpitched frame passes through.
+        final pitch = v.appRefine && e.pitched && e.frequency > 0
+            ? refineByOverlapCorrelation(block, e.frequency, rate)
+            : e.frequency;
+        final smoother = smoothers[v.name];
+        if (smoother == null) {
+          // The engine's own answer, unsmoothed: for checking an app engine
+          // against the bench pipeline it was ported from.
+          detected[v.name]!.add(e.pitched ? pitch : 0);
+          continue;
+        }
+        final smoothed = smoother.accept(
           pitched: e.pitched,
           probability: e.probability,
-          pitch: e.frequency,
+          pitch: pitch,
         );
         detected[v.name]!.add(smoothed ?? 0);
         continue;
@@ -484,6 +573,53 @@ FileResult evaluateFile({
     var path = pyin.snapToCandidates(
         pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     if (v.hmmMask) path = _hmmVoicingMask(path, hop, rate);
+    if (v.noteLag != null) {
+      // Driven one frame at a time, exactly as the tuner would: nothing
+      // here reads a frame the stream has not reached yet, beyond the lag.
+      final hmm = StreamingNoteHmm(
+        lag: v.noteLag!,
+        minFrames: v.noteMinFrames,
+        resumeGap: v.noteResumeGap,
+        octaveJumpCost: v.noteOctaveJump,
+        octaveEmission: v.noteOctaveEmission,
+      );
+      final shown = List<double>.filled(path.length, 0);
+      int? runMidi; // the note of the run in progress, null after a gap
+      int? runShift; // its octave offset once decided
+      void apply(NoteStateDecision d) {
+        if (!d.voiced) {
+          runMidi = null;
+          return;
+        }
+        if (d.midi != runMidi) {
+          runMidi = d.midi;
+          runShift = null;
+        }
+        var f = _gate(path[d.frame], d.midi!, v.noteGate);
+        if (f <= 0) {
+          shown[d.frame] = 0;
+          return;
+        }
+        final y = yinConfident[d.frame];
+        switch (v.noteYinOctave) {
+          case YinOctave.none:
+            break;
+          case YinOctave.frame:
+            if (y > 0) f /= math.pow(2, _octavesApart(f, y));
+          case YinOctave.run:
+            if (runShift == null && y > 0) runShift = _octavesApart(f, y);
+            if (runShift != null) f /= math.pow(2, runShift!);
+        }
+        shown[d.frame] = f;
+      }
+
+      for (int i = 0; i < path.length; i++) {
+        final d = hmm.push(path[i], voiced: path[i] > 0);
+        if (d != null) apply(d);
+      }
+      hmm.flush().forEach(apply);
+      path = shown;
+    }
     if (v.voicingLag != null) {
       // pYIN's own claimed probability mass per frame is the emission: the
       // mass it did not assign to any candidate IS its estimate of being
@@ -597,7 +733,8 @@ FileResult evaluateFile({
     bValues.sort();
     medianB = bValues[bValues.length ~/ 2];
   }
-  return FileResult(wavPath.split('/').last, stats, medianB, bValues.length);
+  return FileResult(wavPath.split('/').last, stats, medianB, bValues.length,
+      tracks: keepTracks ? detected : null);
 }
 
 /// Frames per second of audio at this window and hop, for the report.
@@ -606,6 +743,30 @@ double framesPerSecond(int hop, double rate) => rate / hop;
 /// Convenience for the report: cents between two frequencies.
 double centsOf(double a, double b) => 1200 * math.log(a / b) / math.ln2;
 
+
+/// Whole octaves (±1, ±2) by which [f] sits above [ref], within a semitone;
+/// 0 when they are not octave-related.
+int _octavesApart(double f, double ref) {
+  final c = centsOf(f, ref);
+  for (final k in const [1, -1, 2, -2]) {
+    if ((c - 1200 * k).abs() <= 100) return k;
+  }
+  return 0;
+}
+
+/// Apply a [NoteGate] to one frame: [f0] is pYIN's pitch, [midi] the note
+/// the HMM holds. Returns the pitch to show, or 0.
+double _gate(double f0, int midi, NoteGate gate) {
+  if (f0 <= 0 || gate == NoteGate.none) return f0;
+  final ref = 440 * math.pow(2, (midi - 69) / 12).toDouble();
+  final c = centsOf(f0, ref);
+  if (c.abs() <= 100) return f0;
+  if (gate == NoteGate.agree) return 0;
+  for (final k in const [1, -1, 2, -2]) {
+    if ((c - 1200 * k).abs() <= 100) return f0 / math.pow(2, k);
+  }
+  return 0;
+}
 
 /// Keep pYIN's frequency where CometBeat's note-HMM says a note is sounding,
 /// and report nothing where it does not.

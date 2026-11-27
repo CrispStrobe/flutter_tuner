@@ -984,6 +984,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         return l10n.detectorMpm;
       case DetectorKind.swipe:
         return l10n.detectorSwipe;
+      case DetectorKind.pyinNote:
+        return l10n.detectorPyinNote;
     }
   }
 
@@ -1765,6 +1767,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           // in bench/REPORT.md describes; MPM answers on more frames and is
           // wrong on more of them, which on a quiet instrument is sometimes
           // the trade a player wants.
+          // pYIN + note model holds a sustained note better and answers about
+          // 30 ms later (bench/REPORT.md §39); an option, not the default.
           Semantics(
             label: l10n.detectorLabel,
             child: DropdownButtonFormField<DetectorKind>(

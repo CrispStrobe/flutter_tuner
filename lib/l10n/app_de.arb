@@ -89,6 +89,7 @@
   "detectorYin": "YIN (empfohlen)",
   "detectorMpm": "MPM (empfindlicher)",
   "detectorSwipe": "SWIPE′ (experimentell)",
+  "detectorPyinNote": "pYIN + Notenmodell (ruhiger bei gehaltenen Tönen)",
   "transcriptionTitle": "Akkorderkennung",
   "transcriptionEnable": "Akkorde erkennen",
   "transcriptionListening": "Warte auf Töne …",

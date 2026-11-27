@@ -38,7 +38,7 @@ DATA = os.path.join(WORK, "datasets")
 DART = os.path.join(WORK, "dart-sdk", "bin", "dart")
 DART_URL = ("https://storage.googleapis.com/dart-archive/channels/stable/"
             "release/3.13.4/sdk/dartsdk-linux-x64-release.zip")
-REPO = "https://github.com/CrispStrobe/flutter_tuner.git"
+REPO = "https://github.com/CrispStrobe/CrispTuner.git"
 REF = "bench/kaggle-four-models"
 CORPUS = "cello"
 ENGINES = "cb-rmvpe,cb-fcpe"

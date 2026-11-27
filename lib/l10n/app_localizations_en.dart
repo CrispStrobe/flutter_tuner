@@ -308,6 +308,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get detectorSwipe => 'SWIPE′ (experimental)';
 
   @override
+  String get detectorPyinNote => 'pYIN + note model (steadier on held notes)';
+
+  @override
   String get transcriptionTitle => 'Chord transcription';
 
   @override

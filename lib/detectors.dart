@@ -24,6 +24,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'fft_real.dart';
+import 'pyin_note.dart';
 import 'swipe.dart';
 
 /// One frame's answer from a detector.
@@ -61,6 +62,14 @@ enum DetectorKind {
   /// a quiet instrument with a weak signal its willingness to commit is
   /// sometimes what you want.
   mpm,
+
+  /// pYIN with a streaming note model on top, and YIN's octave. Steadier on
+  /// a held note than YIN (89.2% of held-note frames right against 80.8% on
+  /// GuitarSet's solo takes, through the app's whole pipeline), at the
+  /// price of a reading about 30 ms later after a pluck, 0.15 cents more
+  /// median error, and more false readings between strummed chords.
+  /// Offered as an option, not the default: bench/REPORT.md §39.10.
+  pyinNote,
 }
 
 /// Anything that can turn a window of audio into a pitch.
@@ -90,6 +99,8 @@ abstract class PitchEngine {
           MpmEngine(sampleRate: sampleRate, windowSize: windowSize),
         DetectorKind.swipe =>
           SwipeEngine(sampleRate: sampleRate, windowSize: windowSize),
+        DetectorKind.pyinNote =>
+          PyinNoteEngine(sampleRate: sampleRate, windowSize: windowSize),
       };
 }
 
@@ -183,6 +194,14 @@ class YinEngine extends PitchEngine {
 
   @override
   DetectorKind get kind => DetectorKind.yin;
+
+  /// The cumulative mean normalised difference function of the last window
+  /// [analyse] saw, indexed by lag. pYIN reads every dip in it, not only
+  /// the first below the threshold. Overwritten by the next call.
+  Float64List get cmndf => _yin;
+
+  /// The parabolic-interpolated period around an integer lag of [cmndf].
+  double interpolatedPeriod(int tau) => _parabolicInterpolation(tau);
 
   @override
   double get detectionFloor => 2 * sampleRate / windowSize;

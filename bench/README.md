@@ -119,6 +119,7 @@ of the maths measures nothing.
 | `lib/tracking.dart`, `bin/tracking.dart` | Tracking lag during bends and slides (REPORT.md §9.1). |
 | `lib/swipe.dart`, `bin/swipe.dart` | A SWIPE′-like spectral estimator, as a comparison point (REPORT.md §4.5). |
 | `lib/note_latency.dart`, `bin/notes.dart` | Note-level latency: time from the pluck to a correct, settled reading (REPORT.md §9). |
+| `lib/note_state_hmm.dart`, `bin/note_state.dart` | Streaming note-state HMM over pYIN with a bounded lag, scored for accuracy, false alarms and response time against the shipped tuner (REPORT.md §39). |
 | `tool/basic_pitch_eval.py` | Offline evaluation of Spotify's Basic Pitch on the same corpus, by the same rules (REPORT.md §10). Python, because it is an evaluation and not app code — it needs `onnxruntime`, `numpy` and `scipy`, and the model from `basic_pitch/saved_models/icassp_2022/nmp.onnx`. |
 | `bin/harmonics.dart` | The partial measurements of REPORT.md §8, scored against the annotation. |
 | `lib/refine.dart` | Instantaneous frequency from FFT phase, harmonic least squares, and the stiffness fit that yields an inharmonicity coefficient. |

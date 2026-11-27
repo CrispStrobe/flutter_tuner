@@ -4548,6 +4548,385 @@ shipped pipeline is already the right answer". **A 0.548 ms step, no
 realignment, no regression in any column, and the tail and jitter both
 improve by around a fifth.** The credit is theirs; the measurement is ours.
 
+## 39. Streaming pYIN: a note-state HMM with a bounded lag
+
+§27.3 ended on a design rather than a result: the offline note HMM's gain
+needs its **note states** for the voicing decision, so the streaming form
+should keep them and bound the lag, rather than shrink the model to two
+states. `lib/note_state_hmm.dart` is that model, and `bin/note_state.dart`
+measures it against the tuner as it ships on the three axes a release would
+be judged by: accuracy, false alarms, and response time.
+
+### 39.1 What the offline mask actually does
+
+Reading `segmentNotes` against how §27 feeds it (`_hmmVoicingMask`) gives a
+more specific mechanism than §27.3's "pitch continuity". The mask hands the
+HMM pYIN's *decoded* path with **binary** voicing, and keeps pYIN's frequency
+only inside a decoded note. So the HMM can only ever **remove** frames, and it
+removes them two ways:
+
+1. **Note runs shorter than `minFrames` (5) are dropped.** A two- or
+   three-frame burst of pitch inside a silence is a false alarm; this is what
+   removes it.
+2. **Brief excursions are split off a note.** A frame an octave away costs
+   more to explain as the held note (emission capped at 5) than to leave and
+   come back (2 × 1.8), so it becomes a short run of its own and rule 1 drops
+   it.
+
+Both need note identity, which is what the two-state model of §27.3 threw
+away. And rule 1 needs to know how long a run *will* be, which is exactly the
+lookahead question.
+
+### 39.2 The streaming model
+
+Same state space and costs as `segmentNotes` (one state per MIDI note plus
+silence; stay free, note↔silence 0.6, note→note 1.8), with three changes a
+stream forces:
+
+* **A fixed note range**, MIDI 28–100, since a stream cannot scan the track
+  for its range first.
+* **A bounded-lag backtrace**, §24's trick: a ring buffer of `lag + 1` frames
+  of backpointers, with frame `t` decided from the best state at `t + lag`.
+* **Rule 1 made causal.** A frame is shown only once the run it belongs to is
+  *known* to reach `minFrames`, counting committed frames behind it and the
+  tentative path ahead of it. At `lag ≥ minFrames − 1` that sees exactly as
+  far as the offline rule needs. Below that, the first frames of every note
+  are withheld.
+
+It is driven one frame at a time in the harness, with no access to anything
+beyond the lag. A unit test pins it to `segmentNotes` at full lookahead
+(> 99% of frames agree on a randomised track). It costs **22 µs a frame, 0.1% of the 23.2 ms
+hop**, on this laptop under heavy load from other jobs.
+
+### 39.3 Results: all 180 solo files
+
+The rows that reproduce earlier sections reproduce them exactly: the shipped
+71.88 / 80.80 / 17.07 and the offline mask 88.21 / 19.22 are §27's numbers.
+Response time is measured on 951 isolated plucks (`isolatedNotes`, §9), with
+a reading shown at the end of its analysis window **plus the variant's lag**.
+
+| variant | lag ms | RPA% | oct% | gross% | held RPA% | \|err\| p50 | VR% | FA% | first correct p50 / p90 ms | never correct |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **`engine-yin` (ships)** | 0 | 71.88 | **0.59** | 3.20 | 80.80 | 2.45 | 71.69 | 17.07 | **107** / **152** | 3/951 |
+| pyin-lag0 | 0 | 80.30 | 1.37 | 5.85 | 89.81 | 2.05 | 85.66 | 24.79 | 114 / 161 | 2/951 |
+| pyin-lag0 + note HMM, offline | — | 73.60 | 0.65 | 3.45 | 88.21 | 2.00 | 75.68 | 19.22 | 114 / 161 † | 6/951 |
+| nhmm min5 lag0 | 0 | 50.51 | 0.49 | 2.69 | 82.16 | 1.95 | 50.43 | 11.85 | 209 / 270 | 12/951 |
+| nhmm min5 lag2 | 46 | 63.21 | 0.56 | 1.96 | 87.18 | 2.00 | 62.99 | 13.67 | 207 / 253 | 8/951 |
+| nhmm min5 lag4 | 93 | 72.93 | 0.60 | 2.78 | 87.82 | 2.00 | 74.00 | 18.78 | 206 / 252 | 9/951 |
+| nhmm min4 lag0 | 0 | 57.23 | 0.54 | 2.70 | 86.27 | 2.00 | 57.23 | 12.83 | 186 / 247 | 7/951 |
+| nhmm min4 lag3 | 70 | 75.59 | 0.70 | 3.03 | 88.55 | 2.00 | 77.05 | 19.93 | 183 / 230 | 5/951 |
+| nhmm min3 lag0 | 0 | 64.49 | 0.63 | 2.85 | 87.87 | 2.00 | 64.80 | 14.26 | 163 / 224 | 4/951 |
+| nhmm min3 lag2 | 46 | 77.36 | 0.81 | 3.50 | 88.92 | 2.00 | 79.42 | 21.10 | 160 / 207 | 3/951 |
+| **nhmm min2 lag0** | **0** | **71.89** | 0.82 | 3.36 | **88.85** | 2.05 | **73.09** | **16.76** | 140 / 200 | **2/951** |
+| nhmm min2 lag1 | 23 | 78.49 | 1.01 | 4.20 | 89.33 | 2.05 | 81.38 | 22.13 | 137 / 185 | 2/951 |
+| nhmm min1 lag0 (no run rule) | 0 | 78.40 | 1.27 | 4.73 | 89.49 | 2.05 | 81.85 | 22.20 | 117 / 178 | 2/951 |
+
+† The offline arm needs the whole recording; its times are what it would
+show with no lag at all, a bound rather than a response.
+
+**The streaming model reproduces the offline result.** At `min5 lag4` (the
+offline rule, 93 ms of lookahead) it gives 87.82% held against 88.21%, and
+18.78% false alarms against 19.22%. The note-state structure is what earns
+§27's result, as §27.3 concluded.
+
+**Response time is set by `minFrames`, not by the lag.** Every `min5` row
+shows its first correct reading at about 207 ms, whether the lag is 0, 2 or
+4. A run must be known to reach five frames before any of it is shown,
+whether those frames are waited for as lag or withheld. Lag changes *which*
+frames are shown, not *when* the note first appears. At a fixed `minFrames`,
+the full lag (`minFrames − 1`) costs nothing in response time and buys back
+most of the voicing recall. It also brings back the false alarms the
+withheld onsets were hiding: 13.67% → 18.78% for `min5`.
+
+So the useful dial is `minFrames`. Its cost is exactly linear: each frame of
+minimum run delays the first reading by one hop, 117 → 140 → 163 → 186 → 209
+ms at lag 0. Its benefit is not. False alarms fall 22.20 → 16.76 → 14.26 →
+12.83 → 11.85%, so **the first withheld frame buys more than the next three
+together**, and that is where the operating point belongs.
+
+### 39.4 The operating point: `minFrames = 2`, no lag
+
+On solo playing, against the tuner as it ships, `nhmm min2 lag0`:
+
+* **ties on frame accuracy**, 71.89% against 71.88%;
+* **gains 8.05 points on held notes**, 88.85% against 80.80%, above even the
+  offline mask's 88.21%;
+* has **fewer false alarms**, 16.76% against 17.07%, and **higher voicing
+  recall**, 73.09% against 71.69%;
+* costs **33 ms of median response time** (140 against 107 ms; 48 ms at
+  p90): one withheld 23 ms frame, plus pYIN's own reading arriving 7 ms
+  later than YIN's (114 against 107);
+* costs **0.23 points of octave errors** (0.82% against 0.59%) and 0.16
+  points of gross errors.
+
+`min1` (the note HMM with no run rule) is the latency end of the same line:
+117 ms, only 10 ms behind the shipped tuner, but 5 points more false alarms.
+That is §24.1's problem again, with nothing to fix it.
+
+**One caveat on cents.** `engine-yin` is the detector core the bench copies,
+without the StringTune refinement the app has shipped on by default since
+§38. §38 measured that refinement changing only the cents column, 2.45 →
+2.05. So against today's release the 2.05 here is a **tie, not a win**, and
+the other columns stand. Whether StringTune's step also improves pYIN's
+frequency is untested.
+
+### 39.5 Held out: the comp half
+
+`minFrames = 2` was chosen on the same 180 files it is scored on, from a
+sweep of nine settings. GuitarSet's *comp* takes (the same
+players, accompaniment instead of solos) are the held-out check.
+
+| variant | lag ms | RPA% | oct% | gross% | held RPA% | \|err\| p50 | VR% | FA% | first correct p50 / p90 ms | never correct |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **`engine-yin` (ships)** | 0 | 32.33 | **6.86** | **14.87** | 52.86 | **2.20** | 33.33 | 14.06 | 132 / **203** | 6/58 |
+| pyin-lag0 | 0 | 37.19 | 11.19 | 24.07 | 59.23 | 2.75 | 62.07 | 29.46 | 122 / 224 | 4/58 |
+| pyin-lag0 + note HMM, offline | — | 33.26 | 9.39 | 16.22 | 56.40 | 2.65 | 50.50 | 15.26 | 116 / 222 † | 7/58 |
+| nhmm min3 lag0 | 0 | 28.33 | 8.53 | 14.58 | 55.42 | 2.65 | 38.44 | **13.44** | 171 / 254 | 7/58 |
+| **nhmm min2 lag0** | 0 | 32.18 | 8.78 | 16.78 | 57.11 | 2.70 | 44.88 | 17.77 | 156 / 251 | 5/58 |
+| nhmm min2 lag1 | 23 | 35.99 | 9.14 | 19.77 | 58.32 | 2.70 | 52.94 | 22.75 | 145 / 247 | 4/58 |
+| nhmm min1 lag0 | 0 | 35.65 | 9.15 | 20.50 | 58.47 | 2.70 | 52.45 | 23.73 | 134 / 246 | 4/58 |
+
+Comp is strummed chords, so most frames are polyphonic and every column
+here is scored on the minority that are not. That is why the absolute
+numbers are so much lower than solo, and why only 58 plucks qualify as
+isolated (against 951): **the response-time column is too thin to read**.
+
+What generalises and what does not:
+
+* **The held-note gain holds, at half the size**: 57.11% against 52.86%,
+  +4.25 points (solo: +8.05). Every pYIN arm beats the shipped tuner here,
+  as on solo.
+* **False-alarm parity does not hold.** `min2` reports 17.77% against the
+  shipped 14.06%. On solo it was slightly *better* than shipped; between
+  chords it lets through 3.7 points more. Matching the shipped false alarms
+  here takes `min3`, which costs another frame of response time and gives
+  back about 40% of the held-note gain (+2.56 points against +4.25).
+* **Octave errors and cents are worse** (8.78% against 6.86%; 2.70 against
+  2.20 cents). That is pYIN itself, not the HMM: raw `pyin-lag0` is worse on
+  both, and the HMM improves on it.
+
+So the solo result was partly fitted to solo playing. On isolated notes,
+which is what a tuner is used for, `min2` is a clear improvement. On the
+material furthest from that use, it trades false alarms and octave errors
+for held-note accuracy.
+
+### 39.6 What this means for shipping
+
+The blocker §27.2 named is gone: there is now a streaming form, it costs
+0.1% of the frame budget, and at its chosen setting it adds no lag. On the
+use a tuner exists for, one string at a time, it is the better pipeline. It
+is not yet a uniform improvement: §39.5 shows chordal playing still costs it
+false alarms and octave errors. What is left:
+
+* **Is 33 ms worth eight points on held notes?** The needle appears one frame
+  later after a pluck, and then holds the note far better while the peg
+  turns. For a tuner, where a held note is the whole use case, the trade
+  looks right; for anything where onset timing matters it does not.
+* **pYIN's own cost.** §4 put its front end at 7–8% of the frame budget,
+  against YIN's 6.8% for the whole detector.
+* **Chordal playing.** Players strum between tuning strings, so this
+  matters even for a tuner. §39.7 measures where the comp losses come from;
+  the octave guards it pointed to are tried in §39.8 and do not help,
+  because the wrong octave is chosen at a note's start.
+* **The licence check §27.2 asked for is no longer needed.** This model is
+  written against `segmentNotes`' documented model, not copied from it.
+
+### 39.7 Where the comp errors come from
+
+§39.5 first guessed that the comp losses were pYIN committing to *another*
+sounding string. `lib/error_attribution.dart` measures that instead, putting
+every error frame in exactly one class by what the annotation says was
+happening around it:
+
+* **False alarms** (no string annotated): **tail**, the reading matches
+  (±50 cents, or an octave) a note that ended in the last 300 ms, a string
+  still ringing after its annotation stopped; **onset**, the 93 ms window
+  already reaches the next pluck; **other**.
+* **Wrong pitch** (one string annotated, > 50 cents off): **octave** of
+  that string; **other string**, matches a different note sounding within
+  300 ms; **other**.
+
+The class totals equal the main table's FA% exactly, which checks the
+bookkeeping. Rates are per silent frame (false alarms) and per monophonic
+frame (wrong pitch), all 180 files of each half, run on CI:
+
+| | FA% | tail | onset | other | wrong% | octave | other string | other |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| comp, `engine-yin` (ships) | 14.06 | 4.73 | 1.92 | 7.41 | 8.97 | 2.78 | 2.70 | 3.49 |
+| comp, pyin-lag0 | 29.46 | 9.43 | 4.58 | 15.45 | 20.26 | 6.32 | 5.32 | 8.62 |
+| comp, **nhmm min2 lag0** | 17.77 | 6.37 | 2.31 | 9.09 | 11.05 | 3.80 | 3.29 | 3.97 |
+| comp, nhmm min3 lag0 | 13.44 | 5.09 | 1.70 | 6.64 | 8.52 | 3.14 | 2.75 | 2.62 |
+| solo, `engine-yin` (ships) | 17.07 | 6.32 | 4.03 | 6.72 | 2.83 | 0.43 | 1.48 | 0.92 |
+| solo, **nhmm min2 lag0** | 16.76 | 7.65 | 1.82 | 7.29 | 3.14 | 0.61 | 0.97 | 1.56 |
+
+On comp, `min2` against the shipped tuner:
+
+* **Wrong pitch, +2.08 points.** Another string accounts for **+0.59** of
+  it. The largest part is **octave errors, +1.02**, and the rest (+0.48) is
+  unexplained. The guess in §39.5 was mostly wrong.
+* **False alarms, +3.71 points.** By construction none of them is another
+  string, since no string is annotated. **Tails are +1.64**: the model keeps
+  reading a string for a moment after GuitarSet's annotation has ended it.
+  For a tuner that is arguably right, since the string is still sounding.
+  Onsets add +0.39, and **+1.68 is unexplained**.
+* Without tails, the false-alarm gap on comp is 2.07 points (11.40% against
+  9.33%), and on solo `min2` is **better** than shipped (9.11% against
+  10.75%), because withholding a run's first frame removes most onset false
+  alarms (1.82% against 4.03%).
+
+So the comp losses have no single cause. The one large measured component
+is octave errors, which points at an **octave guard** as the next
+experiment. §8 built one and did not ship it, because at the octave rate it
+measured then (0.58% of monophonic frames) it discarded more good frames
+than bad. The new model's 3.80% on comp is a different trade, and worth measuring on its own.
+
+### 39.8 The octave guard: three versions, none helps
+
+§39.7 pointed at octave errors as the one large measured part of the comp
+losses. §8's guards were spectral and failed because a single frame does not
+carry the information. The note-state model has something §8's did not, the
+note it is holding, so three guards were built on that:
+
+* **A jump penalty** (`octaveJumpCost`): moving straight to a note one or two
+  octaves from the held one costs extra, at 2 or 5 on top of the 1.8 switch.
+* **A gate on the reading**: *agree* hides a reading more than a semitone
+  from the held note; *fold* moves a reading one or two octaves off back
+  into the held note's octave.
+* **Holding through a slip** (`octaveEmission`): an octave-off frame costs
+  0.8 or 0.5 to explain as the held note, instead of the capped 5.0, so the
+  model can stay on the note for the fold to act on. Without this, a slip of
+  one or two frames detours through silence (0.6 + 1.0 a frame + 0.6) and is
+  hidden anyway, and a longer one becomes a run of the wrong-octave note.
+
+All on the operating point `min2 lag0`, both halves, on CI:
+
+| | comp oct% | comp FA% | comp held% | solo oct% | solo FA% | solo held% |
+| --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | **6.86** | **14.06** | 52.86 | **0.59** | 17.07 | 80.80 |
+| nhmm min2 lag0 | 8.78 | 17.77 | 57.11 | 0.82 | **16.76** | **88.85** |
+| + jump penalty 2 or 5 | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + agree | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + fold | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + hold 0.8, fold (with or without penalty 2) | 9.20 | 17.83 | **57.19** | 1.24 | 16.79 | 88.78 |
+| + hold 0.5, penalty 2, fold | 10.37 | 17.89 | 57.17 | 1.33 | 16.79 | 88.75 |
+
+The first three change nothing beyond a hundredth of a point, and that is
+the informative part:
+
+* **agree removes nothing**, and it hides every shown frame more than a
+  semitone from the held note. So in every wrong-octave frame the model
+  shows, **the held note is itself in the wrong octave**: the reading and
+  the state agree, and both are wrong.
+* **The jump penalty changes nothing**, so the model does not reach the
+  wrong octave by jumping there from the right note. It *starts* the note
+  in the wrong octave, from silence or from another note.
+* **Holding makes it worse**, on both halves. Once the model will stay on a
+  note through octave-off frames, it also stays on a *wrong* one, and folds
+  correct readings into a stale note after a real change.
+
+So octave errors here are decided **at the start of a note**, and no rule
+about what happens *during* a note can fix them. That rules out this family
+of guards. The shipped YIN path makes fewer octave errors on comp (6.86%
+against 8.78%) from the same difference function pYIN reads, so the
+remaining idea is to take YIN's octave instead. §39.9 tries it.
+
+The knobs stay in the code with their defaults off, so these rows can be
+reproduced; with every default the model is bit-identical to §39.2's.
+
+### 39.9 Borrowing YIN's octave: a partial fix
+
+YIN's estimate comes free, because pYIN already reads the same difference
+function every frame. It counts only when it passes the shipped tuner's own
+acceptance rule (threshold 0.20, probability above 0.9). Two ways to use it,
+both changing only a reading's octave, never whether a reading is shown:
+
+* **yin-frame**: on every frame where YIN is confident and pYIN's reading is
+  one or two octaves (± a semitone) from it, move the reading into YIN's
+  octave.
+* **yin-run**: decide the octave once per note, at the note's first
+  confident YIN frame, and keep it until the note changes. That matches
+  §39.8's finding that the octave is decided at the start of a note.
+
+| | comp RPA% | comp oct% | comp held% | comp FA% | comp first correct p50 | solo RPA% | solo oct% | solo held% | solo FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | 32.33 | **6.86** | 52.86 | 14.06 | 132 ms | 71.88 | **0.59** | 80.80 | 17.07 |
+| nhmm min2 lag0 | 32.18 | 8.78 | 57.11 | 17.77 | 156 ms | 71.89 | 0.82 | **88.85** | **16.76** |
+| **+ yin-frame** | **32.67** | 7.65 | **57.94** | 17.77 | 148 ms | 71.91 | 0.80 | 88.72 | 16.76 |
+| + yin-run | 32.41 | 8.24 | 57.42 | 17.77 | 148 ms | **71.94** | 0.76 | 88.78 | 16.76 |
+| nhmm min3 lag0 + yin-run | 28.58 | 7.85 | 55.86 | **13.44** | 171 ms | 64.47 | 0.67 | 87.80 | 14.26 |
+
+**yin-frame closes about 60% of the octave gap on comp**: 8.78% → 7.65%,
+against the shipped 6.86%. It lifts comp's overall accuracy past the
+shipped tuner (32.67% against 32.33%) and widens the held-note gain to +5.08
+points. On solo it is nearly free: octave errors 0.82% → 0.80%, held notes
+−0.13 points, false alarms unchanged.
+
+**Per frame beats per note on comp**, which partly qualifies §39.8: the
+wrong octave is chosen when a note starts, but YIN is not always confident
+then, and deciding later in the note catches more. yin-run is slightly
+better on solo octave errors (0.76%).
+
+**It cannot touch false alarms**, by design: comp stays 3.71 points worse
+than shipped. Matching the shipped false alarms on comp still needs `min3`,
+and on solo that costs 7.4 points of overall accuracy (64.47% against
+71.88%), because the extra withheld frame suppresses real readings too.
+
+So the measured trade for shipping `min2 lag0 + yin-frame`, against the
+tuner as it ships:
+
+* **solo** (one string at a time, the tuner's use): held notes **+7.9
+  points**, false alarms −0.3, octave errors +0.21, reading 32 ms later;
+* **comp** (strummed chords): held notes **+5.1 points**, overall accuracy
+  +0.3, octave errors +0.79, **false alarms +3.71**.
+
+### 39.10 In the app, as an option
+
+The pipeline is now a fourth detector, `DetectorKind.pyinNote`
+(`lib/pyin_note.dart`), offered in settings as *pYIN + note model (steadier
+on held notes)*. YIN stays the default. The engine is the operating point
+§39.9 arrived at: pYIN decoded greedily, the note model at `minFrames = 2`,
+YIN's octave per frame. It runs one window at a time, like every other
+engine.
+
+**The port is exact.** The bench runs the app's own engine (`appEngine:
+DetectorKind.pyinNote`). Without the app's smoother it reproduces `nhmm
+min2 lag0 yin-frame` digit for digit on every column of both halves.
+
+**Through the release pipeline.** `main.dart` runs StringTune's refinement
+on the engine's answer, then the gate and the five-frame median, for every
+detector. `release yin` and `release pyin-note` run that same sequence, so
+the first row is the app as it ships today:
+
+| | solo RPA% | oct% | gross% | held% | \|err\| p50 | FA% | first correct p50 | comp held% | comp oct% | comp FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **release yin** (ships) | **71.98** | **0.59** | **3.06** | 80.80 | **2.05** | 17.07 | **107 ms** | 52.87 | **6.86** | **14.06** |
+| **release pyin-note** | 71.84 | 0.77 | 3.49 | **89.22** | 2.20 | **16.76** | 139 ms | **58.69** | 7.95 | 17.77 |
+| release pyin-note, no median | 71.85 | 0.80 | 3.45 | 88.63 | 2.35 | 16.76 | 139 ms | 57.97 | 7.59 | 17.77 |
+
+* **The app's normal pipeline is right for it as it stands.** Without the
+  median it is worse on held notes and on cents, so nothing in `main.dart`
+  special-cases the new detector.
+* **Against the app as it ships**, on solo takes: held notes **+8.4
+  points**, false alarms −0.3, overall accuracy −0.1, octave errors +0.18,
+  gross errors +0.43, median error **+0.15 cents** (2.20 against 2.05), the
+  first correct reading **32 ms later**. Between strummed chords: held
+  notes +5.8 points, octave errors +1.1, false alarms **+3.7**.
+
+That is the case for an option rather than a default. It is clearly the
+steadier needle on a sustained string, which is what a tuner spends most of
+its time showing. It is slower to the first reading, slightly less precise,
+and noisier between chords, and none of those is something to impose on
+everyone.
+
+It costs 0.73 ms a frame against YIN's 0.64 (best of six interleaved runs on
+a loaded laptop), 3.1% of the 23.2 ms frame budget.
+
+*Reproduce:* `dart run bin/note_state.dart --data <guitarset> --subset solo
+--jobs 4`; `--only` takes a comma-separated list of arm names. On CI:
+`gh workflow run "Bench (GuitarSet)" -f tool=note_state -f subset=comp`.
+That takes about 5 minutes for a half of the corpus; a heavily loaded laptop
+took about 90.
+
 ---
 
 *Harness, exact commands and how the copied core is kept in sync:

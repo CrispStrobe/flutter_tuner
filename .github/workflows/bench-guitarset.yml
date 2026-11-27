@@ -20,7 +20,7 @@ on:
         required: true
         default: 'swipe'
         type: choice
-        options: [swipe, bench, notes, tracking, harmonics, hysteresis, decoder_rules, cometbeat]
+        options: [swipe, bench, notes, tracking, harmonics, hysteresis, decoder_rules, cometbeat, note_state]
       limit:
         description: 'Files to use (0 = all 180 of the subset)'
         required: false

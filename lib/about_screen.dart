@@ -44,7 +44,7 @@ const _components = <_Component>[
   _Component('Flutter', 'BSD 3-Clause', 'Application framework'),
 ];
 
-const _repoUrl = 'https://github.com/CrispStrobe/flutter_tuner';
+const _repoUrl = 'https://github.com/CrispStrobe/CrispTuner';
 const _privacyUrl = 'https://crisptuner.vercel.app/privacy.html';
 
 /// Registers licences that `showLicensePage` cannot discover on its own.
