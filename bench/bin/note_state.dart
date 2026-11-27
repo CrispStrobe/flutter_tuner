@@ -70,6 +70,12 @@ final List<(Variant, int?)> arms = [
       noteMinFrames: 2, noteYinOctave: YinOctave.run), 0),
   (Variant('nhmm min3 lag0 yin-run', isPyin: true, pyinLag: 0, noteLag: 0,
       noteMinFrames: 3, noteYinOctave: YinOctave.run), 0),
+  // The app's own engine (lib/pyin_note.dart). Unsmoothed it must match
+  // `nhmm min2 lag0 yin-frame`, the pipeline it was ported from; smoothed
+  // it is what the app shows, through the same PitchSmoother engine-yin uses.
+  (Variant('engine-pyin-note raw', appEngine: DetectorKind.pyinNote), 0),
+  (Variant('engine-pyin-note',
+      appEngine: DetectorKind.pyinNote, coreSmoother: true), 0),
 ];
 
 class Timing {

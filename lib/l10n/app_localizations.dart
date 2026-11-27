@@ -632,6 +632,12 @@ abstract class AppLocalizations {
   /// **'SWIPE′ (experimental)'**
   String get detectorSwipe;
 
+  /// Name of the fourth pitch detector option: pYIN with a streaming note model, steadier on a held note than YIN but slightly slower to respond
+  ///
+  /// In en, this message translates to:
+  /// **'pYIN + note model (steadier on held notes)'**
+  String get detectorPyinNote;
+
   /// Title of the panel that lists every note currently detected, as opposed to the single note the tuner shows
   ///
   /// In en, this message translates to:

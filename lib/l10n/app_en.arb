@@ -253,6 +253,10 @@
   "@detectorSwipe": {
     "description": "Name of the third pitch detector option, a spectral estimator that is measurably less accurate than YIN"
   },
+  "detectorPyinNote": "pYIN + note model (steadier on held notes)",
+  "@detectorPyinNote": {
+    "description": "Name of the fourth pitch detector option: pYIN with a streaming note model, steadier on a held note than YIN but slightly slower to respond"
+  },
   "transcriptionTitle": "Chord transcription",
   "@transcriptionTitle": {
     "description": "Title of the panel that lists every note currently detected, as opposed to the single note the tuner shows"

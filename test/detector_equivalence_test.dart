@@ -150,7 +150,13 @@ void main() {
     for (final kind in DetectorKind.values) {
       final engine = PitchEngine.of(kind,
           sampleRate: rate, windowSize: pitchWindowSize);
-      final r = engine.analyse(block);
+      // Three frames, not one: pyinNote is stateful and shows a note only
+      // once it has lasted two frames (bench/REPORT.md §39.4). The others
+      // are stateless and give the same answer every time.
+      var r = engine.analyse(block);
+      for (int i = 0; i < 2; i++) {
+        r = engine.analyse(block);
+      }
       expect(r.pitched, isTrue, reason: '${kind.name} found nothing');
       expect(centsBetween(r.frequency, 196.0).abs(), lessThan(20),
           reason: '${kind.name} read ${r.frequency}');

@@ -466,7 +466,14 @@ FileResult evaluateFile({
         // The app's detector and the app's smoother, with nothing of the
         // benchmark's own in between.
         final e = engines[v.name]!.analyse(block);
-        final smoothed = smoothers[v.name]!.accept(
+        final smoother = smoothers[v.name];
+        if (smoother == null) {
+          // The engine's own answer, unsmoothed: for checking an app engine
+          // against the bench pipeline it was ported from.
+          detected[v.name]!.add(e.pitched ? e.frequency : 0);
+          continue;
+        }
+        final smoothed = smoother.accept(
           pitched: e.pitched,
           probability: e.probability,
           pitch: e.frequency,
