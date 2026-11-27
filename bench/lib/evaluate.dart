@@ -21,6 +21,7 @@ import 'cometbeat/contracts.dart' as cb;
 import 'cometbeat/note_hmm.dart' as cb;
 import 'pyin.dart';
 import 'refine.dart';
+import 'note_state_hmm.dart';
 import 'voicing_hmm.dart';
 import 'wav.dart';
 import 'yin.dart';
@@ -133,6 +134,17 @@ class Variant {
   /// Cost model for [voicingLag], swept because the defaults were a guess.
   final double? voicingSwitch;
   final double? voicingEvidence;
+
+  /// Mask voicing with the streaming note-state HMM (`note_state_hmm.dart`)
+  /// at this lookahead in frames — §27.3's proposed design: note states for
+  /// the decision, pYIN's frequency for the answer, bounded lag.
+  final int? noteLag;
+
+  /// Minimum confirmed run for [noteLag]; `segmentNotes` uses 5.
+  final int noteMinFrames;
+
+  /// See [StreamingNoteHmm.resumeGap].
+  final int noteResumeGap;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -165,6 +177,9 @@ class Variant {
     this.voicingLag,
     this.voicingSwitch,
     this.voicingEvidence,
+    this.noteLag,
+    this.noteMinFrames = 5,
+    this.noteResumeGap = 0,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -332,7 +347,11 @@ class FileResult {
   /// summarised per file: median B and how many frames supported it.
   final double? medianB;
   final int bFrames;
-  const FileResult(this.file, this.stats, this.medianB, this.bFrames);
+
+  /// Per-variant reading per frame (0 = nothing shown), when asked for.
+  final Map<String, List<double>>? tracks;
+  const FileResult(this.file, this.stats, this.medianB, this.bFrames,
+      {this.tracks});
 }
 
 /// Score every variant on one (wav, jams) pair.
@@ -342,6 +361,7 @@ FileResult evaluateFile({
   int window = pitchWindowSize,
   int hop = 1024,
   List<Variant> variants = defaultVariants,
+  bool keepTracks = false,
 }) {
   final wav = readWav(wavPath);
   final truth = readJams(jamsPath);
@@ -484,6 +504,26 @@ FileResult evaluateFile({
     var path = pyin.snapToCandidates(
         pyinFrames, pyin.decode(pyinFrames, lag: v.pyinLag));
     if (v.hmmMask) path = _hmmVoicingMask(path, hop, rate);
+    if (v.noteLag != null) {
+      // Driven one frame at a time, exactly as the tuner would: nothing
+      // here reads a frame the stream has not reached yet, beyond the lag.
+      final hmm = StreamingNoteHmm(
+        lag: v.noteLag!,
+        minFrames: v.noteMinFrames,
+        resumeGap: v.noteResumeGap,
+      );
+      final keep = List<bool>.filled(path.length, false);
+      for (int i = 0; i < path.length; i++) {
+        final d = hmm.push(path[i], voiced: path[i] > 0);
+        if (d != null) keep[d.frame] = d.voiced;
+      }
+      for (final d in hmm.flush()) {
+        keep[d.frame] = d.voiced;
+      }
+      for (int i = 0; i < path.length; i++) {
+        if (!keep[i]) path[i] = 0;
+      }
+    }
     if (v.voicingLag != null) {
       // pYIN's own claimed probability mass per frame is the emission: the
       // mass it did not assign to any candidate IS its estimate of being
@@ -597,7 +637,8 @@ FileResult evaluateFile({
     bValues.sort();
     medianB = bValues[bValues.length ~/ 2];
   }
-  return FileResult(wavPath.split('/').last, stats, medianB, bValues.length);
+  return FileResult(wavPath.split('/').last, stats, medianB, bValues.length,
+      tracks: keepTracks ? detected : null);
 }
 
 /// Frames per second of audio at this window and hop, for the report.
