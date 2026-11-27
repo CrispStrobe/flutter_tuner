@@ -4726,8 +4726,8 @@ false alarms and octave errors. What is left:
   against YIN's 6.8% for the whole detector.
 * **Chordal playing.** Players strum between tuning strings, so this
   matters even for a tuner. §39.7 measures where the comp losses come from;
-  the next experiment it points to is an **octave guard**, not a polyphony
-  guard.
+  the octave guards it pointed to are tried in §39.8 and do not help,
+  because the wrong octave is chosen at a note's start.
 * **The licence check §27.2 asked for is no longer needed.** This model is
   written against `segmentNotes`' documented model, not copied from it.
 
@@ -4779,6 +4779,60 @@ is octave errors, which points at an **octave guard** as the next
 experiment. §8 built one and did not ship it, because at the octave rate it
 measured then (0.58% of monophonic frames) it discarded more good frames
 than bad. The new model's 3.80% on comp is a different trade, and worth measuring on its own.
+
+### 39.8 The octave guard: three versions, none helps
+
+§39.7 pointed at octave errors as the one large measured part of the comp
+losses. §8's guards were spectral and failed because a single frame does not
+carry the information. The note-state model has something §8's did not, the
+note it is holding, so three guards were built on that:
+
+* **A jump penalty** (`octaveJumpCost`): moving straight to a note one or two
+  octaves from the held one costs extra, at 2 or 5 on top of the 1.8 switch.
+* **A gate on the reading**: *agree* hides a reading more than a semitone
+  from the held note; *fold* moves a reading one or two octaves off back
+  into the held note's octave.
+* **Holding through a slip** (`octaveEmission`): an octave-off frame costs
+  0.8 or 0.5 to explain as the held note, instead of the capped 5.0, so the
+  model can stay on the note for the fold to act on. Without this, a slip of
+  one or two frames detours through silence (0.6 + 1.0 a frame + 0.6) and is
+  hidden anyway, and a longer one becomes a run of the wrong-octave note.
+
+All on the operating point `min2 lag0`, both halves, on CI:
+
+| | comp oct% | comp FA% | comp held% | solo oct% | solo FA% | solo held% |
+| --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | **6.86** | **14.06** | 52.86 | **0.59** | 17.07 | 80.80 |
+| nhmm min2 lag0 | 8.78 | 17.77 | 57.11 | 0.82 | **16.76** | **88.85** |
+| + jump penalty 2 or 5 | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + agree | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + fold | 8.78 | 17.77 | 57.11 | 0.82 | 16.76 | 88.85 |
+| + hold 0.8, fold (with or without penalty 2) | 9.20 | 17.83 | **57.19** | 1.24 | 16.79 | 88.78 |
+| + hold 0.5, penalty 2, fold | 10.37 | 17.89 | 57.17 | 1.33 | 16.79 | 88.75 |
+
+The first three change nothing beyond a hundredth of a point, and that is
+the informative part:
+
+* **agree removes nothing**, and it hides every shown frame more than a
+  semitone from the held note. So in every wrong-octave frame the model
+  shows, **the held note is itself in the wrong octave**: the reading and
+  the state agree, and both are wrong.
+* **The jump penalty changes nothing**, so the model does not reach the
+  wrong octave by jumping there from the right note. It *starts* the note
+  in the wrong octave, from silence or from another note.
+* **Holding makes it worse**, on both halves. Once the model will stay on a
+  note through octave-off frames, it also stays on a *wrong* one, and folds
+  correct readings into a stale note after a real change.
+
+So octave errors here are decided **at the start of a note**, and no rule
+about what happens *during* a note can fix them. That rules out this family
+of guards. The shipped YIN path makes fewer octave errors on comp (6.86%
+against 8.78%) from the same difference function pYIN reads, so the
+remaining idea is an onset decision: when a new note starts, check pYIN's
+octave against YIN's. That is a different experiment, and not built here.
+
+The knobs stay in the code with their defaults off, so these rows can be
+reproduced; with every default the model is bit-identical to §39.2's.
 
 *Reproduce:* `dart run bin/note_state.dart --data <guitarset> --subset solo
 --jobs 4`; `--only` takes a comma-separated list of arm names. On CI:
