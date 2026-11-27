@@ -4725,15 +4725,66 @@ false alarms and octave errors. What is left:
 * **pYIN's own cost.** §4 put its front end at 7–8% of the frame budget,
   against YIN's 6.8% for the whole detector.
 * **Chordal playing.** Players strum between tuning strings, so this
-  matters even for a tuner. The likely cause of the comp losses is pYIN
-  committing to one of several sounding strings, which would make the next
-  experiment a guard for polyphonic frames rather than more HMM tuning. That
-  cause is not yet measured.
+  matters even for a tuner. §39.7 measures where the comp losses come from;
+  the next experiment it points to is an **octave guard**, not a polyphony
+  guard.
 * **The licence check §27.2 asked for is no longer needed.** This model is
   written against `segmentNotes`' documented model, not copied from it.
 
+### 39.7 Where the comp errors come from
+
+§39.5 first guessed that the comp losses were pYIN committing to *another*
+sounding string. `lib/error_attribution.dart` measures that instead, putting
+every error frame in exactly one class by what the annotation says was
+happening around it:
+
+* **False alarms** (no string annotated): **tail**, the reading matches
+  (±50 cents, or an octave) a note that ended in the last 300 ms, a string
+  still ringing after its annotation stopped; **onset**, the 93 ms window
+  already reaches the next pluck; **other**.
+* **Wrong pitch** (one string annotated, > 50 cents off): **octave** of
+  that string; **other string**, matches a different note sounding within
+  300 ms; **other**.
+
+The class totals equal the main table's FA% exactly, which checks the
+bookkeeping. Rates are per silent frame (false alarms) and per monophonic
+frame (wrong pitch), all 180 files of each half, run on CI:
+
+| | FA% | tail | onset | other | wrong% | octave | other string | other |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| comp, `engine-yin` (ships) | 14.06 | 4.73 | 1.92 | 7.41 | 8.97 | 2.78 | 2.70 | 3.49 |
+| comp, pyin-lag0 | 29.46 | 9.43 | 4.58 | 15.45 | 20.26 | 6.32 | 5.32 | 8.62 |
+| comp, **nhmm min2 lag0** | 17.77 | 6.37 | 2.31 | 9.09 | 11.05 | 3.80 | 3.29 | 3.97 |
+| comp, nhmm min3 lag0 | 13.44 | 5.09 | 1.70 | 6.64 | 8.52 | 3.14 | 2.75 | 2.62 |
+| solo, `engine-yin` (ships) | 17.07 | 6.32 | 4.03 | 6.72 | 2.83 | 0.43 | 1.48 | 0.92 |
+| solo, **nhmm min2 lag0** | 16.76 | 7.65 | 1.82 | 7.29 | 3.14 | 0.61 | 0.97 | 1.56 |
+
+On comp, `min2` against the shipped tuner:
+
+* **Wrong pitch, +2.08 points.** Another string accounts for **+0.59** of
+  it. The largest part is **octave errors, +1.02**, and the rest (+0.48) is
+  unexplained. The guess in §39.5 was mostly wrong.
+* **False alarms, +3.71 points.** By construction none of them is another
+  string, since no string is annotated. **Tails are +1.64**: the model keeps
+  reading a string for a moment after GuitarSet's annotation has ended it.
+  For a tuner that is arguably right, since the string is still sounding.
+  Onsets add +0.39, and **+1.68 is unexplained**.
+* Without tails, the false-alarm gap on comp is 2.07 points (11.40% against
+  9.33%), and on solo `min2` is **better** than shipped (9.11% against
+  10.75%), because withholding a run's first frame removes most onset false
+  alarms (1.82% against 4.03%).
+
+So the comp losses have no single cause. The one large measured component
+is octave errors, which points at an **octave guard** as the next
+experiment. §8 built one and did not ship it, because at the octave rate it
+measured then (0.58% of monophonic frames) it discarded more good frames
+than bad. The new model's 3.80% on comp is a different trade, and worth measuring on its own.
+
 *Reproduce:* `dart run bin/note_state.dart --data <guitarset> --subset solo
---jobs 4`; `--only` takes a comma-separated list of arm names.
+--jobs 4`; `--only` takes a comma-separated list of arm names. On CI:
+`gh workflow run "Bench (GuitarSet)" -f tool=note_state -f subset=comp`.
+That takes about 5 minutes for a half of the corpus; a heavily loaded laptop
+took about 90.
 
 ---
 
