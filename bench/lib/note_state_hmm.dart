@@ -75,6 +75,20 @@ class StreamingNoteHmm {
   /// Penalty to enter or leave silence.
   final double boundaryCost;
 
+  /// Extra penalty, on top of [switchCost], for moving straight to a note
+  /// one or two octaves from the held one. §39.7 found octave errors the
+  /// largest measured part of the comp losses; an octave slip is far more
+  /// often the tracker locking a partial than the player leaping an octave
+  /// with no gap. 0 keeps the plain model, bit for bit.
+  final double octaveJumpCost;
+
+  /// When set, a frame one or two octaves from a note costs this (plus its
+  /// residual cents) to explain as that note, rather than the capped 5.0.
+  /// That lets the model *hold* a note through an octave slip instead of
+  /// leaving it, so a gate can fold the reading back. Null keeps the plain
+  /// emission.
+  final double? octaveEmission;
+
   /// Fixed MIDI range of the note states.
   final int minMidi;
   final int maxMidi;
@@ -112,6 +126,8 @@ class StreamingNoteHmm {
     this.maxMidi = 100, // E7: above anything a guitar tuner is asked about
     this.a4 = 440,
     this.resumeGap = 0,
+    this.octaveJumpCost = 0,
+    this.octaveEmission,
   })  : assert(lag >= 0),
         assert(minFrames >= 1),
         _k = maxMidi - minMidi + 1 {
@@ -126,7 +142,12 @@ class StreamingNoteHmm {
   double _emitNote(int i, double frameCents, bool voiced) {
     if (!voiced) return 3.0; // a note state on an unvoiced frame is costly
     final c = (frameCents - 100.0 * (minMidi + i - 69)).abs();
-    return math.min(c / 50.0, 5.0);
+    final plain = math.min(c / 50.0, 5.0);
+    final oe = octaveEmission;
+    if (oe == null || c <= 600) return plain;
+    // Distance to the nearest octave of this note, one or two away.
+    final r = math.min((c - 1200).abs(), (c - 2400).abs());
+    return r <= 50 ? math.min(plain, oe + r / 50.0) : plain;
   }
 
   /// Push the next frame's pitch track value. [voiced] is the tracker's own
@@ -168,6 +189,22 @@ class StreamingNoteHmm {
         }
       }
       final fromSilence = prev[_silence] + boundaryCost;
+      // The five cheapest notes, cheapest first (only for the octave rule).
+      final top = Int32List(5)..fillRange(0, 5, -1);
+      if (octaveJumpCost != 0) {
+        for (int j = 0; j < _k; j++) {
+          final c = prev[j];
+          int pos = 5;
+          while (pos > 0 && (top[pos - 1] < 0 || prev[top[pos - 1]] > c)) {
+            pos--;
+          }
+          if (pos >= 5) continue;
+          for (int m = 4; m > pos; m--) {
+            top[m] = top[m - 1];
+          }
+          top[pos] = j;
+        }
+      }
       for (int i = 0; i < _k; i++) {
         var best = prev[i];
         var from = i;
@@ -175,11 +212,35 @@ class StreamingNoteHmm {
           best = fromSilence;
           from = _silence;
         }
-        final other = i == a1 ? g2 : g1;
-        final otherArg = i == a1 ? a2 : a1;
-        if (other + switchCost < best) {
-          best = other + switchCost;
-          from = otherArg;
+        if (octaveJumpCost == 0) {
+          final other = i == a1 ? g2 : g1;
+          final otherArg = i == a1 ? a2 : a1;
+          if (other + switchCost < best) {
+            best = other + switchCost;
+            from = otherArg;
+          }
+        } else {
+          // Best source that is neither this note nor an octave of it:
+          // at most four are excluded, so the five cheapest always hold one.
+          for (final j in top) {
+            if (j < 0) break;
+            final d = (j - i).abs();
+            if (d == 0 || d == 12 || d == 24) continue;
+            if (prev[j] + switchCost < best) {
+              best = prev[j] + switchCost;
+              from = j;
+            }
+            break;
+          }
+          for (final d in const [-24, -12, 12, 24]) {
+            final j = i + d;
+            if (j < 0 || j >= _k) continue;
+            final c = prev[j] + switchCost + octaveJumpCost;
+            if (c < best) {
+              best = c;
+              from = j;
+            }
+          }
         }
         cur[i] = best + _emitNote(i, fc, voiced);
         back[i] = from;

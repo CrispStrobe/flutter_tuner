@@ -72,6 +72,20 @@ enum MedianPolicy {
   resetOnGapOrJump,
 }
 
+/// What the note-state HMM does with a frame whose pYIN pitch is not near
+/// the note it holds (REPORT.md §39.8).
+enum NoteGate {
+  /// Show pYIN's pitch whenever the model says voiced.
+  none,
+
+  /// Show it only within a semitone of the held note.
+  agree,
+
+  /// Move a reading one or two octaves off back into the held note's
+  /// octave; drop anything else more than a semitone away.
+  fold,
+}
+
 /// One pipeline under test.
 class Variant {
   final String name;
@@ -145,6 +159,14 @@ class Variant {
 
   /// See [StreamingNoteHmm.resumeGap].
   final int noteResumeGap;
+
+  /// See [StreamingNoteHmm.octaveJumpCost].
+  final double noteOctaveJump;
+
+  /// See [StreamingNoteHmm.octaveEmission].
+  final double? noteOctaveEmission;
+
+  final NoteGate noteGate;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -180,6 +202,9 @@ class Variant {
     this.noteLag,
     this.noteMinFrames = 5,
     this.noteResumeGap = 0,
+    this.noteOctaveJump = 0,
+    this.noteOctaveEmission,
+    this.noteGate = NoteGate.none,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -511,18 +536,21 @@ FileResult evaluateFile({
         lag: v.noteLag!,
         minFrames: v.noteMinFrames,
         resumeGap: v.noteResumeGap,
+        octaveJumpCost: v.noteOctaveJump,
+        octaveEmission: v.noteOctaveEmission,
       );
-      final keep = List<bool>.filled(path.length, false);
+      final shown = List<double>.filled(path.length, 0);
+      void apply(NoteStateDecision d) {
+        if (!d.voiced) return;
+        shown[d.frame] = _gate(path[d.frame], d.midi!, v.noteGate);
+      }
+
       for (int i = 0; i < path.length; i++) {
         final d = hmm.push(path[i], voiced: path[i] > 0);
-        if (d != null) keep[d.frame] = d.voiced;
+        if (d != null) apply(d);
       }
-      for (final d in hmm.flush()) {
-        keep[d.frame] = d.voiced;
-      }
-      for (int i = 0; i < path.length; i++) {
-        if (!keep[i]) path[i] = 0;
-      }
+      hmm.flush().forEach(apply);
+      path = shown;
     }
     if (v.voicingLag != null) {
       // pYIN's own claimed probability mass per frame is the emission: the
@@ -647,6 +675,20 @@ double framesPerSecond(int hop, double rate) => rate / hop;
 /// Convenience for the report: cents between two frequencies.
 double centsOf(double a, double b) => 1200 * math.log(a / b) / math.ln2;
 
+
+/// Apply a [NoteGate] to one frame: [f0] is pYIN's pitch, [midi] the note
+/// the HMM holds. Returns the pitch to show, or 0.
+double _gate(double f0, int midi, NoteGate gate) {
+  if (f0 <= 0 || gate == NoteGate.none) return f0;
+  final ref = 440 * math.pow(2, (midi - 69) / 12).toDouble();
+  final c = centsOf(f0, ref);
+  if (c.abs() <= 100) return f0;
+  if (gate == NoteGate.agree) return 0;
+  for (final k in const [1, -1, 2, -2]) {
+    if ((c - 1200 * k).abs() <= 100) return f0 / math.pow(2, k);
+  }
+  return 0;
+}
 
 /// Keep pYIN's frequency where CometBeat's note-HMM says a note is sounding,
 /// and report nothing where it does not.

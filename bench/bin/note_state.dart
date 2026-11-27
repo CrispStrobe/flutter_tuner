@@ -46,6 +46,23 @@ final List<(Variant, int?)> arms = [
   // No run rule at all: the note HMM's own decision, greedy.
   (Variant('nhmm min1 lag0',
       isPyin: true, pyinLag: 0, noteLag: 0, noteMinFrames: 1), 0),
+  // §39.8: octave guards on the chosen operating point (min2, lag 0).
+  // A penalty on direct octave jumps; a gate that drops or folds readings
+  // an octave from the held note; and a cheaper octave-off emission so the
+  // model can hold a note through a slip for the fold to act on.
+  for (final (label, jump, emission, gate) in const [
+    ('oct2', 2.0, null, NoteGate.none),
+    ('oct5', 5.0, null, NoteGate.none),
+    ('agree', 0.0, null, NoteGate.agree),
+    ('fold', 0.0, null, NoteGate.fold),
+    ('hold0.8 fold', 0.0, 0.8, NoteGate.fold),
+    ('hold0.8 oct2 fold', 2.0, 0.8, NoteGate.fold),
+    ('hold0.5 oct2 fold', 2.0, 0.5, NoteGate.fold),
+  ])
+    (Variant('nhmm min2 lag0 $label',
+        isPyin: true, pyinLag: 0, noteLag: 0, noteMinFrames: 2,
+        noteOctaveJump: jump, noteOctaveEmission: emission, noteGate: gate),
+        0),
 ];
 
 class Timing {

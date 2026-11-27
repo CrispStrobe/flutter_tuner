@@ -102,4 +102,53 @@ void main() {
     expect(agree / track.length, greaterThan(0.99),
         reason: '$agree of ${track.length} frames agree');
   });
+
+  test('the octave-aware transition search agrees with the fast path', () {
+    final rng = math.Random(11);
+    final track = [
+      for (int i = 0; i < 3000; i++)
+        rng.nextDouble() < 0.15
+            ? 0.0
+            : midiHz(40 + rng.nextInt(30) + (rng.nextDouble() - 0.5) * 0.8)
+    ];
+    List<int?> notes(StreamingNoteHmm h) {
+      final out = List<int?>.filled(track.length, null);
+      for (final f in track) {
+        final d = h.push(f, voiced: f > 0);
+        if (d != null) out[d.frame] = d.midi;
+      }
+      for (final d in h.flush()) {
+        out[d.frame] = d.midi;
+      }
+      return out;
+    }
+
+    final fast = notes(StreamingNoteHmm(lag: 3, minFrames: 2));
+    final slow =
+        notes(StreamingNoteHmm(lag: 3, minFrames: 2, octaveJumpCost: 1e-9));
+    var agree = 0;
+    for (int i = 0; i < track.length; i++) {
+      if (fast[i] == slow[i]) agree++;
+    }
+    expect(agree / track.length, greaterThan(0.999),
+        reason: '$agree of ${track.length}');
+  });
+
+  test('a cheap octave emission holds the note through an octave slip', () {
+    final track = [
+      ...List.filled(20, midiHz(52)),
+      midiHz(40), midiHz(40), // two frames an octave down
+      ...List.filled(20, midiHz(52)),
+    ];
+    List<NoteStateDecision> run(StreamingNoteHmm h) => [
+          for (final f in track) h.push(f, voiced: true)!,
+        ];
+    final plain = run(StreamingNoteHmm(lag: 0, minFrames: 2));
+    expect(plain[20].midi, isNot(52), reason: 'plain model leaves the note');
+    final held =
+        run(StreamingNoteHmm(lag: 0, minFrames: 2, octaveEmission: 0.8));
+    expect(held[20].midi, 52);
+    expect(held[21].midi, 52);
+    expect(held[20].voiced && held[21].voiced, isTrue);
+  });
 }
