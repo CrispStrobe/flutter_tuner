@@ -86,6 +86,23 @@ enum NoteGate {
   fold,
 }
 
+/// How the note-state HMM borrows YIN's octave (REPORT.md §39.9). §39.8
+/// found the wrong octave is chosen when a note starts, and the shipped YIN
+/// path makes fewer octave errors from the same difference function.
+enum YinOctave {
+  none,
+
+  /// Every frame: when YIN is confident (the app's gate: pitched,
+  /// probability > 0.9) and pYIN's reading is one or two octaves from it,
+  /// move the reading into YIN's octave.
+  frame,
+
+  /// Once per note: at the note's first frame where YIN is confident, take
+  /// the octave offset (0 if not octave-related) and apply it until the note
+  /// changes. Frames before that are shown as they are.
+  run,
+}
+
 /// One pipeline under test.
 class Variant {
   final String name;
@@ -167,6 +184,8 @@ class Variant {
   final double? noteOctaveEmission;
 
   final NoteGate noteGate;
+
+  final YinOctave noteYinOctave;
   final double mpmCutoff;
 
   /// Where in the analysis window this estimator's answer belongs, in
@@ -205,6 +224,7 @@ class Variant {
     this.noteOctaveJump = 0,
     this.noteOctaveEmission,
     this.noteGate = NoteGate.none,
+    this.noteYinOctave = YinOctave.none,
     this.mpmCutoff = 0.9,
     this.referenceOffset = 0,
   });
@@ -420,6 +440,9 @@ FileResult evaluateFile({
             sampleRate: rate, windowSize: window)
   };
   final pyinFrames = <PyinFrame>[];
+  // YIN's own answer per frame, from the difference function pYIN reads,
+  // gated as the app gates it (0 = not confident).
+  final yinConfident = <double>[];
   final bValues = <double>[];
 
   for (int start = 0; start + window <= wav.samples.length; start += hop) {
@@ -432,6 +455,8 @@ FileResult evaluateFile({
 
     yin.cmndf(block);
     pyinFrames.add(pyin.observe(yin));
+    final yr = yin.resultFromCmndf(0.20);
+    yinConfident.add(yr.pitched && yr.probability > 0.9 ? yr.pitch : 0);
 
     YinResult? mpmResult;
 
@@ -540,9 +565,33 @@ FileResult evaluateFile({
         octaveEmission: v.noteOctaveEmission,
       );
       final shown = List<double>.filled(path.length, 0);
+      int? runMidi; // the note of the run in progress, null after a gap
+      int? runShift; // its octave offset once decided
       void apply(NoteStateDecision d) {
-        if (!d.voiced) return;
-        shown[d.frame] = _gate(path[d.frame], d.midi!, v.noteGate);
+        if (!d.voiced) {
+          runMidi = null;
+          return;
+        }
+        if (d.midi != runMidi) {
+          runMidi = d.midi;
+          runShift = null;
+        }
+        var f = _gate(path[d.frame], d.midi!, v.noteGate);
+        if (f <= 0) {
+          shown[d.frame] = 0;
+          return;
+        }
+        final y = yinConfident[d.frame];
+        switch (v.noteYinOctave) {
+          case YinOctave.none:
+            break;
+          case YinOctave.frame:
+            if (y > 0) f /= math.pow(2, _octavesApart(f, y));
+          case YinOctave.run:
+            if (runShift == null && y > 0) runShift = _octavesApart(f, y);
+            if (runShift != null) f /= math.pow(2, runShift!);
+        }
+        shown[d.frame] = f;
       }
 
       for (int i = 0; i < path.length; i++) {
@@ -675,6 +724,16 @@ double framesPerSecond(int hop, double rate) => rate / hop;
 /// Convenience for the report: cents between two frequencies.
 double centsOf(double a, double b) => 1200 * math.log(a / b) / math.ln2;
 
+
+/// Whole octaves (±1, ±2) by which [f] sits above [ref], within a semitone;
+/// 0 when they are not octave-related.
+int _octavesApart(double f, double ref) {
+  final c = centsOf(f, ref);
+  for (final k in const [1, -1, 2, -2]) {
+    if ((c - 1200 * k).abs() <= 100) return k;
+  }
+  return 0;
+}
 
 /// Apply a [NoteGate] to one frame: [f0] is pYIN's pitch, [midi] the note
 /// the HMM holds. Returns the pitch to show, or 0.

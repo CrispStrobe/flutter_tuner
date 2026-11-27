@@ -63,6 +63,13 @@ final List<(Variant, int?)> arms = [
         isPyin: true, pyinLag: 0, noteLag: 0, noteMinFrames: 2,
         noteOctaveJump: jump, noteOctaveEmission: emission, noteGate: gate),
         0),
+  // §39.9: borrow YIN's octave, per frame or once per note.
+  (Variant('nhmm min2 lag0 yin-frame', isPyin: true, pyinLag: 0, noteLag: 0,
+      noteMinFrames: 2, noteYinOctave: YinOctave.frame), 0),
+  (Variant('nhmm min2 lag0 yin-run', isPyin: true, pyinLag: 0, noteLag: 0,
+      noteMinFrames: 2, noteYinOctave: YinOctave.run), 0),
+  (Variant('nhmm min3 lag0 yin-run', isPyin: true, pyinLag: 0, noteLag: 0,
+      noteMinFrames: 3, noteYinOctave: YinOctave.run), 0),
 ];
 
 class Timing {
