@@ -4828,11 +4828,56 @@ So octave errors here are decided **at the start of a note**, and no rule
 about what happens *during* a note can fix them. That rules out this family
 of guards. The shipped YIN path makes fewer octave errors on comp (6.86%
 against 8.78%) from the same difference function pYIN reads, so the
-remaining idea is an onset decision: when a new note starts, check pYIN's
-octave against YIN's. That is a different experiment, and not built here.
+remaining idea is to take YIN's octave instead. §39.9 tries it.
 
 The knobs stay in the code with their defaults off, so these rows can be
 reproduced; with every default the model is bit-identical to §39.2's.
+
+### 39.9 Borrowing YIN's octave: a partial fix
+
+YIN's estimate comes free, because pYIN already reads the same difference
+function every frame. It counts only when it passes the shipped tuner's own
+acceptance rule (threshold 0.20, probability above 0.9). Two ways to use it,
+both changing only a reading's octave, never whether a reading is shown:
+
+* **yin-frame**: on every frame where YIN is confident and pYIN's reading is
+  one or two octaves (± a semitone) from it, move the reading into YIN's
+  octave.
+* **yin-run**: decide the octave once per note, at the note's first
+  confident YIN frame, and keep it until the note changes. That matches
+  §39.8's finding that the octave is decided at the start of a note.
+
+| | comp RPA% | comp oct% | comp held% | comp FA% | comp first correct p50 | solo RPA% | solo oct% | solo held% | solo FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `engine-yin` (ships) | 32.33 | **6.86** | 52.86 | 14.06 | 132 ms | 71.88 | **0.59** | 80.80 | 17.07 |
+| nhmm min2 lag0 | 32.18 | 8.78 | 57.11 | 17.77 | 156 ms | 71.89 | 0.82 | **88.85** | **16.76** |
+| **+ yin-frame** | **32.67** | 7.65 | **57.94** | 17.77 | 148 ms | 71.91 | 0.80 | 88.72 | 16.76 |
+| + yin-run | 32.41 | 8.24 | 57.42 | 17.77 | 148 ms | **71.94** | 0.76 | 88.78 | 16.76 |
+| nhmm min3 lag0 + yin-run | 28.58 | 7.85 | 55.86 | **13.44** | 171 ms | 64.47 | 0.67 | 87.80 | 14.26 |
+
+**yin-frame closes about 60% of the octave gap on comp**: 8.78% → 7.65%,
+against the shipped 6.86%. It lifts comp's overall accuracy past the
+shipped tuner (32.67% against 32.33%) and widens the held-note gain to +5.08
+points. On solo it is nearly free: octave errors 0.82% → 0.80%, held notes
+−0.13 points, false alarms unchanged.
+
+**Per frame beats per note on comp**, which partly qualifies §39.8: the
+wrong octave is chosen when a note starts, but YIN is not always confident
+then, and deciding later in the note catches more. yin-run is slightly
+better on solo octave errors (0.76%).
+
+**It cannot touch false alarms**, by design: comp stays 3.71 points worse
+than shipped. Matching the shipped false alarms on comp still needs `min3`,
+and on solo that costs 7.4 points of overall accuracy (64.47% against
+71.88%), because the extra withheld frame suppresses real readings too.
+
+So the measured trade for shipping `min2 lag0 + yin-frame`, against the
+tuner as it ships:
+
+* **solo** (one string at a time, the tuner's use): held notes **+7.9
+  points**, false alarms −0.3, octave errors +0.21, reading 32 ms later;
+* **comp** (strummed chords): held notes **+5.1 points**, overall accuracy
+  +0.3, octave errors +0.79, **false alarms +3.71**.
 
 *Reproduce:* `dart run bin/note_state.dart --data <guitarset> --subset solo
 --jobs 4`; `--only` takes a comma-separated list of arm names. On CI:
