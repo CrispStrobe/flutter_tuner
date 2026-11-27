@@ -1,10 +1,10 @@
-2.5.0 (Build 11)
+2.5.0 (Build 12)
 
-Die Mikrofontaste bleibt jetzt oben rechts. Auf dem iPad stehen die Einstellungen darunter in der rechten Spalte. Auf dem iPhone führt das Zahnrad direkt zu den Einstellungen.
+Eine neue Tonhöhenerkennung zum Ausprobieren: „pYIN + Notenmodell“. Sie hält einen ausklingenden Ton ruhiger als die Standardeinstellung YIN: Bei aufgenommener Gitarre waren 89 % der Anzeigen auf gehaltenen Tönen richtig, statt 81 %. Die erste Anzeige nach dem Anschlag kommt etwa 30 ms später, und zwischen geschlagenen Akkorden zeigt sie öfter etwas an. YIN bleibt der Standard.
 
 Was testen?
 
-• Die Mikrofontaste oben rechts zum Starten und Beenden des Stimmens verwenden, auch nach dem Scrollen.
-• Das iPad zwischen Hoch- und Querformat drehen und prüfen, ob Einstellungen und Stimmgerät gut erreichbar sind.
-• Auf dem iPhone über das Zahnrad zu den Einstellungen springen. Instrument, Stimmung oder Kammerton ändern und das Stimmen erneut starten.
-• Auf dem iPad die Akkorderkennung einschalten und prüfen, ob erkannte Noten unter den Diagrammen erscheinen.
+• In den Einstellungen die Tonhöhenerkennung auf „pYIN + Notenmodell“ stellen und ein paar Saiten stimmen. Bleibt die Nadel ruhiger, während Sie am Wirbel drehen?
+• Eine Saite anschlagen und beobachten, wie schnell die erste Anzeige erscheint, verglichen mit YIN.
+• Einen Akkord anschlagen und ausklingen lassen. Zeigt das Stimmgerät Werte an, die Sie nicht erwarten würden?
+• Zurück auf YIN stellen und prüfen, ob das Stimmen wie bisher funktioniert.
