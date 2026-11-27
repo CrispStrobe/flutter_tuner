@@ -1,27 +1,10 @@
-2.5.0 (build 10)
+2.5.0 (build 11)
 
-The four extra transcription models now actually run.
+The microphone control now stays in the top-right corner. On iPad, settings sit below it in the right column. On iPhone, tap the gear to jump directly to settings.
 
-WHAT CHANGED
+What to test
 
-• MT3, Piano transcription, Onsets & Frames and hFT-Transformer were listed in the model picker in 2.4.0 but on every device said the engine they need was missing. This build ships the engine (CrispASR) inside the app, so they run — on iPhone, iPad and Mac alike.
-
-• Choosing one asks first, with the download size, then downloads it with a progress bar and a Cancel button. Each file is checked against a fixed fingerprint before it is kept. Downloaded models show "on this device", and "Remove downloaded model" deletes one again.
-
-• Tuning is unchanged. The built-in model stays the default and needs no download.
-
-WHAT TO TEST
-
-• Stop listening first — the picker is greyed out while the microphone is on. Then open the picker (piano icon) and choose hFT-Transformer: the smallest, 4.5 MB.
-• The download: confirm it, watch the progress, cancel one halfway, try it with no network.
-• Start listening, switch on "Detect chords" under Chord transcription, and play a chord or a short phrase.
-• MT3 (96 MB) is the most accurate on real music and names the instrument. Best on Wi-Fi.
-• "Remove downloaded model", then pick the same model again: it should ask again.
-
-KNOWN LIMITS — PLEASE READ
-
-These models have never run on a phone, tablet or Mac before this build. They were tested end to end only on Linux. How fast they are on your device is exactly what we cannot see, and most need reported: whether the notes keep up with your playing, and on which device.
-
-On a Mac older than macOS 13.3 the extra models should show as unavailable; everything else should work as before.
-
-A model download is the only time the app connects to the internet. The file comes from huggingface.co, once, and stays on the device. No audio or settings are sent.
+• Start and stop tuning from the top-right microphone button, including after scrolling down.
+• On iPad, rotate between portrait and landscape and check that the settings and tuner are easy to reach.
+• On iPhone, use the gear to jump to settings. Change the instrument, tuning or A4 reference pitch, then start tuning again.
+• On iPad, enable chord transcription and check that detected notes appear underneath the charts.
