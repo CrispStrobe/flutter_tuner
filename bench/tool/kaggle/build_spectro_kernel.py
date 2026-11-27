@@ -57,7 +57,7 @@ DART_VERSION = "3.13.4"
 # kernel and a kernel that clones `main` would silently score a different
 # tree from the one under review (gotcha #24), so the ref is explicit and the
 # kernel prints the SHA it actually got.
-REPO = "https://github.com/CrispStrobe/flutter_tuner.git"
+REPO = "https://github.com/CrispStrobe/CrispTuner.git"
 REPO_REF = "bench/kaggle-four-models"
 
 
