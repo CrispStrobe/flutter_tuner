@@ -19,11 +19,13 @@
 ///     probability above 0.9) and pYIN's reading sits one or two octaves
 ///     away, the reading moves into YIN's octave (§39.9).
 ///
-/// Measured on GuitarSet against YIN (§39.4, §39.9): held-note accuracy
-/// 88.7% against 80.8% on solo takes, the same overall accuracy and false
-/// alarms, the first correct reading about 30 ms later. Between strummed
-/// chords it reports more often when nothing is annotated (17.8% against
-/// 14.1%), so it is offered as an option, not the default.
+/// Measured on GuitarSet through the app's whole pipeline (refinement, gate
+/// and median after this engine, exactly as for YIN; §39.10): held-note
+/// accuracy 89.2% against YIN's 80.8% on solo takes, the same overall
+/// accuracy and false alarms, 2.20 cents median error against 2.05, the
+/// first correct reading about 30 ms later. Between strummed chords it
+/// reports more often when nothing is annotated (17.8% against 14.1%), so
+/// it is offered as an option, not the default.
 ///
 /// The note model here is the production subset of the bench's
 /// `note_state_hmm.dart`: the research knobs that measured as useless

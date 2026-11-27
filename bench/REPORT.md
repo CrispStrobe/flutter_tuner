@@ -4879,6 +4879,48 @@ tuner as it ships:
 * **comp** (strummed chords): held notes **+5.1 points**, overall accuracy
   +0.3, octave errors +0.79, **false alarms +3.71**.
 
+### 39.10 In the app, as an option
+
+The pipeline is now a fourth detector, `DetectorKind.pyinNote`
+(`lib/pyin_note.dart`), offered in settings as *pYIN + note model (steadier
+on held notes)*. YIN stays the default. The engine is the operating point
+§39.9 arrived at: pYIN decoded greedily, the note model at `minFrames = 2`,
+YIN's octave per frame. It runs one window at a time, like every other
+engine.
+
+**The port is exact.** The bench runs the app's own engine (`appEngine:
+DetectorKind.pyinNote`). Without the app's smoother it reproduces `nhmm
+min2 lag0 yin-frame` digit for digit on every column of both halves.
+
+**Through the release pipeline.** `main.dart` runs StringTune's refinement
+on the engine's answer, then the gate and the five-frame median, for every
+detector. `release yin` and `release pyin-note` run that same sequence, so
+the first row is the app as it ships today:
+
+| | solo RPA% | oct% | gross% | held% | \|err\| p50 | FA% | first correct p50 | comp held% | comp oct% | comp FA% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **release yin** (ships) | **71.98** | **0.59** | **3.06** | 80.80 | **2.05** | 17.07 | **107 ms** | 52.87 | **6.86** | **14.06** |
+| **release pyin-note** | 71.84 | 0.77 | 3.49 | **89.22** | 2.20 | **16.76** | 139 ms | **58.69** | 7.95 | 17.77 |
+| release pyin-note, no median | 71.85 | 0.80 | 3.45 | 88.63 | 2.35 | 16.76 | 139 ms | 57.97 | 7.59 | 17.77 |
+
+* **The app's normal pipeline is right for it as it stands.** Without the
+  median it is worse on held notes and on cents, so nothing in `main.dart`
+  special-cases the new detector.
+* **Against the app as it ships**, on solo takes: held notes **+8.4
+  points**, false alarms −0.3, overall accuracy −0.1, octave errors +0.18,
+  gross errors +0.43, median error **+0.15 cents** (2.20 against 2.05), the
+  first correct reading **32 ms later**. Between strummed chords: held
+  notes +5.8 points, octave errors +1.1, false alarms **+3.7**.
+
+That is the case for an option rather than a default. It is clearly the
+steadier needle on a sustained string, which is what a tuner spends most of
+its time showing. It is slower to the first reading, slightly less precise,
+and noisier between chords, and none of those is something to impose on
+everyone.
+
+It costs 0.73 ms a frame against YIN's 0.64 (best of six interleaved runs on
+a loaded laptop), 3.1% of the 23.2 ms frame budget.
+
 *Reproduce:* `dart run bin/note_state.dart --data <guitarset> --subset solo
 --jobs 4`; `--only` takes a comma-separated list of arm names. On CI:
 `gh workflow run "Bench (GuitarSet)" -f tool=note_state -f subset=comp`.

@@ -64,10 +64,11 @@ enum DetectorKind {
   mpm,
 
   /// pYIN with a streaming note model on top, and YIN's octave. Steadier on
-  /// a held note than YIN (88.7% of held-note frames right against 80.8% on
-  /// GuitarSet's solo takes), at the price of a reading about 30 ms later
-  /// after a pluck and more false readings between strummed chords. Offered
-  /// as an option, not the default: bench/REPORT.md §39.
+  /// a held note than YIN (89.2% of held-note frames right against 80.8% on
+  /// GuitarSet's solo takes, through the app's whole pipeline), at the
+  /// price of a reading about 30 ms later after a pluck, 0.15 cents more
+  /// median error, and more false readings between strummed chords.
+  /// Offered as an option, not the default: bench/REPORT.md §39.10.
   pyinNote,
 }
 
