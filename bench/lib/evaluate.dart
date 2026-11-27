@@ -129,6 +129,12 @@ class Variant {
   /// class, not a benchmark's idea of it.
   final bool coreSmoother;
 
+  /// For an [appEngine] variant: run the app's period refinement
+  /// (`refineByOverlapCorrelation`, on by default since §38) on the
+  /// engine's answer before the smoother, in `main.dart`'s order. With
+  /// [coreSmoother] this is the whole release pipeline.
+  final bool appRefine;
+
   /// Non-YIN detectors.
   final bool isMpm;
   final bool isPyin;
@@ -209,6 +215,7 @@ class Variant {
     this.probabilityGate = false,
     this.medianPolicy = MedianPolicy.none,
     this.coreSmoother = false,
+    this.appRefine = false,
     this.appEngine,
     this.refine = Refinement2.none,
     this.isMpm = false,
@@ -466,17 +473,22 @@ FileResult evaluateFile({
         // The app's detector and the app's smoother, with nothing of the
         // benchmark's own in between.
         final e = engines[v.name]!.analyse(block);
+        // main.dart refines before it gates and smooths; refinement leaves
+        // a non-positive pitch alone, so an unpitched frame passes through.
+        final pitch = v.appRefine && e.pitched && e.frequency > 0
+            ? refineByOverlapCorrelation(block, e.frequency, rate)
+            : e.frequency;
         final smoother = smoothers[v.name];
         if (smoother == null) {
           // The engine's own answer, unsmoothed: for checking an app engine
           // against the bench pipeline it was ported from.
-          detected[v.name]!.add(e.pitched ? e.frequency : 0);
+          detected[v.name]!.add(e.pitched ? pitch : 0);
           continue;
         }
         final smoothed = smoother.accept(
           pitched: e.pitched,
           probability: e.probability,
-          pitch: e.frequency,
+          pitch: pitch,
         );
         detected[v.name]!.add(smoothed ?? 0);
         continue;

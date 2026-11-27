@@ -76,6 +76,15 @@ final List<(Variant, int?)> arms = [
   (Variant('engine-pyin-note raw', appEngine: DetectorKind.pyinNote), 0),
   (Variant('engine-pyin-note',
       appEngine: DetectorKind.pyinNote, coreSmoother: true), 0),
+  // The release pipeline: refinement, then gate and median, as main.dart
+  // runs it. engine-yin + refine is the app as it ships today.
+  (Variant('release yin', appEngine: DetectorKind.yin,
+      appRefine: true, coreSmoother: true), 0),
+  (Variant('release pyin-note', appEngine: DetectorKind.pyinNote,
+      appRefine: true, coreSmoother: true), 0),
+  // The same without the median, in case this detector should skip it.
+  (Variant('release pyin-note no median', appEngine: DetectorKind.pyinNote,
+      appRefine: true), 0),
 ];
 
 class Timing {
