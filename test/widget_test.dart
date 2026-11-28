@@ -87,15 +87,49 @@ void main() {
       await tester.pumpAndSettle();
 
       final mic = find.byTooltip('Start tuning');
-      final micPosition = tester.getTopRight(mic);
-      expect(micPosition.dx, greaterThan(350));
-      expect(micPosition.dy, lessThan(56));
+      final settings = find.byTooltip('Settings');
+      final micRect = tester.getRect(mic);
+      expect(micRect.width, greaterThanOrEqualTo(48));
+      expect(micRect.bottom, lessThan(56));
+      // Settings sits to the right of the microphone, at the edge.
+      expect(tester.getCenter(settings).dx, greaterThan(micRect.right));
+      expect(tester.getTopRight(settings).dx, greaterThan(360));
 
+      // It opens the settings over the tuner, which also works where the
+      // settings panel is already on screen.
+      await tester.tap(settings);
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsOneWidget);
+      final sheetSlider = find.descendant(
+          of: find.byType(BottomSheet), matching: find.byType(Slider));
+      expect(sheetSlider.hitTestable(), findsOneWidget);
+
+      // A change in the sheet shows in the sheet straight away.
+      final before = tester.widget<Slider>(sheetSlider).value;
+      await tester.drag(sheetSlider, const Offset(60, 0));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(sheetSlider).value, isNot(before));
+
+      // Dismissed, the microphone is reachable where it was.
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(tester.getRect(mic), micRect);
+      expect(mic.hitTestable(), findsOneWidget);
+    });
+
+    testWidgets('the settings button opens the sheet on an iPad too',
+        (tester) async {
+      tester.view.physicalSize = const Size(1180, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(buildApp());
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.byType(Slider).hitTestable(), findsOneWidget);
-      expect(tester.getTopRight(mic), micPosition);
-      expect(mic.hitTestable(), findsOneWidget);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     for (final size in [const Size(820, 1180), const Size(1180, 820)]) {

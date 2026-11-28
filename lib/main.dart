@@ -198,7 +198,16 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
   int _transcriptionUnchanged = 0;
   static const _pacing = TranscriptionPacing();
   final _engine = TunerEngine();
-  final _settingsHeadingKey = GlobalKey();
+  /// Bumped on every setState. The settings sheet is built by its modal
+  /// route, not by this State, so this (with the engine's own notifications)
+  /// is how it rebuilds along with the page.
+  final _settingsRevision = ValueNotifier<int>(0);
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _settingsRevision.value++;
+  }
 
   TunerStatus _status = TunerStatus.idle;
   bool _isListening = false;
@@ -380,6 +389,7 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     _toneGenerator.dispose();
     _audioService.dispose();
     _engine.dispose();
+    _settingsRevision.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _silenceTimer?.cancel();
     super.dispose();
@@ -1038,15 +1048,32 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
     );
   }
 
+  /// The settings in a sheet over the tuner. It used to scroll the page to
+  /// the settings panel, which did nothing visible wherever that panel was
+  /// already on screen: the iPad and Mac layouts, a tall phone.
   void _showSettings() {
-    final heading = _settingsHeadingKey.currentContext;
-    if (heading == null) return;
-    Scrollable.ensureVisible(
-      heading,
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: TunerPalette.of(context).backgroundTop,
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.85,
+        minChildSize: 0.4,
+        maxChildSize: 1,
+        builder: (sheetContext, controller) => ListenableBuilder(
+          // The page rebuilds on both; so must the sheet.
+          listenable: Listenable.merge([_engine, _settingsRevision]),
+          builder: (sheetContext, _) => SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+            child: _buildSettings(AppLocalizations.of(sheetContext),
+                TunerPalette.of(sheetContext)),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1079,15 +1106,16 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            color: palette.textSecondary,
-            tooltip: l10n.settings,
-            onPressed: _showSettings,
-          ),
+          _buildMicButton(l10n, palette),
+          const SizedBox(width: 4),
           Padding(
-            padding: const EdgeInsetsDirectional.only(end: 12),
-            child: _buildMicButton(l10n, palette),
+            padding: const EdgeInsetsDirectional.only(end: 4),
+            child: IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              color: palette.textSecondary,
+              tooltip: l10n.settings,
+              onPressed: _showSettings,
+            ),
           ),
         ],
       ),
@@ -1583,7 +1611,6 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Semantics(
-            key: _settingsHeadingKey,
             header: true,
             child: Text(
               l10n.settings,
@@ -2043,13 +2070,13 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           foregroundColor: Colors.white,
           shape: const CircleBorder(),
           padding: EdgeInsets.zero,
-          minimumSize: const Size.square(44),
-          tapTargetSize: MaterialTapTargetSize.padded,
+          minimumSize: const Size.square(48),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           elevation: 2,
         ),
         child: Icon(
           _isListening ? Icons.mic_off : Icons.mic,
-          size: 24,
+          size: 28,
           color: Colors.white,
         ),
       ),
