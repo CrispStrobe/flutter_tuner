@@ -89,8 +89,8 @@ void main() {
       final mic = find.byTooltip('Start tuning');
       final settings = find.byTooltip('Settings');
       final micRect = tester.getRect(mic);
-      expect(micRect.width, greaterThanOrEqualTo(48));
-      expect(micRect.bottom, lessThan(56));
+      expect(micRect.width, greaterThanOrEqualTo(56));
+      expect(micRect.bottom, lessThan(64));
       // Settings sits to the right of the microphone, at the edge.
       expect(tester.getCenter(settings).dx, greaterThan(micRect.right));
       expect(tester.getTopRight(settings).dx, greaterThan(360));

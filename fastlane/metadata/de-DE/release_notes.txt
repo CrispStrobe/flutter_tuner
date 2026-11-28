@@ -1,0 +1,4 @@
+• Neue Tonhöhenerkennung zum Ausprobieren: „pYIN + Notenmodell“. Sie hält einen ausklingenden Ton ruhiger als die Standardeinstellung: Bei aufgenommener Gitarre waren 89 % der Anzeigen auf gehaltenen Tönen richtig, statt 81 %. Die erste Anzeige nach dem Anschlag kommt etwa 30 ms später. YIN bleibt der Standard; umstellen lässt sich das in den Einstellungen.
+• Die vier zusätzlichen Transkriptionsmodelle (MT3, Piano transcription, Onsets & Frames, hFT-Transformer) laufen jetzt auf iPhone, iPad und Mac. Bisher standen sie nur in der Auswahl. Jedes wird einmal geladen, nach Rückfrage, mit Fortschrittsbalken und „Abbrechen“-Knopf, und vor dem Speichern geprüft. Nur das eingebaute Modell braucht keinen Download.
+• Ein größerer Aufnahmeknopf oben rechts, mit dem Einstellungsknopf daneben. Der Einstellungsknopf öffnet die Einstellungen über dem Stimmgerät.
+• Auf dem iPad stehen die Einstellungen in einer eigenen Spalte neben dem Stimmgerät.

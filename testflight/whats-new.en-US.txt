@@ -1,10 +1,15 @@
-2.5.0 (build 12)
+2.5.0 (build 13)
 
-A new pitch detector to try: "pYIN + note model". It holds a sustained note steadier than the default YIN: on recorded guitar, 89% of held-note readings were right against 81%. The first reading after a pluck comes about 30 ms later, and between strummed chords it shows a reading more often. YIN stays the default.
+The buttons in the top-right corner, reworked.
+
+• The record button is bigger, and the settings button now sits to its right.
+• The settings button opens the settings in a panel over the tuner, on iPhone, iPad and Mac. It used to scroll down to the settings, which did nothing when they were already on screen.
+
+Also in 2.5.0, unchanged since build 12: the "pYIN + note model" pitch detector to try, and the four extra transcription models that now run on the device.
 
 What to test
 
-• In settings, switch the pitch detector to "pYIN + note model" and tune a few strings. Does the needle stay calmer while you turn a peg?
-• Pluck a string and watch how quickly the first reading appears, compared with YIN.
-• Strum a chord, then let it ring out. Does the tuner show readings you would not expect?
-• Switch back to YIN and check that tuning works as before.
+• Start and stop tuning with the big record button.
+• Tap the gear: the settings should open over the tuner. Change the A4 pitch or the instrument and check that the change shows at once, there and in the tuner.
+• Close the panel by swiping it down or tapping outside it, then start tuning again.
+• On iPad and Mac, the gear should open the panel too, even though the settings are already visible beside the tuner.

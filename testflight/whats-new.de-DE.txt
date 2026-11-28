@@ -1,10 +1,15 @@
-2.5.0 (Build 12)
+2.5.0 (Build 13)
 
-Eine neue Tonhöhenerkennung zum Ausprobieren: „pYIN + Notenmodell“. Sie hält einen ausklingenden Ton ruhiger als die Standardeinstellung YIN: Bei aufgenommener Gitarre waren 89 % der Anzeigen auf gehaltenen Tönen richtig, statt 81 %. Die erste Anzeige nach dem Anschlag kommt etwa 30 ms später, und zwischen geschlagenen Akkorden zeigt sie öfter etwas an. YIN bleibt der Standard.
+Die Knöpfe oben rechts, überarbeitet.
+
+• Der Aufnahmeknopf ist größer, und der Einstellungsknopf sitzt jetzt rechts daneben.
+• Der Einstellungsknopf öffnet die Einstellungen in einem Fenster über dem Stimmgerät, auf iPhone, iPad und Mac. Bisher scrollte er nur zu den Einstellungen und tat nichts, wenn sie schon zu sehen waren.
+
+Außerdem in 2.5.0, unverändert seit Build 12: die Tonhöhenerkennung „pYIN + Notenmodell“ zum Ausprobieren und die vier zusätzlichen Transkriptionsmodelle, die jetzt auf dem Gerät laufen.
 
 Was testen?
 
-• In den Einstellungen die Tonhöhenerkennung auf „pYIN + Notenmodell“ stellen und ein paar Saiten stimmen. Bleibt die Nadel ruhiger, während Sie am Wirbel drehen?
-• Eine Saite anschlagen und beobachten, wie schnell die erste Anzeige erscheint, verglichen mit YIN.
-• Einen Akkord anschlagen und ausklingen lassen. Zeigt das Stimmgerät Werte an, die Sie nicht erwarten würden?
-• Zurück auf YIN stellen und prüfen, ob das Stimmen wie bisher funktioniert.
+• Mit dem großen Aufnahmeknopf das Stimmen starten und beenden.
+• Auf das Zahnrad tippen: Die Einstellungen sollten sich über dem Stimmgerät öffnen. Den Kammerton A4 oder das Instrument ändern und prüfen, ob die Änderung sofort sichtbar ist, dort und im Stimmgerät.
+• Das Fenster nach unten wischen oder daneben tippen, um es zu schließen, dann wieder stimmen.
+• Auf iPad und Mac sollte das Zahnrad das Fenster ebenfalls öffnen, obwohl die Einstellungen schon neben dem Stimmgerät stehen.

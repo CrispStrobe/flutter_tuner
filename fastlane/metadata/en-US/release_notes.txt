@@ -1,0 +1,4 @@
+• New pitch detector to try: "pYIN + note model". It holds a sustained note steadier than the default: on recorded guitar, 89% of readings on held notes were right, against 81%. The first reading after a pluck comes about 30 ms later. YIN stays the default; switch in settings.
+• The four extra transcription models (MT3, Piano transcription, Onsets & Frames, hFT-Transformer) now run on iPhone, iPad and Mac. Before, they were listed but could not run. Each is downloaded once, after you confirm, with a progress bar and a cancel button, and checked before it is saved. Only the built-in model needs no download.
+• A bigger record button in the top-right corner, with the settings button beside it. The settings button opens the settings over the tuner.
+• On iPad, the settings sit in their own column beside the tuner.

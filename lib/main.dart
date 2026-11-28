@@ -1097,6 +1097,8 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // Taller than the default 56 so the record button can be 56.
+        toolbarHeight: 64,
         leading: IconButton(
           icon: const Icon(Icons.info_outline, size: 20),
           color: palette.textSecondary,
@@ -2070,13 +2072,13 @@ class _TunerPageState extends State<TunerPage> with WidgetsBindingObserver {
           foregroundColor: Colors.white,
           shape: const CircleBorder(),
           padding: EdgeInsets.zero,
-          minimumSize: const Size.square(48),
+          minimumSize: const Size.square(56),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           elevation: 2,
         ),
         child: Icon(
           _isListening ? Icons.mic_off : Icons.mic,
-          size: 28,
+          size: 32,
           color: Colors.white,
         ),
       ),
